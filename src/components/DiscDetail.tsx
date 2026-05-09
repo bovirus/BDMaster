@@ -150,10 +150,10 @@ export default function DiscDetail() {
   // Resizable splitter between the playlist table and the info panel.
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [splitFraction, setSplitFraction] = useState<number>(
-    config?.discInfoSplit ?? 0.4
+    config?.discInfoSplit ?? 0.5
   );
   useEffect(() => {
-    if (config) setSplitFraction(config.discInfoSplit ?? 0.4);
+    if (config) setSplitFraction(config.discInfoSplit ?? 0.5);
   }, [config?.discInfoSplit]);
 
   const draggingRef = useRef(false);
@@ -177,8 +177,8 @@ export default function DiscDetail() {
       const onMove = (ev: MouseEvent) => {
         const rect = containerRef.current?.getBoundingClientRect();
         if (!rect || !draggingRef.current) return;
-        const y = ev.clientY - rect.top;
-        const fraction = Math.max(0.1, Math.min(0.9, y / rect.height));
+        const x = ev.clientX - rect.left;
+        const fraction = Math.max(0.1, Math.min(0.9, x / rect.width));
         setSplitFraction(fraction);
       };
       const onUp = () => {
@@ -335,14 +335,14 @@ export default function DiscDetail() {
         </Stack>
       </Paper>
 
-      {/* Body: playlists / splitter / info panel */}
+      {/* Body: playlists | splitter | info panel */}
       <Box
         ref={containerRef}
         sx={{
           flex: 1,
           minHeight: 0,
           display: "flex",
-          flexDirection: "column",
+          flexDirection: "row",
         }}
       >
         {/* Playlist list */}
@@ -351,6 +351,7 @@ export default function DiscDetail() {
           sx={{
             overflow: "auto",
             minHeight: 0,
+            minWidth: 0,
             flex: `0 0 ${(splitFraction * 100).toFixed(2)}%`,
           }}
         >
@@ -425,12 +426,12 @@ export default function DiscDetail() {
           </TableContainer>
         </Paper>
 
-        {/* Draggable splitter */}
+        {/* Draggable vertical splitter */}
         <Box
           onMouseDown={handleSplitterMouseDown}
           sx={(theme) => ({
-            height: 6,
-            cursor: "row-resize",
+            width: 6,
+            cursor: "col-resize",
             flexShrink: 0,
             backgroundColor: theme.palette.divider,
             transition: "background-color 120ms",
@@ -440,8 +441,8 @@ export default function DiscDetail() {
           })}
         />
 
-        {/* Bottom panel: streams + clips for selected playlist */}
-        <Paper variant="outlined" sx={{ overflow: "auto", minHeight: 0, p: 1, flex: 1 }}>
+        {/* Right panel: streams + clips for selected playlist */}
+        <Paper variant="outlined" sx={{ overflow: "auto", minHeight: 0, minWidth: 0, p: 1, flex: 1 }}>
           {playlist ? (
             <>
               <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: "wrap", gap: 1, alignItems: "center" }}>

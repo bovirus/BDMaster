@@ -37,7 +37,7 @@ pub struct Config {
 }
 
 fn default_disc_info_split() -> f32 {
-    0.4
+    0.5
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -130,7 +130,7 @@ impl Default for Config {
             language: Default::default(),
             scan: Default::default(),
             formatting: Default::default(),
-            disc_info_split: 0.4,
+            disc_info_split: 0.5,
             update: Default::default(),
             window: Default::default(),
         }
