@@ -27,6 +27,7 @@ import { getUpdateResult, skipVersion } from "../lib/service";
 import DiscInfoTab from "./DiscInfoTab";
 import Config from "./Config";
 import About from "./About";
+import ChaptersTab from "./ChaptersTab";
 
 const RELEASES_URL = "https://github.com/caoccao/BDMaster/releases";
 
@@ -44,8 +45,10 @@ export default function MainContent() {
 
   const tabAboutStatus = useAppStore((state) => state.tabAboutStatus);
   const tabSettingsStatus = useAppStore((state) => state.tabSettingsStatus);
+  const tabChaptersStatus = useAppStore((state) => state.tabChaptersStatus);
   const setTabAboutStatus = useAppStore((state) => state.setTabAboutStatus);
   const setTabSettingsStatus = useAppStore((state) => state.setTabSettingsStatus);
+  const setTabChaptersStatus = useAppStore((state) => state.setTabChaptersStatus);
 
   const [newVersion, setNewVersion] = useState<string | null>(null);
   const [skipChecked, setSkipChecked] = useState(false);
@@ -87,6 +90,9 @@ export default function MainContent() {
       if (tabSettingsStatus !== Protocol.ControlStatus.Hidden) {
         controls.push({ type: Protocol.TabType.Config, index: 0 });
       }
+      if (tabChaptersStatus !== Protocol.ControlStatus.Hidden) {
+        controls.push({ type: Protocol.TabType.Chapters, index: 0 });
+      }
       controls.forEach((c, i) => (c.index = i));
 
       const current = prev[tabIndex];
@@ -98,7 +104,7 @@ export default function MainContent() {
       }
       return controls;
     });
-  }, [tabAboutStatus, tabSettingsStatus]);
+  }, [tabAboutStatus, tabSettingsStatus, tabChaptersStatus]);
 
   // Handle Selected status: jump to that tab.
   useEffect(() => {
@@ -121,6 +127,16 @@ export default function MainContent() {
     }
   }, [tabSettingsStatus, tabControls, setTabSettingsStatus]);
 
+  useEffect(() => {
+    if (tabChaptersStatus === Protocol.ControlStatus.Selected) {
+      const t = tabControls.find((c) => c.type === Protocol.TabType.Chapters);
+      if (t) {
+        setTabIndex(t.index);
+        setTabChaptersStatus(Protocol.ControlStatus.Visible);
+      }
+    }
+  }, [tabChaptersStatus, tabControls, setTabChaptersStatus]);
+
   // Keep tabIndex within bounds.
   useEffect(() => {
     if (tabIndex >= tabControls.length && tabControls.length > 0) {
@@ -139,9 +155,12 @@ export default function MainContent() {
         case Protocol.TabType.Config:
           setTabSettingsStatus(Protocol.ControlStatus.Hidden);
           break;
+        case Protocol.TabType.Chapters:
+          setTabChaptersStatus(Protocol.ControlStatus.Hidden);
+          break;
       }
     },
-    [tabControls, setTabAboutStatus, setTabSettingsStatus]
+    [tabControls, setTabAboutStatus, setTabSettingsStatus, setTabChaptersStatus]
   );
 
   // Keyboard shortcuts.
@@ -199,6 +218,7 @@ export default function MainContent() {
       case Protocol.TabType.About: return t("tabs.about");
       case Protocol.TabType.Config: return t("tabs.settings");
       case Protocol.TabType.DiscInfo: return t("tabs.discInfo");
+      case Protocol.TabType.Chapters: return t("tabs.chapters");
     }
   };
 
@@ -309,6 +329,7 @@ export default function MainContent() {
               {control.type === Protocol.TabType.About && <About />}
               {control.type === Protocol.TabType.Config && <Config />}
               {control.type === Protocol.TabType.DiscInfo && <DiscInfoTab />}
+              {control.type === Protocol.TabType.Chapters && <ChaptersTab />}
             </Box>
           );
         })}

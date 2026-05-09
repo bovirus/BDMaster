@@ -9,6 +9,7 @@
     "about": "關於",
     "settings": "設定",
     "discInfo": "光碟資訊",
+    "chapters": "章節",
     "close": "關閉 (Ctrl + W)"
   },
   "cards": {
@@ -62,6 +63,8 @@
     "bitRate": "位元率",
     "viewDetails": "檢視詳細資料",
     "viewChart": "檢視位元率圖表",
+    "viewBitRateReport": "檢視位元率報告",
+    "viewChapter": "檢視章節",
     "generateReport": "產生報告",
     "generateQuickSummary": "快速摘要",
     "generateFullReport": "完整報告",

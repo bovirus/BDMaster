@@ -9,6 +9,7 @@
     "about": "À propos",
     "settings": "Paramètres",
     "discInfo": "Infos du disque",
+    "chapters": "Chapitres",
     "close": "Fermer (Ctrl + W)"
   },
   "cards": {
@@ -62,6 +63,8 @@
     "bitRate": "Débit",
     "viewDetails": "Voir les détails",
     "viewChart": "Voir le graphique de débit",
+    "viewBitRateReport": "Voir le rapport de débit",
+    "viewChapter": "Voir les chapitres",
     "generateReport": "Générer un rapport",
     "generateQuickSummary": "Résumé rapide",
     "generateFullReport": "Rapport complet",

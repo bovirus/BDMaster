@@ -104,6 +104,7 @@ export interface Config {
   scan: ConfigScan;
   formatting: ConfigFormatting;
   discInfoSplit: number;
+  infoPanelSplit: number;
   update: ConfigUpdate;
   window: ConfigWindow;
 }
@@ -195,6 +196,7 @@ export enum TabType {
   About,
   Config,
   DiscInfo,
+  Chapters,
 }
 
 export interface UpdateCheckResult {
@@ -255,6 +257,7 @@ export interface PlaylistStreamClipInfo {
   relativeTimeOut: number;
   length: number;
   fileSize: number;
+  measuredSize: number;
   interleavedFileSize: number;
   angleIndex: number;
 }
@@ -280,6 +283,7 @@ export interface TSStreamInfo {
   description: string;
   bitRate: number;
   activeBitRate: number;
+  measuredSize: number;
   isVideoStream: boolean;
   isAudioStream: boolean;
   isGraphicsStream: boolean;

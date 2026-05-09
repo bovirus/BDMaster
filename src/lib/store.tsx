@@ -24,6 +24,9 @@ interface AppState {
   // Tab status
   tabAboutStatus: Protocol.ControlStatus;
   tabSettingsStatus: Protocol.ControlStatus;
+  tabChaptersStatus: Protocol.ControlStatus;
+  // Which playlist's chapters the Chapters tab should display.
+  chapterPlaylist: string | null;
 
   // Actions
   initConfig: () => Promise<void>;
@@ -32,6 +35,8 @@ interface AppState {
   setDialogNotification: (n: DialogNotification | null) => void;
   setTabAboutStatus: (s: Protocol.ControlStatus) => void;
   setTabSettingsStatus: (s: Protocol.ControlStatus) => void;
+  setTabChaptersStatus: (s: Protocol.ControlStatus) => void;
+  setChapterPlaylist: (name: string | null) => void;
   setDisc: (disc: Protocol.DiscInfo | null) => void;
   clearDisc: () => void;
   setScanningPath: (path: string | null) => void;
@@ -45,6 +50,8 @@ export const useAppStore = create<AppState>((set) => ({
   scanningPath: null,
   tabAboutStatus: Protocol.ControlStatus.Hidden,
   tabSettingsStatus: Protocol.ControlStatus.Hidden,
+  tabChaptersStatus: Protocol.ControlStatus.Hidden,
+  chapterPlaylist: null,
 
   initConfig: async () => {
     try {
@@ -68,6 +75,8 @@ export const useAppStore = create<AppState>((set) => ({
   setDialogNotification: (dialogNotification) => set({ dialogNotification }),
   setTabAboutStatus: (tabAboutStatus) => set({ tabAboutStatus }),
   setTabSettingsStatus: (tabSettingsStatus) => set({ tabSettingsStatus }),
+  setTabChaptersStatus: (tabChaptersStatus) => set({ tabChaptersStatus }),
+  setChapterPlaylist: (chapterPlaylist) => set({ chapterPlaylist }),
   setDisc: (disc) => set({ disc }),
   clearDisc: () => set({ disc: null }),
   setScanningPath: (scanningPath) => set({ scanningPath }),

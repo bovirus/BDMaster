@@ -115,6 +115,8 @@ pub struct PlaylistStreamClipInfo {
     pub length: u64,
     #[serde(rename = "fileSize")]
     pub file_size: u64,
+    #[serde(rename = "measuredSize")]
+    pub measured_size: u64,
     #[serde(rename = "interleavedFileSize")]
     pub interleaved_file_size: u64,
     #[serde(rename = "angleIndex")]
@@ -151,6 +153,8 @@ pub struct TSStreamInfo {
     pub bit_rate: u64,
     #[serde(rename = "activeBitRate")]
     pub active_bit_rate: u64,
+    #[serde(rename = "measuredSize")]
+    pub measured_size: u64,
     #[serde(rename = "isVideoStream")]
     pub is_video_stream: bool,
     #[serde(rename = "isAudioStream")]
@@ -224,6 +228,7 @@ impl TSStreamInfo {
             description: String::new(),
             bit_rate: 0,
             active_bit_rate: 0,
+            measured_size: 0,
             is_video_stream: false,
             is_audio_stream: false,
             is_graphics_stream: false,

@@ -9,6 +9,7 @@
     "about": "Acerca de",
     "settings": "Configuración",
     "discInfo": "Información del disco",
+    "chapters": "Capítulos",
     "close": "Cerrar (Ctrl + W)"
   },
   "cards": {
@@ -62,6 +63,8 @@
     "bitRate": "Tasa de bits",
     "viewDetails": "Ver detalles",
     "viewChart": "Ver gráfico de tasa de bits",
+    "viewBitRateReport": "Ver informe de tasa de bits",
+    "viewChapter": "Ver capítulos",
     "generateReport": "Generar informe",
     "generateQuickSummary": "Resumen rápido",
     "generateFullReport": "Informe completo",

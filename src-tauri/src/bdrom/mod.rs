@@ -716,6 +716,7 @@ fn build_playlist_info(pl: &PlaylistFile, bd: &BDRom, group_index: u32) -> Playl
             relative_time_out: (relative_time_in + length).max(0) as u64,
             length: length as u64,
             file_size,
+            measured_size: 0,
             interleaved_file_size: 0,
             angle_index: c.angle_index,
         };
@@ -919,6 +920,7 @@ pub fn enrich_inner(disc: &mut DiscInfo, bd: &BDRom, full_scan: bool) {
         let mut total_seconds: f64 = 0.0;
         let mut per_pid_bytes: HM<u16, u64> = HM::new();
         let mut total_measured_bytes: u64 = 0;
+        let mut clip_measured: HM<String, u64> = HM::new();
 
         for clip in &pl.stream_clips {
             if clip.angle_index != 0 {
@@ -996,6 +998,7 @@ pub fn enrich_inner(disc: &mut DiscInfo, bd: &BDRom, full_scan: bool) {
                         bytes_map.insert(pid, stat.total_bytes);
                     }
                     per_file_bytes.insert(clip.name.clone(), bytes_map);
+                    clip_measured.insert(clip.name.clone(), r.bytes);
                 }
                 Err(err) => {
                     log::warn!("scan {}: {}", clip.name, err);
@@ -1003,6 +1006,11 @@ pub fn enrich_inner(disc: &mut DiscInfo, bd: &BDRom, full_scan: bool) {
             }
         }
         pl.measured_size = total_measured_bytes;
+        for c in pl.stream_clips.iter_mut() {
+            if let Some(b) = clip_measured.get(&c.name) {
+                c.measured_size = *b;
+            }
+        }
 
         // Compute active bit-rate for each playlist stream and finalize
         // descriptions.
@@ -1016,6 +1024,7 @@ pub fn enrich_inner(disc: &mut DiscInfo, bd: &BDRom, full_scan: bool) {
             {
                 if let Some(b) = per_pid_bytes.get(&s.pid) {
                     s.active_bit_rate = (*b as f64 * 8.0 / total_seconds) as u64;
+                    s.measured_size = *b;
                     if s.bit_rate == 0 || s.is_vbr {
                         s.bit_rate = s.active_bit_rate;
                     }

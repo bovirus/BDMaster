@@ -30,6 +30,8 @@ pub struct Config {
     pub formatting: ConfigFormatting,
     #[serde(rename = "discInfoSplit", default = "default_disc_info_split")]
     pub disc_info_split: f32,
+    #[serde(rename = "infoPanelSplit", default = "default_info_panel_split")]
+    pub info_panel_split: f32,
     #[serde(default)]
     pub update: ConfigUpdate,
     #[serde(default)]
@@ -37,6 +39,10 @@ pub struct Config {
 }
 
 fn default_disc_info_split() -> f32 {
+    0.5
+}
+
+fn default_info_panel_split() -> f32 {
     0.5
 }
 
@@ -131,6 +137,7 @@ impl Default for Config {
             scan: Default::default(),
             formatting: Default::default(),
             disc_info_split: 0.5,
+            info_panel_split: 0.5,
             update: Default::default(),
             window: Default::default(),
         }

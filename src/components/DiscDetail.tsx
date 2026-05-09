@@ -15,7 +15,6 @@ import {
   IconButton,
   Paper,
   Stack,
-  Tab,
   Table,
   TableBody,
   TableCell,
@@ -23,7 +22,6 @@ import {
   TableHead,
   TableRow,
   TableSortLabel,
-  Tabs,
   Typography,
 } from "@mui/material";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
@@ -40,6 +38,7 @@ import { openSaveReportDialog } from "../lib/dialog";
 import { formatBitRate, formatLength45k, formatLengthSeconds, formatSize } from "../lib/format";
 
 type PlaylistSortKey = "name" | "groupIndex" | "totalLength" | "fileSize" | "measuredSize";
+type StreamSortKey = "name" | "index" | "length" | "fileSize" | "measuredSize";
 type SortDir = "asc" | "desc";
 
 /**
@@ -203,11 +202,77 @@ export default function DiscDetail() {
     config?.formatting?.bitRate?.precision ?? Protocol.FormatPrecision.Two;
   const bitRateUnit = config?.formatting?.bitRate?.unit ?? Protocol.FormatUnit.KMGT;
   const [selectedPlaylist, setSelectedPlaylist] = useState<string | null>(null);
-  const [tabIndex, setTabIndex] = useState(0);
   const [reportText, setReportText] = useState<string | null>(null);
   const [reportTitle, setReportTitle] = useState<string>("");
   const [chartOpen, setChartOpen] = useState(false);
   const [chartData, setChartData] = useState<{ time: number; bitRate: number }[]>([]);
+
+  // Sort state for the Stream (clip) table inside the info panel.
+  const [streamSortKey, setStreamSortKey] = useState<StreamSortKey>("index");
+  const [streamSortDir, setStreamSortDir] = useState<SortDir>("asc");
+  const handleStreamSort = (key: StreamSortKey) => {
+    if (streamSortKey === key) {
+      setStreamSortDir(streamSortDir === "asc" ? "desc" : "asc");
+    } else {
+      setStreamSortKey(key);
+      setStreamSortDir(key === "name" ? "asc" : "desc");
+    }
+  };
+
+  // Horizontal splitter inside the info panel: stream table on top, track
+  // table below, button row pinned at the bottom.
+  const infoPanelRef = useRef<HTMLDivElement | null>(null);
+  const [infoSplitFraction, setInfoSplitFraction] = useState<number>(
+    config?.infoPanelSplit ?? 0.5
+  );
+  useEffect(() => {
+    if (config) setInfoSplitFraction(config.infoPanelSplit ?? 0.5);
+  }, [config?.infoPanelSplit]);
+  const infoDraggingRef = useRef(false);
+  const persistInfoSplit = useCallback(
+    (fraction: number) => {
+      if (!config) return;
+      const next = { ...config, infoPanelSplit: fraction };
+      saveConfig(next)
+        .then((saved) => setConfigState(saved))
+        .catch(() => {});
+    },
+    [config, setConfigState]
+  );
+  const handleInfoSplitterMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      infoDraggingRef.current = true;
+      const onMove = (ev: MouseEvent) => {
+        const rect = infoPanelRef.current?.getBoundingClientRect();
+        if (!rect || !infoDraggingRef.current) return;
+        const y = ev.clientY - rect.top;
+        const fraction = Math.max(0.1, Math.min(0.9, y / rect.height));
+        setInfoSplitFraction(fraction);
+      };
+      const onUp = () => {
+        infoDraggingRef.current = false;
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        setInfoSplitFraction((current) => {
+          persistInfoSplit(current);
+          return current;
+        });
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [persistInfoSplit]
+  );
+
+  // Open the Chapters tab for the currently selected playlist.
+  const setTabChaptersStatus = useAppStore((s) => s.setTabChaptersStatus);
+  const setChapterPlaylist = useAppStore((s) => s.setChapterPlaylist);
+  const handleViewChapters = () => {
+    if (!selectedPlaylist) return;
+    setChapterPlaylist(selectedPlaylist);
+    setTabChaptersStatus(Protocol.ControlStatus.Selected);
+  };
 
   useEffect(() => {
     if (!disc) return;
@@ -441,11 +506,65 @@ export default function DiscDetail() {
           })}
         />
 
-        {/* Right panel: streams + clips for selected playlist */}
-        <Paper variant="outlined" sx={{ overflow: "auto", minHeight: 0, minWidth: 0, p: 1, flex: 1 }}>
+        {/* Right panel: stream table | splitter | track table | buttons */}
+        <Box
+          ref={infoPanelRef}
+          sx={{
+            flex: 1,
+            minHeight: 0,
+            minWidth: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: 0,
+          }}
+        >
           {playlist ? (
             <>
-              <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: "wrap", gap: 1, alignItems: "center" }}>
+              {/* Stream (clip) table */}
+              <Paper
+                variant="outlined"
+                sx={{
+                  overflow: "auto",
+                  minHeight: 0,
+                  flex: `0 0 ${(infoSplitFraction * 100).toFixed(2)}%`,
+                }}
+              >
+                <StreamClipTable
+                  clips={playlist.streamClips}
+                  sortKey={streamSortKey}
+                  sortDir={streamSortDir}
+                  onSort={handleStreamSort}
+                  sizePrecision={sizePrecision}
+                  sizeUnit={sizeUnit}
+                />
+              </Paper>
+
+              {/* Horizontal splitter */}
+              <Box
+                onMouseDown={handleInfoSplitterMouseDown}
+                sx={(theme) => ({
+                  height: 6,
+                  cursor: "row-resize",
+                  flexShrink: 0,
+                  backgroundColor: theme.palette.divider,
+                  transition: "background-color 120ms",
+                  "&:hover": { backgroundColor: theme.palette.primary.main },
+                })}
+              />
+
+              {/* Track table */}
+              <Paper variant="outlined" sx={{ overflow: "auto", minHeight: 0, flex: 1 }}>
+                <TrackTable
+                  playlist={playlist}
+                  bitRatePrecision={bitRatePrecision}
+                  bitRateUnit={bitRateUnit}
+                  sizePrecision={sizePrecision}
+                  sizeUnit={sizeUnit}
+                />
+              </Paper>
+
+              {/* Button row */}
+              <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: "wrap", gap: 1, alignItems: "center" }}>
                 <Button
                   size="small"
                   variant="outlined"
@@ -468,62 +587,26 @@ export default function DiscDetail() {
                   startIcon={<ShowChartIcon />}
                   onClick={handleViewChart}
                 >
-                  {t("disc.viewChart")}
+                  {t("disc.viewBitRateReport")}
                 </Button>
+                {playlist.chapters.length > 0 && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<DescriptionIcon />}
+                    onClick={handleViewChapters}
+                  >
+                    {t("disc.viewChapter")}
+                  </Button>
+                )}
               </Stack>
-              <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)}>
-                <Tab label={`${t("disc.videoStreams")} (${playlist.videoStreams.length})`} />
-                <Tab label={`${t("disc.audioStreams")} (${playlist.audioStreams.length})`} />
-                <Tab label={`${t("disc.graphicsStreams")} (${playlist.graphicsStreams.length})`} />
-                <Tab label={`${t("disc.textStreams")} (${playlist.textStreams.length})`} />
-                <Tab label={`Clips (${playlist.streamClips.length})`} />
-                <Tab label={`${t("disc.chapters")} (${playlist.chapters.length})`} />
-              </Tabs>
-              <Box sx={{ mt: 1 }}>
-                {tabIndex === 0 && (
-                  <StreamTable
-                    streams={playlist.videoStreams}
-                    bitRatePrecision={bitRatePrecision}
-                    bitRateUnit={bitRateUnit}
-                  />
-                )}
-                {tabIndex === 1 && (
-                  <StreamTable
-                    streams={playlist.audioStreams}
-                    bitRatePrecision={bitRatePrecision}
-                    bitRateUnit={bitRateUnit}
-                  />
-                )}
-                {tabIndex === 2 && (
-                  <StreamTable
-                    streams={playlist.graphicsStreams}
-                    bitRatePrecision={bitRatePrecision}
-                    bitRateUnit={bitRateUnit}
-                  />
-                )}
-                {tabIndex === 3 && (
-                  <StreamTable
-                    streams={playlist.textStreams}
-                    bitRatePrecision={bitRatePrecision}
-                    bitRateUnit={bitRateUnit}
-                  />
-                )}
-                {tabIndex === 4 && (
-                  <ClipsTable
-                    clips={playlist.streamClips}
-                    sizePrecision={sizePrecision}
-                    sizeUnit={sizeUnit}
-                  />
-                )}
-                {tabIndex === 5 && <ChaptersTable chapters={playlist.chapters} />}
-              </Box>
             </>
           ) : (
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="text.secondary" sx={{ p: 1 }}>
               {t("disc.noPlaylistSelected")}
             </Typography>
           )}
-        </Paper>
+        </Box>
       </Box>
 
       {/* Report dialog */}
@@ -565,7 +648,7 @@ export default function DiscDetail() {
       {/* Chart dialog */}
       <Dialog open={chartOpen} onClose={() => setChartOpen(false)} maxWidth="lg" fullWidth>
         <DialogTitle>
-          {t("disc.viewChart")}
+          {t("disc.viewBitRateReport")}
           <IconButton
             onClick={() => setChartOpen(false)}
             sx={{ position: "absolute", right: 8, top: 8 }}
@@ -581,43 +664,118 @@ export default function DiscDetail() {
   );
 }
 
-function StreamTable({
-  streams,
-  bitRatePrecision,
-  bitRateUnit,
+/** The Stream (clip) table: one row per M2TS clip in the selected playlist. */
+function StreamClipTable({
+  clips,
+  sortKey,
+  sortDir,
+  onSort,
+  sizePrecision,
+  sizeUnit,
 }: {
-  streams: Protocol.TSStreamInfo[];
-  bitRatePrecision: Protocol.FormatPrecision;
-  bitRateUnit: Protocol.FormatUnit;
+  clips: Protocol.PlaylistStreamClipInfo[];
+  sortKey: StreamSortKey;
+  sortDir: SortDir;
+  onSort: (k: StreamSortKey) => void;
+  sizePrecision: Protocol.FormatPrecision;
+  sizeUnit: Protocol.FormatUnit;
 }) {
-  if (streams.length === 0) {
+  // Filter to angle 0 only (mirroring the playlist grouping in BDInfo).
+  const angle0 = useMemo(
+    () => clips.filter((c) => c.angleIndex === 0),
+    [clips]
+  );
+  // Pair each clip with its 1-based original index before sorting.
+  const sorted = useMemo(() => {
+    const indexed = angle0.map((c, i) => ({ clip: c, index: i + 1 }));
+    return stableSort(indexed, (a, b) => {
+      let cmp: number;
+      switch (sortKey) {
+        case "name":
+          cmp = a.clip.name.localeCompare(b.clip.name);
+          break;
+        case "index":
+          cmp = a.index - b.index;
+          break;
+        case "length":
+          cmp = a.clip.length - b.clip.length;
+          break;
+        case "fileSize":
+          cmp = a.clip.fileSize - b.clip.fileSize;
+          break;
+        case "measuredSize":
+          cmp = a.clip.measuredSize - b.clip.measuredSize;
+          break;
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [angle0, sortKey, sortDir]);
+
+  if (sorted.length === 0) {
     return (
-      <Typography variant="body2" color="text.secondary">
+      <Typography variant="body2" color="text.secondary" sx={{ p: 1 }}>
         —
       </Typography>
     );
   }
   return (
     <TableContainer>
-      <Table size="small">
+      <Table size="small" stickyHeader>
         <TableHead>
           <TableRow>
-            <TableCell sx={{ fontWeight: "bold" }}>PID</TableCell>
-            <TableCell sx={{ fontWeight: "bold" }}>Codec</TableCell>
-            <TableCell sx={{ fontWeight: "bold" }}>Description</TableCell>
-            <TableCell sx={{ fontWeight: "bold" }}>Language</TableCell>
-            <TableCell sx={{ fontWeight: "bold" }} align="right">Bit Rate</TableCell>
+            <SortableHeaderCell
+              active={sortKey === "name"}
+              direction={sortDir}
+              onSort={() => onSort("name")}
+            >
+              Stream
+            </SortableHeaderCell>
+            <SortableHeaderCell
+              active={sortKey === "index"}
+              direction={sortDir}
+              onSort={() => onSort("index")}
+              align="right"
+            >
+              Index
+            </SortableHeaderCell>
+            <SortableHeaderCell
+              active={sortKey === "length"}
+              direction={sortDir}
+              onSort={() => onSort("length")}
+            >
+              Length
+            </SortableHeaderCell>
+            <SortableHeaderCell
+              active={sortKey === "fileSize"}
+              direction={sortDir}
+              onSort={() => onSort("fileSize")}
+              align="right"
+            >
+              Estimated Size
+            </SortableHeaderCell>
+            <SortableHeaderCell
+              active={sortKey === "measuredSize"}
+              direction={sortDir}
+              onSort={() => onSort("measuredSize")}
+              align="right"
+            >
+              Measured Size
+            </SortableHeaderCell>
           </TableRow>
         </TableHead>
         <TableBody>
-          {streams.map((s, i) => (
-            <TableRow key={`${s.pid}-${i}`}>
-              <TableCell>{`0x${s.pid.toString(16).toUpperCase().padStart(4, "0")}`}</TableCell>
-              <TableCell>{s.codecShortName || s.codecName}</TableCell>
-              <TableCell>{s.description}</TableCell>
-              <TableCell>{s.languageName || s.languageCode}</TableCell>
+          {sorted.map(({ clip, index }) => (
+            <TableRow key={`${clip.name}-${index}`} hover>
+              <TableCell>{clip.name}</TableCell>
+              <TableCell align="right">{index}</TableCell>
+              <TableCell>{formatLength45k(clip.length)}</TableCell>
               <TableCell align="right">
-                {formatBitRate(s.bitRate || s.activeBitRate, bitRatePrecision, bitRateUnit)}
+                {formatSize(clip.fileSize, sizePrecision, sizeUnit)}
+              </TableCell>
+              <TableCell align="right">
+                {clip.measuredSize > 0
+                  ? formatSize(clip.measuredSize, sizePrecision, sizeUnit)
+                  : "—"}
               </TableCell>
             </TableRow>
           ))}
@@ -627,69 +785,63 @@ function StreamTable({
   );
 }
 
-function ChaptersTable({ chapters }: { chapters: number[] }) {
-  if (chapters.length === 0) {
-    return (
-      <Typography variant="body2" color="text.secondary">
-        —
-      </Typography>
-    );
-  }
-  return (
-    <TableContainer>
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            <TableCell sx={{ fontWeight: "bold" }} align="right">#</TableCell>
-            <TableCell sx={{ fontWeight: "bold" }}>Time</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {chapters.map((sec, i) => (
-            <TableRow key={i}>
-              <TableCell align="right">{i + 1}</TableCell>
-              <TableCell>{formatLengthSeconds(sec)}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
-  );
-}
-
-function ClipsTable({
-  clips,
+/** The Track table: video → audio → graphics+text streams of the playlist. */
+function TrackTable({
+  playlist,
+  bitRatePrecision,
+  bitRateUnit,
   sizePrecision,
   sizeUnit,
 }: {
-  clips: Protocol.PlaylistStreamClipInfo[];
+  playlist: Protocol.PlaylistInfo;
+  bitRatePrecision: Protocol.FormatPrecision;
+  bitRateUnit: Protocol.FormatUnit;
   sizePrecision: Protocol.FormatPrecision;
   sizeUnit: Protocol.FormatUnit;
 }) {
-  if (clips.length === 0) {
+  const tracks = useMemo(
+    () => [
+      ...playlist.videoStreams,
+      ...playlist.audioStreams,
+      ...playlist.graphicsStreams,
+      ...playlist.textStreams,
+    ],
+    [playlist]
+  );
+  if (tracks.length === 0) {
     return (
-      <Typography variant="body2" color="text.secondary">
+      <Typography variant="body2" color="text.secondary" sx={{ p: 1 }}>
         —
       </Typography>
     );
   }
   return (
     <TableContainer>
-      <Table size="small">
+      <Table size="small" stickyHeader>
         <TableHead>
           <TableRow>
-            <TableCell sx={{ fontWeight: "bold" }}>Clip</TableCell>
-            <TableCell sx={{ fontWeight: "bold" }}>Length</TableCell>
-            <TableCell sx={{ fontWeight: "bold" }} align="right">Size</TableCell>
+            <TableCell sx={{ fontWeight: "bold" }}>ID</TableCell>
+            <TableCell sx={{ fontWeight: "bold" }}>Codec</TableCell>
+            <TableCell sx={{ fontWeight: "bold" }}>Language</TableCell>
+            <TableCell sx={{ fontWeight: "bold" }} align="right">Bit Rate</TableCell>
+            <TableCell sx={{ fontWeight: "bold" }}>Description</TableCell>
+            <TableCell sx={{ fontWeight: "bold" }} align="right">Measured Size</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
-          {clips.map((c, i) => (
-            <TableRow key={`${c.name}-${i}`}>
-              <TableCell>{c.name}</TableCell>
-              <TableCell>{formatLength45k(c.length)}</TableCell>
+          {tracks.map((s, i) => (
+            <TableRow key={`${s.pid}-${i}`}>
+              <TableCell>{`0x${s.pid.toString(16).toUpperCase().padStart(4, "0")}`}</TableCell>
+              <TableCell>{s.codecShortName || s.codecName}</TableCell>
+              <TableCell>{s.languageName || s.languageCode}</TableCell>
               <TableCell align="right">
-                {formatSize(c.fileSize, sizePrecision, sizeUnit)}
+                {formatBitRate(s.bitRate || s.activeBitRate, bitRatePrecision, bitRateUnit)}
+              </TableCell>
+              <TableCell>{s.description}</TableCell>
+              <TableCell align="right">
+                {s.measuredSize > 0
+                  ? formatSize(s.measuredSize, sizePrecision, sizeUnit)
+                  : "—"}
               </TableCell>
             </TableRow>
           ))}

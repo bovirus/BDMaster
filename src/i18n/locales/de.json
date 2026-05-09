@@ -9,6 +9,7 @@
     "about": "Über",
     "settings": "Einstellungen",
     "discInfo": "Disc-Info",
+    "chapters": "Kapitel",
     "close": "Schließen (Strg + W)"
   },
   "cards": {
@@ -62,6 +63,8 @@
     "bitRate": "Bitrate",
     "viewDetails": "Details anzeigen",
     "viewChart": "Bitraten-Diagramm anzeigen",
+    "viewBitRateReport": "Bitraten-Bericht anzeigen",
+    "viewChapter": "Kapitel anzeigen",
     "generateReport": "Bericht erstellen",
     "generateQuickSummary": "Kurzbericht",
     "generateFullReport": "Vollständiger Bericht",
