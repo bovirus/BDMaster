@@ -16,6 +16,20 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
 
+/// Run the streaming scan against an opaque reader. The native and UDF code
+/// paths both funnel into this entry point.
+pub fn scan_m2ts_streaming_from_reader<R, F>(reader: R, mut on_pes: F) -> Result<M2tsScanResult>
+where
+    R: Read,
+    F: FnMut(u16, u8, &[u8]) -> bool,
+{
+    scan_inner(reader, |pid, st, payload| on_pes(pid, st, payload))
+}
+
+pub fn scan_m2ts_from_reader<R: Read>(reader: R) -> Result<M2tsScanResult> {
+    scan_inner(reader, |_, _, _| true)
+}
+
 const TS_PACKET_SIZE: usize = 188;
 const M2TS_PACKET_SIZE: usize = 192;
 const SYNC_BYTE: u8 = 0x47;
@@ -46,16 +60,23 @@ pub struct StreamStats {
 
 const SAMPLE_INTERVAL_SECONDS: f64 = 1.0;
 
-/// Streaming scan: invokes `on_pes` for every completed elementary-stream PES
-/// payload (with the PES header already stripped). Returns when EOF is reached
-/// or `on_pes` returns false to short-circuit. Mirrors how
-/// TSStreamFile.cs feeds TSStreamBuffer through TSCodec*.Scan().
-pub fn scan_m2ts_streaming<F>(path: &Path, mut on_pes: F) -> Result<M2tsScanResult>
+/// Streaming scan from a path. Equivalent to `scan_inner` over a buffered
+/// `File`.
+pub fn scan_m2ts_streaming<F>(path: &Path, on_pes: F) -> Result<M2tsScanResult>
 where
     F: FnMut(u16, u8, &[u8]) -> bool,
 {
     let file = File::open(path)?;
-    let mut reader = BufReader::with_capacity(1 << 20, file);
+    let reader = BufReader::with_capacity(1 << 20, file);
+    scan_inner(reader, on_pes)
+}
+
+fn scan_inner<R, F>(reader: R, mut on_pes: F) -> Result<M2tsScanResult>
+where
+    R: Read,
+    F: FnMut(u16, u8, &[u8]) -> bool,
+{
+    let mut reader = reader;
     let mut packet = [0u8; M2TS_PACKET_SIZE];
     let mut pmt_pid_set = std::collections::HashSet::<u16>::new();
     let mut pmt_pids: Vec<u16> = Vec::new();

@@ -129,7 +129,9 @@ impl<'a> TSStreamBuffer<'a> {
         let to = self.skip_bits + bits;
         for i in from..to {
             value <<= 1;
-            value += if (data >> (16 - i as i32 - 1)) & 1 != 0 { 1 } else { 0 };
+            let shift_amount = 16i32 - i as i32 - 1;
+            let bit = if shift_amount < 0 { 0 } else { (data >> shift_amount) & 1 };
+            value += bit as u16;
         }
         self.skip_bits += bits;
         self.pos = pos + (self.skip_bits >> 3) as usize + self.skipped_bytes as usize;
@@ -160,7 +162,9 @@ impl<'a> TSStreamBuffer<'a> {
         let to = self.skip_bits + bits;
         for i in from..to {
             value <<= 1;
-            value += if (data >> (32 - i as i32 - 1)) & 1 != 0 { 1 } else { 0 };
+            let shift_amount = 32i32 - i as i32 - 1;
+            let bit = if shift_amount < 0 { 0 } else { (data >> shift_amount) & 1 };
+            value += bit;
         }
         self.skip_bits += bits;
         self.pos = pos + (self.skip_bits >> 3) as usize + self.skipped_bytes as usize;
@@ -203,7 +207,9 @@ impl<'a> TSStreamBuffer<'a> {
         let to = self.skip_bits + bits;
         for i in from..to {
             value <<= 1;
-            value += if (combined >> (64 - i as i32 - 1)) & 1 != 0 { 1 } else { 0 };
+            let shift_amount = 64i32 - i as i32 - 1;
+            let bit = if shift_amount < 0 { 0 } else { (combined >> shift_amount) & 1 };
+            value += bit;
         }
         self.skip_bits += bits;
         self.pos = pos + (self.skip_bits >> 3) as usize + self.skipped_bytes as usize;

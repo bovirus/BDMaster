@@ -14,10 +14,12 @@ pub mod m2ts;
 pub mod mpls;
 pub mod report;
 pub mod types;
+pub mod udf;
 
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use crate::protocol::{
     ChartSample, DiscInfo, PlaylistInfo, PlaylistStreamClipInfo, StreamClipFileInfo,
@@ -26,20 +28,25 @@ use crate::protocol::{
 
 use self::clpi::StreamClipFile;
 use self::lang::language_name;
-use self::mpls::{parse_mpls, PlaylistFile, PlaylistStream};
+use self::mpls::{parse_mpls_bytes, PlaylistFile, PlaylistStream};
 use self::types::*;
+use self::udf::{UdfFile, UdfFileReader, UdfImage};
+
+#[derive(Clone)]
+pub enum StreamSource {
+    Native(PathBuf),
+    Iso(UdfFile),
+}
+
+#[derive(Clone)]
+pub enum DiscSource {
+    Native,
+    Iso(Arc<Mutex<UdfImage>>),
+}
 
 pub struct BDRom {
     pub path: PathBuf,
-    pub directory_root: PathBuf,
-    pub directory_bdmv: PathBuf,
-    pub directory_playlist: Option<PathBuf>,
-    pub directory_clipinf: Option<PathBuf>,
-    pub directory_stream: Option<PathBuf>,
-    pub directory_ssif: Option<PathBuf>,
-    pub directory_bdjo: Option<PathBuf>,
-    pub directory_meta: Option<PathBuf>,
-    pub directory_snp: Option<PathBuf>,
+    pub source: DiscSource,
     pub volume_label: String,
     pub disc_title: Option<String>,
     pub size: u64,
@@ -51,7 +58,7 @@ pub struct BDRom {
     pub is_3d: bool,
     pub is_50_hz: bool,
     pub playlists: HashMap<String, PlaylistFile>,
-    pub stream_files: HashMap<String, (PathBuf, u64)>,
+    pub stream_files: HashMap<String, (StreamSource, u64)>,
     pub stream_clip_files: HashMap<String, StreamClipFile>,
 }
 
@@ -69,10 +76,23 @@ fn open_bdrom(path: &Path) -> Result<BDRom> {
     if !path.exists() {
         return Err(anyhow!("Path does not exist: {}", path.display()));
     }
-    if !path.is_dir() {
-        return Err(anyhow!("Disc image (.iso) is not yet supported in BDMaster."));
+    if path.is_file() {
+        let ext = path
+            .extension()
+            .map(|e| e.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        if ext == "iso" {
+            return open_bdrom_iso(path);
+        }
+        return Err(anyhow!(
+            "Unsupported file type: {} (only .iso disc images are supported)",
+            path.display()
+        ));
     }
+    open_bdrom_native(path)
+}
 
+fn open_bdrom_native(path: &Path) -> Result<BDRom> {
     let directory_bdmv = locate_bdmv(path)?;
     let directory_root = directory_bdmv
         .parent()
@@ -93,7 +113,6 @@ fn open_bdrom(path: &Path) -> Result<BDRom> {
         return Err(anyhow!("Unable to locate PLAYLIST or CLIPINF directory."));
     }
 
-    // Disc properties
     let volume_label = directory_root
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -101,7 +120,6 @@ fn open_bdrom(path: &Path) -> Result<BDRom> {
 
     let size = directory_size(&directory_root);
 
-    // Index version
     let mut is_uhd = false;
     let index_path = directory_bdmv.join("index.bdmv");
     if let Ok(bytes) = std::fs::read(&index_path) {
@@ -111,7 +129,6 @@ fn open_bdrom(path: &Path) -> Result<BDRom> {
         }
     }
 
-    // Detection flags
     let is_bd_plus = find_subdir(&directory_root, "BDSVM").is_some()
         || find_subdir(&directory_root, "SLYVM").is_some()
         || find_subdir(&directory_root, "ANYVM").is_some();
@@ -133,27 +150,31 @@ fn open_bdrom(path: &Path) -> Result<BDRom> {
 
     let is_dbox = directory_root.join("FilmIndex.xml").exists();
 
-    let disc_title = directory_meta.as_ref().and_then(|m| read_disc_title(m));
+    let disc_title = directory_meta.as_ref().and_then(|m| read_disc_title_native(m));
 
-    // Read MPLS playlists
     let mut playlists: HashMap<String, PlaylistFile> = HashMap::new();
     if let Some(plist_dir) = &directory_playlist {
         for entry in std::fs::read_dir(plist_dir)?.flatten() {
             let p = entry.path();
             if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
                 if ext.eq_ignore_ascii_case("mpls") {
-                    match parse_mpls(&p) {
-                        Ok(pl) => {
-                            playlists.insert(pl.name.clone(), pl);
+                    if let Ok(bytes) = std::fs::read(&p) {
+                        let name = p
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_uppercase())
+                            .unwrap_or_default();
+                        match parse_mpls_bytes(name, &bytes) {
+                            Ok(pl) => {
+                                playlists.insert(pl.name.clone(), pl);
+                            }
+                            Err(e) => log::warn!("Failed to parse {}: {}", p.display(), e),
                         }
-                        Err(e) => log::warn!("Failed to parse {}: {}", p.display(), e),
                     }
                 }
             }
         }
     }
 
-    // CLPI
     let mut stream_clip_files: HashMap<String, StreamClipFile> = HashMap::new();
     if let Some(clip_dir) = &directory_clipinf {
         for entry in std::fs::read_dir(clip_dir)?.flatten() {
@@ -168,8 +189,7 @@ fn open_bdrom(path: &Path) -> Result<BDRom> {
         }
     }
 
-    // M2TS stream files
-    let mut stream_files: HashMap<String, (PathBuf, u64)> = HashMap::new();
+    let mut stream_files: HashMap<String, (StreamSource, u64)> = HashMap::new();
     if let Some(stream_dir) = &directory_stream {
         for entry in std::fs::read_dir(stream_dir)?.flatten() {
             let p = entry.path();
@@ -180,13 +200,12 @@ fn open_bdrom(path: &Path) -> Result<BDRom> {
                         .map(|n| n.to_string_lossy().to_uppercase())
                         .unwrap_or_default();
                     let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-                    stream_files.insert(name, (p, size));
+                    stream_files.insert(name, (StreamSource::Native(p), size));
                 }
             }
         }
     }
 
-    // 50Hz check based on playlist video frame rates
     let is_50_hz = playlists.values().any(|pl| {
         pl.playlist_streams
             .iter()
@@ -195,15 +214,7 @@ fn open_bdrom(path: &Path) -> Result<BDRom> {
 
     Ok(BDRom {
         path: path.to_path_buf(),
-        directory_root,
-        directory_bdmv,
-        directory_playlist,
-        directory_clipinf,
-        directory_stream,
-        directory_ssif,
-        directory_bdjo,
-        directory_meta,
-        directory_snp,
+        source: DiscSource::Native,
         volume_label,
         disc_title,
         size,
@@ -218,6 +229,222 @@ fn open_bdrom(path: &Path) -> Result<BDRom> {
         stream_files,
         stream_clip_files,
     })
+}
+
+fn open_bdrom_iso(path: &Path) -> Result<BDRom> {
+    let image = Arc::new(Mutex::new(UdfImage::open(path)?));
+
+    // Resolve the BDMV directory (case-insensitive).
+    let bdmv = {
+        let mut img = image.lock().unwrap();
+        img.resolve("BDMV")
+            .map_err(|e| anyhow!("UDF: BDMV not found in image: {}", e))?
+    };
+    if !bdmv.is_directory {
+        return Err(anyhow!("UDF: BDMV is not a directory"));
+    }
+
+    // Volume label: derive from the ISO file name (without extension).
+    let volume_label = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    // Total disc size: sum of all files in the root directory tree, skipping
+    // .ssif files (mirroring BDInfo's behavior).
+    let size = {
+        let mut img = image.lock().unwrap();
+        let root = img.root.clone();
+        img.directory_size(&root).unwrap_or(0)
+    };
+
+    // index.bdmv → UHD detection.
+    let mut is_uhd = false;
+    {
+        let mut img = image.lock().unwrap();
+        if let Ok(index_fe) = img.resolve("BDMV/index.bdmv") {
+            if let Ok(bytes) = img.read_file(&index_fe) {
+                if bytes.len() >= 8 {
+                    let header = String::from_utf8_lossy(&bytes[..8]);
+                    is_uhd = header == "INDX0300";
+                }
+            }
+        }
+    }
+
+    let mut img = image.lock().unwrap();
+
+    let is_bd_plus = img.try_resolve("BDSVM").is_some()
+        || img.try_resolve("SLYVM").is_some()
+        || img.try_resolve("ANYVM").is_some();
+
+    let is_bd_java = img
+        .try_resolve("BDMV/BDJO")
+        .filter(|d| d.is_directory)
+        .map(|d| {
+            img.list_dir(&d)
+                .map(|es| es.iter().any(|e| !e.is_parent && !e.is_directory))
+                .unwrap_or(false)
+        })
+        .unwrap_or(false);
+
+    let is_psp = img
+        .try_resolve("SNP")
+        .filter(|d| d.is_directory)
+        .map(|d| {
+            img.list_dir(&d)
+                .map(|es| {
+                    es.iter().any(|e| {
+                        !e.is_parent && e.name.to_ascii_lowercase().ends_with(".mnv")
+                    })
+                })
+                .unwrap_or(false)
+        })
+        .unwrap_or(false);
+
+    let is_3d = img
+        .try_resolve("BDMV/STREAM/SSIF")
+        .filter(|d| d.is_directory)
+        .map(|d| {
+            img.list_dir(&d)
+                .map(|es| es.iter().any(|e| !e.is_parent && !e.is_directory))
+                .unwrap_or(false)
+        })
+        .unwrap_or(false);
+
+    let is_dbox = img.try_resolve("FilmIndex.xml").is_some();
+
+    let disc_title = read_disc_title_iso(&mut img);
+
+    // Read MPLS playlists from BDMV/PLAYLIST.
+    let mut playlists: HashMap<String, PlaylistFile> = HashMap::new();
+    if let Ok(playlist_dir) = img.resolve("BDMV/PLAYLIST") {
+        if let Ok(entries) = img.list_dir(&playlist_dir) {
+            for entry in entries {
+                if entry.is_parent || entry.is_deleted || entry.is_directory {
+                    continue;
+                }
+                if !entry.name.to_ascii_lowercase().ends_with(".mpls") {
+                    continue;
+                }
+                if let Ok(fe) =
+                    crate::bdrom::udf::read_file_entry_at(&mut img, &entry.icb)
+                {
+                    if let Ok(bytes) = img.read_file(&fe) {
+                        let name = entry.name.to_uppercase();
+                        match parse_mpls_bytes(name.clone(), &bytes) {
+                            Ok(pl) => {
+                                playlists.insert(pl.name.clone(), pl);
+                            }
+                            Err(e) => log::warn!("Failed to parse {}: {}", name, e),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // CLPI.
+    let mut stream_clip_files: HashMap<String, StreamClipFile> = HashMap::new();
+    if let Ok(clip_dir) = img.resolve("BDMV/CLIPINF") {
+        if let Ok(entries) = img.list_dir(&clip_dir) {
+            for entry in entries {
+                if entry.is_parent || entry.is_deleted || entry.is_directory {
+                    continue;
+                }
+                if !entry.name.to_ascii_lowercase().ends_with(".clpi") {
+                    continue;
+                }
+                if let Ok(fe) =
+                    crate::bdrom::udf::read_file_entry_at(&mut img, &entry.icb)
+                {
+                    let name = entry.name.to_uppercase();
+                    stream_clip_files.insert(
+                        name.clone(),
+                        StreamClipFile {
+                            name,
+                            size: fe.size,
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    // M2TS.
+    let mut stream_files: HashMap<String, (StreamSource, u64)> = HashMap::new();
+    if let Ok(stream_dir) = img.resolve("BDMV/STREAM") {
+        if let Ok(entries) = img.list_dir(&stream_dir) {
+            for entry in entries {
+                if entry.is_parent || entry.is_deleted || entry.is_directory {
+                    continue;
+                }
+                if !entry.name.to_ascii_lowercase().ends_with(".m2ts") {
+                    continue;
+                }
+                if let Ok(fe) =
+                    crate::bdrom::udf::read_file_entry_at(&mut img, &entry.icb)
+                {
+                    let name = entry.name.to_uppercase();
+                    let size = fe.size;
+                    stream_files.insert(name, (StreamSource::Iso(fe), size));
+                }
+            }
+        }
+    }
+
+    drop(img);
+
+    let is_50_hz = playlists.values().any(|pl| {
+        pl.playlist_streams
+            .iter()
+            .any(|s| s.frame_rate.is_50_hz())
+    });
+
+    Ok(BDRom {
+        path: path.to_path_buf(),
+        source: DiscSource::Iso(image),
+        volume_label,
+        disc_title,
+        size,
+        is_uhd,
+        is_bd_plus,
+        is_bd_java,
+        is_dbox,
+        is_psp,
+        is_3d,
+        is_50_hz,
+        playlists,
+        stream_files,
+        stream_clip_files,
+    })
+}
+
+fn read_disc_title_iso(img: &mut UdfImage) -> Option<String> {
+    let meta_dir = img.try_resolve("BDMV/META")?;
+    if !meta_dir.is_directory {
+        return None;
+    }
+    fn walk_for_bdmt_eng(img: &mut UdfImage, dir: &UdfFile) -> Option<Vec<u8>> {
+        let entries = img.list_dir(dir).ok()?;
+        for e in entries {
+            if e.is_parent || e.is_deleted {
+                continue;
+            }
+            let child = crate::bdrom::udf::read_file_entry_at(img, &e.icb).ok()?;
+            if child.is_directory {
+                if let Some(bytes) = walk_for_bdmt_eng(img, &child) {
+                    return Some(bytes);
+                }
+            } else if e.name.eq_ignore_ascii_case("bdmt_eng.xml") {
+                return img.read_file(&child).ok();
+            }
+        }
+        None
+    }
+    let bytes = walk_for_bdmt_eng(img, &meta_dir)?;
+    let text = String::from_utf8_lossy(&bytes).to_string();
+    extract_title_from_xml(&text)
 }
 
 fn locate_bdmv(path: &Path) -> Result<PathBuf> {
@@ -303,7 +530,7 @@ fn directory_size(dir: &Path) -> u64 {
     size
 }
 
-fn read_disc_title(meta_dir: &Path) -> Option<String> {
+fn read_disc_title_native(meta_dir: &Path) -> Option<String> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
@@ -556,6 +783,27 @@ fn playlist_stream_to_info(s: &PlaylistStream) -> TSStreamInfo {
     info
 }
 
+/// Open a streaming reader for an M2TS stream entry, regardless of whether
+/// the disc source is a directory or an ISO image.
+fn open_stream_reader(
+    bd: &BDRom,
+    src: &StreamSource,
+) -> Result<Box<dyn std::io::Read + Send>> {
+    match src {
+        StreamSource::Native(p) => {
+            let f = std::fs::File::open(p)?;
+            Ok(Box::new(std::io::BufReader::with_capacity(1 << 20, f)))
+        }
+        StreamSource::Iso(fe) => {
+            if let DiscSource::Iso(image) = &bd.source {
+                Ok(Box::new(UdfFileReader::new(image.clone(), fe)?))
+            } else {
+                Err(anyhow!("ISO stream source without ISO disc source"))
+            }
+        }
+    }
+}
+
 pub fn build_chart_samples(path: &str, playlist_name: &str) -> Vec<ChartSample> {
     let bd = match open_bdrom(Path::new(path)) {
         Ok(bd) => bd,
@@ -578,9 +826,15 @@ pub fn build_chart_samples(path: &str, playlist_name: &str) -> Vec<ChartSample> 
             Some(e) => e,
             None => continue,
         };
-        match m2ts::scan_m2ts(&entry.0) {
+        let reader = match open_stream_reader(&bd, &entry.0) {
+            Ok(r) => r,
+            Err(err) => {
+                log::warn!("chart: failed to open {}: {}", clip.name, err);
+                continue;
+            }
+        };
+        match m2ts::scan_m2ts_from_reader(reader) {
             Ok(res) => {
-                // Restrict samples to the clip window [time_in, time_out).
                 let clip_in_s = clip.time_in as f64 / 45000.0;
                 let clip_out_s = clip.time_out as f64 / 45000.0;
                 for (t, bps) in res.bitrate_samples {
@@ -661,7 +915,14 @@ pub fn enrich_inner(disc: &mut DiscInfo, bd: &BDRom, full_scan: bool) {
                 .map(|(pid, p)| unsafe { (*pid, (**p).bit_rate as i64) })
                 .collect();
 
-            let res = m2ts::scan_m2ts_streaming(&entry.0, |pid, _stream_type, payload| {
+            let reader = match open_stream_reader(bd, &entry.0) {
+                Ok(r) => r,
+                Err(err) => {
+                    log::warn!("scan {}: {}", clip.name, err);
+                    continue;
+                }
+            };
+            let res = m2ts::scan_m2ts_streaming_from_reader(reader, |pid, _stream_type, payload| {
                 if let Some(stream_ptr) = pid_streams.get(&pid) {
                     let stream = unsafe { &mut **stream_ptr };
                     if !stream.is_initialized {
