@@ -15,10 +15,10 @@ import {
 } from "@mui/material";
 import GitHubIcon from "@mui/icons-material/GitHub";
 import PersonIcon from "@mui/icons-material/Person";
-import AlbumIcon from "@mui/icons-material/Album";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useTranslation } from "react-i18next";
 
+import appIconUrl from "../../src-tauri/icons/icon.png";
 import { useAppStore } from "../lib/store";
 
 const APP_NAME = "BDMaster";
@@ -74,9 +74,18 @@ export default function About() {
                 },
               }}
             >
-              <Avatar sx={{ background: GRADIENT, width: 96, height: 96, position: "relative", zIndex: 1 }}>
-                <AlbumIcon sx={{ fontSize: 60, color: "#fff" }} />
-              </Avatar>
+              <Box
+                component="img"
+                src={appIconUrl}
+                alt={APP_NAME}
+                sx={{
+                  position: "relative",
+                  zIndex: 1,
+                  width: 96,
+                  height: 96,
+                  filter: "drop-shadow(0 8px 20px rgba(99, 102, 241, 0.35))",
+                }}
+              />
             </Box>
             <Typography
               variant="h3"
@@ -104,9 +113,6 @@ export default function About() {
             </Stack>
             <Typography variant="body2" color="text.secondary" sx={{ textAlign: "center" }}>
               {t("about.tagline")}
-            </Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ textAlign: "center" }}>
-              {t("about.basedOn")}
             </Typography>
           </Stack>
 

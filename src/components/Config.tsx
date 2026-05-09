@@ -3,7 +3,7 @@
  *   All rights reserved.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Box,
   Button,
@@ -71,10 +71,43 @@ export default function Config() {
   const setNotification = useAppStore((s) => s.setDialogNotification);
 
   const [draft, setDraft] = useState<Protocol.Config | null>(config);
+  const isInitializedRef = useRef(false);
 
   useEffect(() => {
-    setDraft(config);
+    if (config && !isInitializedRef.current) {
+      setDraft(config);
+      isInitializedRef.current = true;
+    } else if (config && isInitializedRef.current) {
+      // Keep persisted fields in sync but preserve unsaved scan-option edits.
+      setDraft((prev) =>
+        prev ? { ...prev, displayMode: config.displayMode, theme: config.theme, language: config.language } : config
+      );
+    }
   }, [config]);
+
+  // Apply appearance / theme / language changes to the store immediately so
+  // the rest of the UI re-themes and re-translates without waiting for Save.
+  useEffect(() => {
+    if (!isInitializedRef.current || !draft || !config) return;
+    if (
+      draft.displayMode !== config.displayMode ||
+      draft.theme !== config.theme ||
+      draft.language !== config.language
+    ) {
+      setConfigState({
+        ...config,
+        displayMode: draft.displayMode,
+        theme: draft.theme,
+        language: draft.language,
+      });
+    }
+  }, [draft?.displayMode, draft?.theme, draft?.language, config, setConfigState]);
+
+  // Apply i18n language change immediately.
+  useEffect(() => {
+    if (!isInitializedRef.current || !draft) return;
+    changeLanguage(draft.language);
+  }, [draft?.language]);
 
   if (!draft) {
     return <Box sx={{ p: 2 }}>Loading…</Box>;
@@ -87,6 +120,9 @@ export default function Config() {
   const updateScan = (patch: Partial<Protocol.ConfigScan>) => {
     setDraft({ ...draft, scan: { ...draft.scan, ...patch } });
   };
+
+  const getThemeLabel = (theme: Protocol.Theme) =>
+    t(`settings.themeNames.${theme}`, { defaultValue: theme });
 
   const handleSave = async () => {
     try {
@@ -106,8 +142,8 @@ export default function Config() {
   };
 
   return (
-    <Box sx={{ p: 2, display: "flex", flexDirection: "column", gap: 2 }}>
-      <Paper variant="outlined" sx={{ p: 2 }}>
+    <Box sx={{ width: "100%", maxWidth: 640, mx: "auto", py: 2, px: 1, display: "flex", flexDirection: "column", gap: 2 }}>
+      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
         <SectionHeader icon={<AppearanceIcon />} title={t("settings.appearance")} />
         <SettingRow label={t("settings.appearance")}>
           <ToggleButtonGroup
@@ -138,7 +174,7 @@ export default function Config() {
             >
               {Protocol.getThemes().map((th) => (
                 <MenuItem key={th} value={th}>
-                  {th}
+                  {getThemeLabel(th)}
                 </MenuItem>
               ))}
             </Select>
@@ -160,7 +196,7 @@ export default function Config() {
         </SettingRow>
       </Paper>
 
-      <Paper variant="outlined" sx={{ p: 2 }}>
+      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
         <SectionHeader icon={<ScanIcon />} title={t("settings.scan")} />
         <Stack>
           <SettingRow label={t("settings.generateStreamDiagnostics")}>
@@ -255,11 +291,13 @@ export default function Config() {
         </Stack>
       </Paper>
 
-      <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+      <Box sx={{ display: "flex", justifyContent: "center", pt: 1 }}>
         <Button
           variant="contained"
+          color="primary"
           startIcon={<SaveIcon />}
           onClick={handleSave}
+          sx={{ minWidth: 180, borderRadius: 2, textTransform: "none", fontWeight: 600 }}
         >
           {t("settings.save")}
         </Button>

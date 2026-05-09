@@ -16,6 +16,8 @@
     "welcomeTitle": "欢迎使用 BDMaster",
     "welcomeSubtitle": "检查蓝光光盘目录,以查看播放列表、流和编解码器。",
     "introBDMaster": "将光盘目录(包含 BDMV/ 的文件夹)拖入窗口,或使用“添加光盘目录”按钮。每张光盘会在自己的标签页中显示详细信息。",
+    "introBetterMediaInfo": "通过现代化的快速界面检查任何媒体文件。一目了然地浏览视频、音频、图像和字幕轨道的流、属性和元数据。",
+    "introBatchMkvExtract": "一次性从多个 .mkv 文件中提取轨道、章节和附件。基于 MKVToolNix 的 mkvextract 的批量友好图形界面。",
     "viewOnGithub": "在 GitHub 上查看",
     "emptyHint": "提示:可以将蓝光目录拖放到任意位置以开始扫描。",
     "addDisc": "添加光盘目录",
@@ -82,6 +84,28 @@
     "lightMode": "浅色",
     "darkMode": "深色",
     "theme": "主题",
+    "themeNames": {
+      "Ocean": "海洋",
+      "Aqua": "碧水",
+      "Sky": "天空",
+      "Arctic": "北极",
+      "Glacier": "冰川",
+      "Mist": "薄雾",
+      "Slate": "石板",
+      "Charcoal": "炭黑",
+      "Midnight": "午夜",
+      "Indigo": "靛蓝",
+      "Violet": "紫罗兰",
+      "Lavender": "薰衣草",
+      "Rose": "玫瑰",
+      "Blush": "粉晕",
+      "Coral": "珊瑚",
+      "Sunset": "日落",
+      "Amber": "琥珀",
+      "Sand": "沙色",
+      "Forest": "森林",
+      "Emerald": "翡翠"
+    },
     "language": "语言",
     "scan": "扫描选项",
     "generateStreamDiagnostics": "生成流诊断信息",
@@ -103,8 +127,7 @@
   "about": {
     "tagline": "现代化的蓝光光盘检查工具",
     "author": "作者",
-    "github": "Github",
-    "basedOn": "基于 Cinema Squid 的 BDInfo"
+    "github": "Github"
   },
   "update": {
     "newVersionAvailable": "新版本 {{version}} 已发布。",
