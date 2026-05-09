@@ -41,7 +41,13 @@ import { formatBitRate, formatLength45k, formatLengthSeconds, formatSize } from 
 export default function DiscDetail() {
   const { t } = useTranslation();
   const disc = useAppStore((s) => s.disc);
+  const config = useAppStore((s) => s.config);
   const setNotification = useAppStore((s) => s.setDialogNotification);
+  const sizePrecision = config?.formatting?.size?.precision ?? Protocol.FormatPrecision.Two;
+  const sizeUnit = config?.formatting?.size?.unit ?? Protocol.FormatUnit.KMGT;
+  const bitRatePrecision =
+    config?.formatting?.bitRate?.precision ?? Protocol.FormatPrecision.Two;
+  const bitRateUnit = config?.formatting?.bitRate?.unit ?? Protocol.FormatUnit.KMGT;
   const [selectedPlaylist, setSelectedPlaylist] = useState<string | null>(null);
   const [tabIndex, setTabIndex] = useState(0);
   const [reportText, setReportText] = useState<string | null>(null);
@@ -141,7 +147,7 @@ export default function DiscDetail() {
                 <b>{t("disc.volume")}:</b> {disc.volumeLabel || "-"}
               </Typography>
               <Typography variant="caption">
-                <b>{t("disc.size")}:</b> {formatSize(disc.size)}
+                <b>{t("disc.size")}:</b> {formatSize(disc.size, sizePrecision, sizeUnit)}
               </Typography>
               <Typography variant="caption">
                 <b>{t("disc.playlists")}:</b> {disc.playlists.length}
@@ -167,7 +173,7 @@ export default function DiscDetail() {
           flex: 1,
           minHeight: 0,
           display: "grid",
-          gridTemplateColumns: "minmax(280px, 30%) 1fr",
+          gridTemplateColumns: "minmax(360px, 36%) 1fr",
           gap: 1,
         }}
       >
@@ -178,9 +184,15 @@ export default function DiscDetail() {
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ fontWeight: "bold" }}>{t("disc.playlist")}</TableCell>
+                  <TableCell sx={{ fontWeight: "bold" }} align="right">
+                    {t("disc.group")}
+                  </TableCell>
                   <TableCell sx={{ fontWeight: "bold" }}>{t("disc.length")}</TableCell>
                   <TableCell sx={{ fontWeight: "bold" }} align="right">
-                    {t("disc.fileSizeMB")}
+                    {t("disc.estimatedSize")}
+                  </TableCell>
+                  <TableCell sx={{ fontWeight: "bold" }} align="right">
+                    {t("disc.measuredSize")}
                   </TableCell>
                 </TableRow>
               </TableHead>
@@ -194,9 +206,15 @@ export default function DiscDetail() {
                     sx={{ cursor: "pointer" }}
                   >
                     <TableCell>{p.name}</TableCell>
+                    <TableCell align="right">{p.groupIndex || ""}</TableCell>
                     <TableCell>{formatLength45k(p.totalLength)}</TableCell>
                     <TableCell align="right">
-                      {(p.fileSize / (1024 * 1024)).toFixed(2)}
+                      {formatSize(p.fileSize, sizePrecision, sizeUnit)}
+                    </TableCell>
+                    <TableCell align="right">
+                      {p.measuredSize > 0
+                        ? formatSize(p.measuredSize, sizePrecision, sizeUnit)
+                        : "—"}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -244,11 +262,41 @@ export default function DiscDetail() {
                 <Tab label={`${t("disc.chapters")} (${playlist.chapters.length})`} />
               </Tabs>
               <Box sx={{ mt: 1 }}>
-                {tabIndex === 0 && <StreamTable streams={playlist.videoStreams} />}
-                {tabIndex === 1 && <StreamTable streams={playlist.audioStreams} />}
-                {tabIndex === 2 && <StreamTable streams={playlist.graphicsStreams} />}
-                {tabIndex === 3 && <StreamTable streams={playlist.textStreams} />}
-                {tabIndex === 4 && <ClipsTable clips={playlist.streamClips} />}
+                {tabIndex === 0 && (
+                  <StreamTable
+                    streams={playlist.videoStreams}
+                    bitRatePrecision={bitRatePrecision}
+                    bitRateUnit={bitRateUnit}
+                  />
+                )}
+                {tabIndex === 1 && (
+                  <StreamTable
+                    streams={playlist.audioStreams}
+                    bitRatePrecision={bitRatePrecision}
+                    bitRateUnit={bitRateUnit}
+                  />
+                )}
+                {tabIndex === 2 && (
+                  <StreamTable
+                    streams={playlist.graphicsStreams}
+                    bitRatePrecision={bitRatePrecision}
+                    bitRateUnit={bitRateUnit}
+                  />
+                )}
+                {tabIndex === 3 && (
+                  <StreamTable
+                    streams={playlist.textStreams}
+                    bitRatePrecision={bitRatePrecision}
+                    bitRateUnit={bitRateUnit}
+                  />
+                )}
+                {tabIndex === 4 && (
+                  <ClipsTable
+                    clips={playlist.streamClips}
+                    sizePrecision={sizePrecision}
+                    sizeUnit={sizeUnit}
+                  />
+                )}
                 {tabIndex === 5 && <ChaptersTable chapters={playlist.chapters} />}
               </Box>
             </>
@@ -315,7 +363,15 @@ export default function DiscDetail() {
   );
 }
 
-function StreamTable({ streams }: { streams: Protocol.TSStreamInfo[] }) {
+function StreamTable({
+  streams,
+  bitRatePrecision,
+  bitRateUnit,
+}: {
+  streams: Protocol.TSStreamInfo[];
+  bitRatePrecision: Protocol.FormatPrecision;
+  bitRateUnit: Protocol.FormatUnit;
+}) {
   if (streams.length === 0) {
     return (
       <Typography variant="body2" color="text.secondary">
@@ -343,7 +399,7 @@ function StreamTable({ streams }: { streams: Protocol.TSStreamInfo[] }) {
               <TableCell>{s.description}</TableCell>
               <TableCell>{s.languageName || s.languageCode}</TableCell>
               <TableCell align="right">
-                {formatBitRate(s.bitRate || s.activeBitRate)}
+                {formatBitRate(s.bitRate || s.activeBitRate, bitRatePrecision, bitRateUnit)}
               </TableCell>
             </TableRow>
           ))}
@@ -383,7 +439,15 @@ function ChaptersTable({ chapters }: { chapters: number[] }) {
   );
 }
 
-function ClipsTable({ clips }: { clips: Protocol.PlaylistStreamClipInfo[] }) {
+function ClipsTable({
+  clips,
+  sizePrecision,
+  sizeUnit,
+}: {
+  clips: Protocol.PlaylistStreamClipInfo[];
+  sizePrecision: Protocol.FormatPrecision;
+  sizeUnit: Protocol.FormatUnit;
+}) {
   if (clips.length === 0) {
     return (
       <Typography variant="body2" color="text.secondary">
@@ -398,7 +462,7 @@ function ClipsTable({ clips }: { clips: Protocol.PlaylistStreamClipInfo[] }) {
           <TableRow>
             <TableCell sx={{ fontWeight: "bold" }}>Clip</TableCell>
             <TableCell sx={{ fontWeight: "bold" }}>Length</TableCell>
-            <TableCell sx={{ fontWeight: "bold" }} align="right">Size (MB)</TableCell>
+            <TableCell sx={{ fontWeight: "bold" }} align="right">Size</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -406,7 +470,9 @@ function ClipsTable({ clips }: { clips: Protocol.PlaylistStreamClipInfo[] }) {
             <TableRow key={`${c.name}-${i}`}>
               <TableCell>{c.name}</TableCell>
               <TableCell>{formatLength45k(c.length)}</TableCell>
-              <TableCell align="right">{(c.fileSize / (1024 * 1024)).toFixed(2)}</TableCell>
+              <TableCell align="right">
+                {formatSize(c.fileSize, sizePrecision, sizeUnit)}
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>

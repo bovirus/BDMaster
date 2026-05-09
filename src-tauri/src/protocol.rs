@@ -72,8 +72,12 @@ pub struct DiscInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaylistInfo {
     pub name: String,
+    #[serde(rename = "groupIndex")]
+    pub group_index: u32,
     #[serde(rename = "fileSize")]
     pub file_size: u64,
+    #[serde(rename = "measuredSize")]
+    pub measured_size: u64,
     #[serde(rename = "totalLength")]
     pub total_length: u64,
     #[serde(rename = "hasHiddenTracks")]

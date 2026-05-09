@@ -102,8 +102,76 @@ export interface Config {
   theme: Theme;
   language: Language;
   scan: ConfigScan;
+  formatting: ConfigFormatting;
   update: ConfigUpdate;
   window: ConfigWindow;
+}
+
+export enum FormatPrecision {
+  Zero = "Zero",
+  One = "One",
+  Two = "Two",
+}
+
+export enum FormatUnit {
+  K = "K",
+  KM = "KM",
+  KMG = "KMG",
+  KMGT = "KMGT",
+  KMi = "KMi",
+  KMiGi = "KMiGi",
+  KMiGiTi = "KMiGiTi",
+}
+
+export interface ConfigBitRate {
+  precision: FormatPrecision;
+  unit: FormatUnit;
+}
+
+export interface ConfigSize {
+  precision: FormatPrecision;
+  unit: FormatUnit;
+}
+
+export interface ConfigFormatting {
+  bitRate: ConfigBitRate;
+  size: ConfigSize;
+}
+
+export function getFormatPrecisions(): FormatPrecision[] {
+  return [FormatPrecision.Zero, FormatPrecision.One, FormatPrecision.Two];
+}
+
+export function getFormatUnits(): FormatUnit[] {
+  return [
+    FormatUnit.K,
+    FormatUnit.KM,
+    FormatUnit.KMG,
+    FormatUnit.KMGT,
+    FormatUnit.KMi,
+    FormatUnit.KMiGi,
+    FormatUnit.KMiGiTi,
+  ];
+}
+
+export function getFormatPrecisionLabel(p: FormatPrecision): string {
+  switch (p) {
+    case FormatPrecision.Zero: return "#";
+    case FormatPrecision.One: return "#.#";
+    case FormatPrecision.Two: return "#.##";
+  }
+}
+
+export function getFormatUnitLabel(u: FormatUnit): string {
+  switch (u) {
+    case FormatUnit.K: return "k";
+    case FormatUnit.KM: return "k/M";
+    case FormatUnit.KMG: return "k/M/G";
+    case FormatUnit.KMGT: return "k/M/G/T";
+    case FormatUnit.KMi: return "k/Mi";
+    case FormatUnit.KMiGi: return "k/Mi/Gi";
+    case FormatUnit.KMiGiTi: return "k/Mi/Gi/Ti";
+  }
 }
 
 export enum ControlStatus {
@@ -162,7 +230,9 @@ export interface DiscInfo {
 
 export interface PlaylistInfo {
   name: string;
+  groupIndex: number;
   fileSize: number;
+  measuredSize: number;
   totalLength: number;
   hasHiddenTracks: boolean;
   hasLoops: boolean;

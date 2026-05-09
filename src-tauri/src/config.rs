@@ -27,9 +27,92 @@ pub struct Config {
     #[serde(default)]
     pub scan: ConfigScan,
     #[serde(default)]
+    pub formatting: ConfigFormatting,
+    #[serde(default)]
     pub update: ConfigUpdate,
     #[serde(default)]
     pub window: ConfigWindow,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ConfigFormatting {
+    #[serde(rename = "bitRate", default)]
+    pub bit_rate: ConfigBitRate,
+    #[serde(default)]
+    pub size: ConfigSize,
+}
+
+impl Default for ConfigFormatting {
+    fn default() -> Self {
+        Self {
+            bit_rate: Default::default(),
+            size: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ConfigBitRate {
+    #[serde(default)]
+    pub precision: FormatPrecision,
+    #[serde(default)]
+    pub unit: FormatUnit,
+}
+
+impl Default for ConfigBitRate {
+    fn default() -> Self {
+        Self {
+            precision: Default::default(),
+            unit: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ConfigSize {
+    #[serde(default)]
+    pub precision: FormatPrecision,
+    #[serde(default)]
+    pub unit: FormatUnit,
+}
+
+impl Default for ConfigSize {
+    fn default() -> Self {
+        Self {
+            precision: Default::default(),
+            unit: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum FormatPrecision {
+    Zero,
+    One,
+    Two,
+}
+
+impl Default for FormatPrecision {
+    fn default() -> Self {
+        Self::Two
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum FormatUnit {
+    K,
+    KM,
+    KMG,
+    KMGT,
+    KMi,
+    KMiGi,
+    KMiGiTi,
+}
+
+impl Default for FormatUnit {
+    fn default() -> Self {
+        Self::KMGT
+    }
 }
 
 impl Default for Config {
@@ -40,6 +123,7 @@ impl Default for Config {
             theme: Default::default(),
             language: Default::default(),
             scan: Default::default(),
+            formatting: Default::default(),
             update: Default::default(),
             window: Default::default(),
         }

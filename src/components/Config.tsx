@@ -26,6 +26,7 @@ import {
   Palette as AppearanceIcon,
   Save as SaveIcon,
   Tune as ScanIcon,
+  Numbers as FormatIcon,
 } from "@mui/icons-material";
 import { useTranslation } from "react-i18next";
 import * as Protocol from "../lib/protocol";
@@ -119,6 +120,16 @@ export default function Config() {
 
   const updateScan = (patch: Partial<Protocol.ConfigScan>) => {
     setDraft({ ...draft, scan: { ...draft.scan, ...patch } });
+  };
+
+  const updateFormatting = (patch: Partial<Protocol.ConfigFormatting>) => {
+    setDraft({ ...draft, formatting: { ...draft.formatting, ...patch } });
+  };
+  const updateFormattingBitRate = (patch: Partial<Protocol.ConfigBitRate>) => {
+    updateFormatting({ bitRate: { ...draft.formatting.bitRate, ...patch } });
+  };
+  const updateFormattingSize = (patch: Partial<Protocol.ConfigSize>) => {
+    updateFormatting({ size: { ...draft.formatting.size, ...patch } });
   };
 
   const getThemeLabel = (theme: Protocol.Theme) =>
@@ -288,6 +299,98 @@ export default function Config() {
               onChange={(e) => updateScan({ enableExtendedStreamDiagnostics: e.target.checked })}
             />
           </SettingRow>
+        </Stack>
+      </Paper>
+
+      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+        <SectionHeader icon={<FormatIcon />} title={t("settings.formatting")} />
+        <Stack>
+          <Typography variant="body2" sx={{ fontWeight: 500, mb: 1 }}>
+            {t("settings.bitRate")}
+          </Typography>
+          <Box sx={{ display: "flex", gap: 2, mb: 2 }}>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                {t("settings.precision")}
+              </Typography>
+              <FormControl size="small" fullWidth sx={{ mt: 0.5 }}>
+                <Select
+                  value={draft.formatting.bitRate.precision}
+                  onChange={(e) =>
+                    updateFormattingBitRate({ precision: e.target.value as Protocol.FormatPrecision })
+                  }
+                >
+                  {Protocol.getFormatPrecisions().map((p) => (
+                    <MenuItem key={p} value={p}>
+                      {Protocol.getFormatPrecisionLabel(p)}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Box>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                {t("settings.unit")}
+              </Typography>
+              <FormControl size="small" fullWidth sx={{ mt: 0.5 }}>
+                <Select
+                  value={draft.formatting.bitRate.unit}
+                  onChange={(e) =>
+                    updateFormattingBitRate({ unit: e.target.value as Protocol.FormatUnit })
+                  }
+                >
+                  {Protocol.getFormatUnits().map((u) => (
+                    <MenuItem key={u} value={u}>
+                      {Protocol.getFormatUnitLabel(u)}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Box>
+          </Box>
+          <Typography variant="body2" sx={{ fontWeight: 500, mb: 1 }}>
+            {t("settings.size")}
+          </Typography>
+          <Box sx={{ display: "flex", gap: 2 }}>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                {t("settings.precision")}
+              </Typography>
+              <FormControl size="small" fullWidth sx={{ mt: 0.5 }}>
+                <Select
+                  value={draft.formatting.size.precision}
+                  onChange={(e) =>
+                    updateFormattingSize({ precision: e.target.value as Protocol.FormatPrecision })
+                  }
+                >
+                  {Protocol.getFormatPrecisions().map((p) => (
+                    <MenuItem key={p} value={p}>
+                      {Protocol.getFormatPrecisionLabel(p)}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Box>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                {t("settings.unit")}
+              </Typography>
+              <FormControl size="small" fullWidth sx={{ mt: 0.5 }}>
+                <Select
+                  value={draft.formatting.size.unit}
+                  onChange={(e) =>
+                    updateFormattingSize({ unit: e.target.value as Protocol.FormatUnit })
+                  }
+                >
+                  {Protocol.getFormatUnits().map((u) => (
+                    <MenuItem key={u} value={u}>
+                      {Protocol.getFormatUnitLabel(u)}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Box>
+          </Box>
         </Stack>
       </Paper>
 

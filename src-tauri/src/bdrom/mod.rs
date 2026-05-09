@@ -591,12 +591,51 @@ fn to_disc_info(bd: BDRom) -> DiscInfo {
             .any(|s| s.stream_type == TSStreamType::MVCVideo)
     });
 
-    // Sort playlists by name.
+    // Sort playlists by name and assign group indices. Two playlists belong
+    // to the same group if they share at least one stream-clip name —
+    // mirroring BDInfo's playlist grouping in FormMain.cs.
     let mut playlist_names: Vec<&String> = bd.playlists.keys().collect();
     playlist_names.sort();
+    let mut groups: Vec<Vec<&String>> = Vec::new();
+    let mut group_index_by_name: std::collections::HashMap<String, u32> =
+        std::collections::HashMap::new();
+    for name in &playlist_names {
+        let pl = match bd.playlists.get(*name) {
+            Some(p) => p,
+            None => continue,
+        };
+        let mut matched: Option<usize> = None;
+        'outer: for (gi, group) in groups.iter().enumerate() {
+            for other_name in group {
+                if let Some(other) = bd.playlists.get(*other_name) {
+                    for c1 in &pl.stream_clips {
+                        for c2 in &other.stream_clips {
+                            if c1.name == c2.name {
+                                matched = Some(gi);
+                                break 'outer;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        match matched {
+            Some(gi) => groups[gi].push(*name),
+            None => groups.push(vec![*name]),
+        }
+    }
+    for (gi, group) in groups.iter().enumerate() {
+        for name in group {
+            group_index_by_name.insert((*name).clone(), (gi + 1) as u32);
+        }
+    }
+
     let playlists: Vec<PlaylistInfo> = playlist_names
         .iter()
-        .map(|name| build_playlist_info(bd.playlists.get(*name).unwrap(), &bd))
+        .map(|name| {
+            let group = group_index_by_name.get(*name).copied().unwrap_or(0);
+            build_playlist_info(bd.playlists.get(*name).unwrap(), &bd, group)
+        })
         .collect();
 
     // Stream files (sorted)
@@ -654,7 +693,7 @@ fn to_disc_info(bd: BDRom) -> DiscInfo {
     }
 }
 
-fn build_playlist_info(pl: &PlaylistFile, bd: &BDRom) -> PlaylistInfo {
+fn build_playlist_info(pl: &PlaylistFile, bd: &BDRom, group_index: u32) -> PlaylistInfo {
     // Compute clip lengths and total length using only angle 0 clips.
     let mut total_length_45k: i64 = 0;
     let mut total_file_size: u64 = 0;
@@ -706,7 +745,9 @@ fn build_playlist_info(pl: &PlaylistFile, bd: &BDRom) -> PlaylistInfo {
 
     PlaylistInfo {
         name: pl.name.clone(),
+        group_index,
         file_size: total_file_size,
+        measured_size: 0,
         total_length: total_length_45k.max(0) as u64,
         has_hidden_tracks: false,
         has_loops: false,
@@ -877,6 +918,7 @@ pub fn enrich_inner(disc: &mut DiscInfo, bd: &BDRom, full_scan: bool) {
     for pl in disc.playlists.iter_mut() {
         let mut total_seconds: f64 = 0.0;
         let mut per_pid_bytes: HM<u16, u64> = HM::new();
+        let mut total_measured_bytes: u64 = 0;
 
         for clip in &pl.stream_clips {
             if clip.angle_index != 0 {
@@ -944,6 +986,7 @@ pub fn enrich_inner(disc: &mut DiscInfo, bd: &BDRom, full_scan: bool) {
             match res {
                 Ok(r) => {
                     total_seconds += r.duration_seconds;
+                    total_measured_bytes += r.bytes;
                     for (pid, stat) in &r.streams {
                         *per_pid_bytes.entry(*pid).or_insert(0) += stat.total_bytes;
                     }
@@ -959,6 +1002,7 @@ pub fn enrich_inner(disc: &mut DiscInfo, bd: &BDRom, full_scan: bool) {
                 }
             }
         }
+        pl.measured_size = total_measured_bytes;
 
         // Compute active bit-rate for each playlist stream and finalize
         // descriptions.
