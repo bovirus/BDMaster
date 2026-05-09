@@ -8,8 +8,7 @@
   "tabs": {
     "about": "About",
     "settings": "Settings",
-    "cards": "Discs",
-    "discs": "All Discs",
+    "discInfo": "Disc Info",
     "close": "Close (Ctrl + W)"
   },
   "cards": {

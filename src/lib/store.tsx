@@ -17,10 +17,9 @@ interface AppState {
   about: Protocol.About | null;
   dialogNotification: DialogNotification | null;
 
-  // Discs
-  discs: Protocol.DiscInfo[];
-  selectedDiscPath: string | null;
-  scanningPaths: Set<string>;
+  // Single Blu-ray disc currently being inspected.
+  disc: Protocol.DiscInfo | null;
+  scanningPath: string | null;
 
   // Tab status
   tabAboutStatus: Protocol.ControlStatus;
@@ -33,20 +32,17 @@ interface AppState {
   setDialogNotification: (n: DialogNotification | null) => void;
   setTabAboutStatus: (s: Protocol.ControlStatus) => void;
   setTabSettingsStatus: (s: Protocol.ControlStatus) => void;
-  addDisc: (disc: Protocol.DiscInfo) => void;
-  removeDisc: (path: string) => void;
-  clearDiscs: () => void;
-  setSelectedDiscPath: (path: string | null) => void;
-  setScanning: (path: string, scanning: boolean) => void;
+  setDisc: (disc: Protocol.DiscInfo | null) => void;
+  clearDisc: () => void;
+  setScanningPath: (path: string | null) => void;
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
+export const useAppStore = create<AppState>((set) => ({
   config: null,
   about: null,
   dialogNotification: null,
-  discs: [],
-  selectedDiscPath: null,
-  scanningPaths: new Set(),
+  disc: null,
+  scanningPath: null,
   tabAboutStatus: Protocol.ControlStatus.Hidden,
   tabSettingsStatus: Protocol.ControlStatus.Hidden,
 
@@ -72,27 +68,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setDialogNotification: (dialogNotification) => set({ dialogNotification }),
   setTabAboutStatus: (tabAboutStatus) => set({ tabAboutStatus }),
   setTabSettingsStatus: (tabSettingsStatus) => set({ tabSettingsStatus }),
-
-  addDisc: (disc) => {
-    const { discs } = get();
-    const filtered = discs.filter((d) => d.path !== disc.path);
-    set({ discs: [...filtered, disc] });
-  },
-
-  removeDisc: (path) => {
-    const { discs } = get();
-    set({ discs: discs.filter((d) => d.path !== path) });
-  },
-
-  clearDiscs: () => set({ discs: [], selectedDiscPath: null }),
-
-  setSelectedDiscPath: (selectedDiscPath) => set({ selectedDiscPath }),
-
-  setScanning: (path, scanning) => {
-    const { scanningPaths } = get();
-    const next = new Set(scanningPaths);
-    if (scanning) next.add(path);
-    else next.delete(path);
-    set({ scanningPaths: next });
-  },
+  setDisc: (disc) => set({ disc }),
+  clearDisc: () => set({ disc: null }),
+  setScanningPath: (scanningPath) => set({ scanningPath }),
 }));

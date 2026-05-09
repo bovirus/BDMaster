@@ -125,8 +125,7 @@ export enum DialogNotificationType {
 export enum TabType {
   About,
   Config,
-  Cards,
-  Disc,
+  DiscInfo,
 }
 
 export interface UpdateCheckResult {

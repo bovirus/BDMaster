@@ -8,8 +8,7 @@
   "tabs": {
     "about": "情報",
     "settings": "設定",
-    "cards": "ディスク",
-    "discs": "すべてのディスク",
+    "discInfo": "ディスク情報",
     "close": "閉じる (Ctrl + W)"
   },
   "cards": {

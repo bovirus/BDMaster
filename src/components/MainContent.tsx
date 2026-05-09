@@ -18,73 +18,56 @@ import type { Event, UnlistenFn } from "@tauri-apps/api/event";
 import * as Protocol from "../lib/protocol";
 import { useAppStore } from "../lib/store";
 import { scanDiscPaths } from "../lib/fs";
-import { shrinkFileName } from "../lib/format";
-import Cards from "./Cards";
-import DiscDetail from "./DiscDetail";
+import DiscInfoTab from "./DiscInfoTab";
 import Config from "./Config";
 import About from "./About";
 
 interface TabControl {
   type: Protocol.TabType;
   index: number;
-  value: string | null;
 }
 
 export default function MainContent() {
   const { t } = useTranslation();
   const [tabIndex, setTabIndex] = useState(0);
   const [tabControls, setTabControls] = useState<TabControl[]>([
-    { type: Protocol.TabType.Cards, index: 0, value: null },
+    { type: Protocol.TabType.DiscInfo, index: 0 },
   ]);
 
-  const discs = useAppStore((state) => state.discs);
-  const selectedDiscPath = useAppStore((state) => state.selectedDiscPath);
   const tabAboutStatus = useAppStore((state) => state.tabAboutStatus);
   const tabSettingsStatus = useAppStore((state) => state.tabSettingsStatus);
   const setTabAboutStatus = useAppStore((state) => state.setTabAboutStatus);
   const setTabSettingsStatus = useAppStore((state) => state.setTabSettingsStatus);
-  const setSelectedDiscPath = useAppStore((state) => state.setSelectedDiscPath);
-  const removeDisc = useAppStore((state) => state.removeDisc);
 
-  // Update tab controls when status / discs change
+  // Update tab controls when status changes.
   useEffect(() => {
     setTabControls((prev) => {
-      let controls: TabControl[] = [{ type: Protocol.TabType.Cards, index: 0, value: null }];
-
-      // About
+      const controls: TabControl[] = [{ type: Protocol.TabType.DiscInfo, index: 0 }];
       if (tabAboutStatus !== Protocol.ControlStatus.Hidden) {
-        controls.push({ type: Protocol.TabType.About, index: 0, value: null });
+        controls.push({ type: Protocol.TabType.About, index: 0 });
       }
-      // Config
       if (tabSettingsStatus !== Protocol.ControlStatus.Hidden) {
-        controls.push({ type: Protocol.TabType.Config, index: 0, value: null });
+        controls.push({ type: Protocol.TabType.Config, index: 0 });
       }
-      // Discs
-      discs.forEach((disc) => {
-        controls.push({ type: Protocol.TabType.Disc, index: 0, value: disc.path });
-      });
       controls.forEach((c, i) => (c.index = i));
 
-      // Preserve current tab if possible — match same type+value
-      const currentControl = prev[tabIndex];
-      if (currentControl) {
-        const newIdx = controls.findIndex(
-          (c) => c.type === currentControl.type && c.value === currentControl.value
-        );
+      const current = prev[tabIndex];
+      if (current) {
+        const newIdx = controls.findIndex((c) => c.type === current.type);
         if (newIdx >= 0 && newIdx !== tabIndex) {
           setTabIndex(newIdx);
         }
       }
       return controls;
     });
-  }, [tabAboutStatus, tabSettingsStatus, discs]);
+  }, [tabAboutStatus, tabSettingsStatus]);
 
-  // Handle Selected status: jump to that tab
+  // Handle Selected status: jump to that tab.
   useEffect(() => {
     if (tabAboutStatus === Protocol.ControlStatus.Selected) {
-      const aboutTab = tabControls.find((c) => c.type === Protocol.TabType.About);
-      if (aboutTab) {
-        setTabIndex(aboutTab.index);
+      const t = tabControls.find((c) => c.type === Protocol.TabType.About);
+      if (t) {
+        setTabIndex(t.index);
         setTabAboutStatus(Protocol.ControlStatus.Visible);
       }
     }
@@ -100,18 +83,7 @@ export default function MainContent() {
     }
   }, [tabSettingsStatus, tabControls, setTabSettingsStatus]);
 
-  useEffect(() => {
-    if (selectedDiscPath === null) return;
-    const t = tabControls.find(
-      (c) => c.type === Protocol.TabType.Disc && c.value === selectedDiscPath
-    );
-    if (t) {
-      setTabIndex(t.index);
-      setSelectedDiscPath(null);
-    }
-  }, [selectedDiscPath, tabControls, setSelectedDiscPath]);
-
-  // Keep tabIndex within bounds
+  // Keep tabIndex within bounds.
   useEffect(() => {
     if (tabIndex >= tabControls.length && tabControls.length > 0) {
       setTabIndex(tabControls.length - 1);
@@ -129,15 +101,12 @@ export default function MainContent() {
         case Protocol.TabType.Config:
           setTabSettingsStatus(Protocol.ControlStatus.Hidden);
           break;
-        case Protocol.TabType.Disc:
-          if (tabControl.value) removeDisc(tabControl.value);
-          break;
       }
     },
-    [tabControls, setTabAboutStatus, setTabSettingsStatus, removeDisc]
+    [tabControls, setTabAboutStatus, setTabSettingsStatus]
   );
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts.
   useEffect(() => {
     const handleKeyUp = (event: KeyboardEvent) => {
       if (event.ctrlKey && !event.altKey && !event.shiftKey) {
@@ -170,7 +139,7 @@ export default function MainContent() {
     return () => document.removeEventListener("keyup", handleKeyUp);
   }, [tabIndex, tabControls.length, closeTab]);
 
-  // Drag-and-drop
+  // Drag-and-drop.
   useEffect(() => {
     let cancelFileDrop: UnlistenFn | null = null;
     getCurrentWindow()
@@ -191,21 +160,7 @@ export default function MainContent() {
     switch (control.type) {
       case Protocol.TabType.About: return t("tabs.about");
       case Protocol.TabType.Config: return t("tabs.settings");
-      case Protocol.TabType.Cards: return t("tabs.cards");
-      case Protocol.TabType.Disc: {
-        const disc = discs.find((d) => d.path === control.value);
-        const label = disc?.discTitle || disc?.volumeLabel || disc?.discName || control.value || "";
-        return shrinkFileName(label, 30);
-      }
-    }
-  };
-
-  const getTabTooltip = (control: TabControl) => {
-    switch (control.type) {
-      case Protocol.TabType.About: return t("tabs.about");
-      case Protocol.TabType.Config: return t("tabs.settings");
-      case Protocol.TabType.Cards: return t("tabs.discs");
-      case Protocol.TabType.Disc: return control.value ?? "";
+      case Protocol.TabType.DiscInfo: return t("tabs.discInfo");
     }
   };
 
@@ -221,14 +176,12 @@ export default function MainContent() {
         >
           {tabControls.map((control) => (
             <Tab
-              key={`${control.type}-${control.value}`}
+              key={control.type}
               style={{ minHeight: "24px" }}
               label={
                 <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                  <Tooltip title={getTabTooltip(control)}>
-                    <span>{getTabLabel(control)}</span>
-                  </Tooltip>
-                  {control.type !== Protocol.TabType.Cards && (
+                  <span>{getTabLabel(control)}</span>
+                  {control.type !== Protocol.TabType.DiscInfo && (
                     <Tooltip title={t("tabs.close")}>
                       <IconButton
                         size="small"
@@ -268,7 +221,7 @@ export default function MainContent() {
           const isVisible = control.index === tabIndex;
           return (
             <Box
-              key={`content-${control.type}-${control.value}`}
+              key={`content-${control.type}`}
               sx={{
                 display: isVisible ? "flex" : "none",
                 flexDirection: "column",
@@ -279,10 +232,7 @@ export default function MainContent() {
             >
               {control.type === Protocol.TabType.About && <About />}
               {control.type === Protocol.TabType.Config && <Config />}
-              {control.type === Protocol.TabType.Cards && <Cards />}
-              {control.type === Protocol.TabType.Disc && control.value && (
-                <DiscDetail path={control.value} />
-              )}
+              {control.type === Protocol.TabType.DiscInfo && <DiscInfoTab />}
             </Box>
           );
         })}

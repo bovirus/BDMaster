@@ -8,8 +8,7 @@
   "tabs": {
     "about": "À propos",
     "settings": "Paramètres",
-    "cards": "Disques",
-    "discs": "Tous les disques",
+    "discInfo": "Infos du disque",
     "close": "Fermer (Ctrl + W)"
   },
   "cards": {

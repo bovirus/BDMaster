@@ -38,13 +38,9 @@ import { generateReport, getPlaylistChartData, writeTextFile } from "../lib/serv
 import { openSaveReportDialog } from "../lib/dialog";
 import { formatBitRate, formatLength45k, formatLengthSeconds, formatSize } from "../lib/format";
 
-interface Props {
-  path: string;
-}
-
-export default function DiscDetail({ path }: Props) {
+export default function DiscDetail() {
   const { t } = useTranslation();
-  const disc = useAppStore((s) => s.discs.find((d) => d.path === path));
+  const disc = useAppStore((s) => s.disc);
   const setNotification = useAppStore((s) => s.setDialogNotification);
   const [selectedPlaylist, setSelectedPlaylist] = useState<string | null>(null);
   const [tabIndex, setTabIndex] = useState(0);
@@ -72,7 +68,7 @@ export default function DiscDetail({ path }: Props) {
   const handleGenerateReport = async (full: boolean) => {
     try {
       const text = await generateReport(
-        path,
+        disc.path,
         full,
         selectedPlaylist ? [selectedPlaylist] : null
       );
@@ -117,7 +113,7 @@ export default function DiscDetail({ path }: Props) {
   const handleViewChart = async () => {
     if (!selectedPlaylist) return;
     try {
-      const data = await getPlaylistChartData(path, selectedPlaylist);
+      const data = await getPlaylistChartData(disc.path, selectedPlaylist);
       setChartData(data);
       setChartOpen(true);
     } catch (error) {

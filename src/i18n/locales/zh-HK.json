@@ -8,8 +8,7 @@
   "tabs": {
     "about": "關於",
     "settings": "設定",
-    "cards": "光碟",
-    "discs": "全部光碟",
+    "discInfo": "光碟資訊",
     "close": "關閉 (Ctrl + W)"
   },
   "cards": {

@@ -8,8 +8,7 @@
   "tabs": {
     "about": "关于",
     "settings": "设置",
-    "cards": "光盘",
-    "discs": "全部光盘",
+    "discInfo": "光盘信息",
     "close": "关闭 (Ctrl + W)"
   },
   "cards": {

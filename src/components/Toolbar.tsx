@@ -16,16 +16,16 @@ import { openDiscDirectoryDialog } from "../lib/dialog";
 
 export default function Toolbar() {
   const { t } = useTranslation();
-  const discs = useAppStore((state) => state.discs);
+  const disc = useAppStore((state) => state.disc);
   const tabAboutStatus = useAppStore((state) => state.tabAboutStatus);
   const tabSettingsStatus = useAppStore((state) => state.tabSettingsStatus);
   const setTabAboutStatus = useAppStore((state) => state.setTabAboutStatus);
   const setTabSettingsStatus = useAppStore((state) => state.setTabSettingsStatus);
-  const clearDiscs = useAppStore((state) => state.clearDiscs);
+  const clearDisc = useAppStore((state) => state.clearDisc);
 
   const handleClear = useCallback(() => {
-    clearDiscs();
-  }, [clearDiscs]);
+    clearDisc();
+  }, [clearDisc]);
 
   const handleSelectTabSettings = useCallback(() => {
     setTabSettingsStatus(Protocol.ControlStatus.Selected);
@@ -69,7 +69,7 @@ export default function Toolbar() {
       <ButtonGroup variant="outlined" size="small">
         <Tooltip title={t("toolbar.clear")}>
           <span>
-            <IconButton sx={buttonSx} onClick={handleClear} disabled={discs.length === 0}>
+            <IconButton sx={buttonSx} onClick={handleClear} disabled={disc === null}>
               <DeleteIcon fontSize="small" />
             </IconButton>
           </span>
