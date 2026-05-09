@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "bdmaster",
+  "productName": "BDMaster",
   "version": "0.1.0",
   "identifier": "com.caoccao.bdmaster",
   "build": {
@@ -12,9 +12,14 @@
   "app": {
     "windows": [
       {
-        "title": "bdmaster",
-        "width": 800,
-        "height": 600
+        "title": "BDMaster",
+        "theme": "Light",
+        "width": 1200,
+        "height": 900,
+        "minWidth": 600,
+        "minHeight": 450,
+        "visible": false,
+        "dragDropEnabled": true
       }
     ],
     "security": {

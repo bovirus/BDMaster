@@ -4,7 +4,17 @@
   "description": "Capability for the main window",
   "windows": ["main"],
   "permissions": [
+    "clipboard-manager:allow-clear",
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
     "core:default",
-    "opener:default"
+    "core:window:allow-create",
+    "core:window:allow-close",
+    "core:window:allow-set-focus",
+    "core:window:allow-unminimize",
+    "core:webview:allow-create-webview-window",
+    "dialog:default",
+    "opener:default",
+    "shell:allow-open"
   ]
 }
