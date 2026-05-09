@@ -22,6 +22,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TableSortLabel,
   Tabs,
   Typography,
 } from "@mui/material";
@@ -38,11 +39,69 @@ import { generateReport, getPlaylistChartData, writeTextFile } from "../lib/serv
 import { openSaveReportDialog } from "../lib/dialog";
 import { formatBitRate, formatLength45k, formatLengthSeconds, formatSize } from "../lib/format";
 
+type PlaylistSortKey = "name" | "groupIndex" | "totalLength" | "fileSize" | "measuredSize";
+type SortDir = "asc" | "desc";
+
+/**
+ * Stable sort helper: pairs each item with its original index so equal keys
+ * preserve their input order across asc/desc flips.
+ */
+function stableSort<T>(items: T[], comparator: (a: T, b: T) => number): T[] {
+  const arr = items.map((item, idx) => [item, idx] as const);
+  arr.sort((a, b) => {
+    const r = comparator(a[0], b[0]);
+    if (r !== 0) return r;
+    return a[1] - b[1];
+  });
+  return arr.map((x) => x[0]);
+}
+
+function comparePlaylists(
+  key: PlaylistSortKey,
+  dir: SortDir
+): (a: Protocol.PlaylistInfo, b: Protocol.PlaylistInfo) => number {
+  return (a, b) => {
+    let av: number | string;
+    let bv: number | string;
+    switch (key) {
+      case "name":
+        av = a.name;
+        bv = b.name;
+        break;
+      case "groupIndex":
+        av = a.groupIndex;
+        bv = b.groupIndex;
+        break;
+      case "totalLength":
+        av = a.totalLength;
+        bv = b.totalLength;
+        break;
+      case "fileSize":
+        av = a.fileSize;
+        bv = b.fileSize;
+        break;
+      case "measuredSize":
+        av = a.measuredSize;
+        bv = b.measuredSize;
+        break;
+    }
+    let cmp: number;
+    if (typeof av === "number" && typeof bv === "number") {
+      cmp = av - bv;
+    } else {
+      cmp = String(av).localeCompare(String(bv));
+    }
+    return dir === "asc" ? cmp : -cmp;
+  };
+}
+
 export default function DiscDetail() {
   const { t } = useTranslation();
   const disc = useAppStore((s) => s.disc);
   const config = useAppStore((s) => s.config);
   const setNotification = useAppStore((s) => s.setDialogNotification);
+  const [sortKey, setSortKey] = useState<PlaylistSortKey>("totalLength");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const sizePrecision = config?.formatting?.size?.precision ?? Protocol.FormatPrecision.Two;
   const sizeUnit = config?.formatting?.size?.unit ?? Protocol.FormatUnit.KMGT;
   const bitRatePrecision =
@@ -66,6 +125,20 @@ export default function DiscDetail() {
     if (!disc || !selectedPlaylist) return null;
     return disc.playlists.find((p) => p.name === selectedPlaylist) ?? null;
   }, [disc, selectedPlaylist]);
+
+  const sortedPlaylists = useMemo(() => {
+    if (!disc) return [];
+    return stableSort(disc.playlists, comparePlaylists(sortKey, sortDir));
+  }, [disc, sortKey, sortDir]);
+
+  const handleSort = (key: PlaylistSortKey) => {
+    if (sortKey === key) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortKey(key);
+      setSortDir(key === "name" ? "asc" : "desc");
+    }
+  };
 
   if (!disc) {
     return <Box sx={{ p: 2 }}>Loading…</Box>;
@@ -183,21 +256,70 @@ export default function DiscDetail() {
             <Table size="small" stickyHeader>
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ fontWeight: "bold" }}>{t("disc.playlist")}</TableCell>
-                  <TableCell sx={{ fontWeight: "bold" }} align="right">
-                    {t("disc.group")}
+                  <TableCell sx={{ fontWeight: "bold" }} sortDirection={sortKey === "name" ? sortDir : false}>
+                    <TableSortLabel
+                      active={sortKey === "name"}
+                      direction={sortKey === "name" ? sortDir : "asc"}
+                      onClick={() => handleSort("name")}
+                    >
+                      {t("disc.playlist")}
+                    </TableSortLabel>
                   </TableCell>
-                  <TableCell sx={{ fontWeight: "bold" }}>{t("disc.length")}</TableCell>
-                  <TableCell sx={{ fontWeight: "bold" }} align="right">
-                    {t("disc.estimatedSize")}
+                  <TableCell
+                    sx={{ fontWeight: "bold" }}
+                    align="right"
+                    sortDirection={sortKey === "groupIndex" ? sortDir : false}
+                  >
+                    <TableSortLabel
+                      active={sortKey === "groupIndex"}
+                      direction={sortKey === "groupIndex" ? sortDir : "asc"}
+                      onClick={() => handleSort("groupIndex")}
+                    >
+                      {t("disc.group")}
+                    </TableSortLabel>
                   </TableCell>
-                  <TableCell sx={{ fontWeight: "bold" }} align="right">
-                    {t("disc.measuredSize")}
+                  <TableCell
+                    sx={{ fontWeight: "bold" }}
+                    sortDirection={sortKey === "totalLength" ? sortDir : false}
+                  >
+                    <TableSortLabel
+                      active={sortKey === "totalLength"}
+                      direction={sortKey === "totalLength" ? sortDir : "asc"}
+                      onClick={() => handleSort("totalLength")}
+                    >
+                      {t("disc.length")}
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell
+                    sx={{ fontWeight: "bold" }}
+                    align="right"
+                    sortDirection={sortKey === "fileSize" ? sortDir : false}
+                  >
+                    <TableSortLabel
+                      active={sortKey === "fileSize"}
+                      direction={sortKey === "fileSize" ? sortDir : "asc"}
+                      onClick={() => handleSort("fileSize")}
+                    >
+                      {t("disc.estimatedSize")}
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell
+                    sx={{ fontWeight: "bold" }}
+                    align="right"
+                    sortDirection={sortKey === "measuredSize" ? sortDir : false}
+                  >
+                    <TableSortLabel
+                      active={sortKey === "measuredSize"}
+                      direction={sortKey === "measuredSize" ? sortDir : "asc"}
+                      onClick={() => handleSort("measuredSize")}
+                    >
+                      {t("disc.measuredSize")}
+                    </TableSortLabel>
                   </TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {disc.playlists.map((p) => (
+                {sortedPlaylists.map((p) => (
                   <TableRow
                     key={p.name}
                     hover

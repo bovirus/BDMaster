@@ -123,6 +123,80 @@ pub fn run() {
             let _ = window.set_focus();
             WINDOW_READY.store(true, Ordering::SeqCst);
 
+            // Background update check, throttled by ConfigUpdate.check_interval.
+            let update_state = app.state::<UpdateCheckState>();
+            let result_arc = update_state.result.clone();
+            let interval_seconds: i64 = match cfg.update.check_interval {
+                config::UpdateCheckInterval::Daily => 86_400,
+                config::UpdateCheckInterval::Weekly => 604_800,
+                config::UpdateCheckInterval::Monthly => 2_592_000,
+            };
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            if cfg.update.last_checked == 0 || now - cfg.update.last_checked > interval_seconds {
+                std::thread::spawn(move || {
+                    let check_result = std::panic::catch_unwind(|| controller::check_for_updates())
+                        .unwrap_or_else(|_| {
+                            log::error!("Update check panicked");
+                            Err(anyhow::anyhow!("Update check panicked"))
+                        });
+                    match check_result {
+                        Ok(result) => {
+                            log::info!(
+                                "Update check result: has_update={}, latest_version={:?}",
+                                result.has_update,
+                                result.latest_version
+                            );
+                            let mut updated_config = config::get_config();
+                            updated_config.update.last_checked = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs() as i64)
+                                .unwrap_or(0);
+                            if let Some(ref version) = result.latest_version {
+                                updated_config.update.last_version = version.clone();
+                            }
+                            let _ = config::set_config(updated_config.clone());
+                            // Suppress if this version is the user-ignored one.
+                            let final_result = if result.has_update
+                                && result.latest_version.as_deref()
+                                    == Some(updated_config.update.ignore_version.as_str())
+                                && !updated_config.update.ignore_version.is_empty()
+                            {
+                                UpdateCheckResult {
+                                    has_update: false,
+                                    latest_version: None,
+                                }
+                            } else {
+                                result
+                            };
+                            *result_arc.lock().unwrap() = Some(final_result);
+                        }
+                        Err(e) => {
+                            log::warn!("Update check failed: {}", e);
+                            *result_arc.lock().unwrap() = Some(UpdateCheckResult {
+                                has_update: false,
+                                latest_version: None,
+                            });
+                        }
+                    }
+                });
+            } else if !cfg.update.last_version.is_empty()
+                && controller::is_newer_version(&cfg.update.last_version, controller::get_app_version())
+                && cfg.update.last_version != cfg.update.ignore_version
+            {
+                *result_arc.lock().unwrap() = Some(UpdateCheckResult {
+                    has_update: true,
+                    latest_version: Some(cfg.update.last_version.clone()),
+                });
+            } else {
+                *result_arc.lock().unwrap() = Some(UpdateCheckResult {
+                    has_update: false,
+                    latest_version: None,
+                });
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {

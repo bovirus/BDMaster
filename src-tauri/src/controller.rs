@@ -10,6 +10,7 @@ use std::path::Path;
 
 use crate::bdrom;
 use crate::config;
+use crate::constants::APP_NAME;
 use crate::protocol::*;
 
 pub fn get_app_version() -> &'static str {
@@ -64,6 +65,33 @@ pub async fn write_text_file(file: String, text: String) -> Result<()> {
     let mut f = File::create(path)?;
     f.write_all(text.as_bytes())?;
     Ok(())
+}
+
+pub fn check_for_updates() -> Result<UpdateCheckResult> {
+    let app_version = get_app_version();
+    log::info!("Checking for updates. Current version: {}", app_version);
+    let resp = ureq::get("https://api.github.com/repos/caoccao/BDMaster/releases")
+        .set("User-Agent", APP_NAME)
+        .call()
+        .map_err(|e| anyhow::anyhow!("Failed to fetch releases: {}", e))?;
+    let json: serde_json::Value = resp
+        .into_json()
+        .map_err(|e| anyhow::anyhow!("Failed to parse releases: {}", e))?;
+    if let Some(first) = json.as_array().and_then(|arr| arr.first()) {
+        let tag = first["tag_name"].as_str().unwrap_or("");
+        log::info!("Latest release tag: {}", tag);
+        if is_newer_version(tag, app_version) {
+            let version = tag.trim_start_matches('v').to_owned();
+            return Ok(UpdateCheckResult {
+                has_update: true,
+                latest_version: Some(version),
+            });
+        }
+    }
+    Ok(UpdateCheckResult {
+        has_update: false,
+        latest_version: None,
+    })
 }
 
 pub fn is_newer_version(latest: &str, current: &str) -> bool {

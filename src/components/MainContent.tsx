@@ -3,24 +3,32 @@
  *   All rights reserved.
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
+  Alert,
   Box,
-  Tabs,
-  Tab,
+  Checkbox,
+  FormControlLabel,
   IconButton,
+  Link,
+  Tab,
+  Tabs,
   Tooltip,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow, type DragDropEvent } from "@tauri-apps/api/window";
 import type { Event, UnlistenFn } from "@tauri-apps/api/event";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import * as Protocol from "../lib/protocol";
 import { useAppStore } from "../lib/store";
 import { scanDiscPaths } from "../lib/fs";
+import { getUpdateResult, skipVersion } from "../lib/service";
 import DiscInfoTab from "./DiscInfoTab";
 import Config from "./Config";
 import About from "./About";
+
+const RELEASES_URL = "https://github.com/caoccao/BDMaster/releases";
 
 interface TabControl {
   type: Protocol.TabType;
@@ -38,6 +46,36 @@ export default function MainContent() {
   const tabSettingsStatus = useAppStore((state) => state.tabSettingsStatus);
   const setTabAboutStatus = useAppStore((state) => state.setTabAboutStatus);
   const setTabSettingsStatus = useAppStore((state) => state.setTabSettingsStatus);
+
+  const [newVersion, setNewVersion] = useState<string | null>(null);
+  const [skipChecked, setSkipChecked] = useState(false);
+  const updatePollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+
+  // Poll the backend's update-check result until we get a definitive answer.
+  useEffect(() => {
+    updatePollRef.current = setInterval(async () => {
+      try {
+        const result = await getUpdateResult();
+        if (result) {
+          if (updatePollRef.current) {
+            clearInterval(updatePollRef.current);
+            updatePollRef.current = undefined;
+          }
+          if (result.hasUpdate && result.latestVersion) {
+            setNewVersion(result.latestVersion);
+          }
+        }
+      } catch {
+        // Ignore errors; we'll retry on the next interval until success.
+      }
+    }, 1000);
+    return () => {
+      if (updatePollRef.current) {
+        clearInterval(updatePollRef.current);
+        updatePollRef.current = undefined;
+      }
+    };
+  }, []);
 
   // Update tab controls when status changes.
   useEffect(() => {
@@ -166,6 +204,44 @@ export default function MainContent() {
 
   return (
     <Box sx={{ width: "100%", height: "100%", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      {newVersion && (
+        <Alert
+          severity="info"
+          onClose={async () => {
+            if (skipChecked) {
+              await skipVersion(newVersion);
+            }
+            setNewVersion(null);
+            setSkipChecked(false);
+          }}
+          sx={{ flexShrink: 0, "& .MuiAlert-message": { flex: 1 } }}
+        >
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Link
+              component="button"
+              variant="body2"
+              onClick={() => shellOpen(RELEASES_URL)}
+              sx={{ cursor: "pointer" }}
+            >
+              {t("update.newVersionAvailable", { version: newVersion })}
+            </Link>
+            <Box sx={{ flex: 1 }} />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  size="small"
+                  sx={{ p: 0.5 }}
+                  checked={skipChecked}
+                  onChange={(e) => setSkipChecked(e.target.checked)}
+                />
+              }
+              label={t("update.skipThisVersion")}
+              slotProps={{ typography: { variant: "body2" } }}
+              sx={{ mr: 0 }}
+            />
+          </Box>
+        </Alert>
+      )}
       <Box sx={{ borderBottom: 1, borderColor: "divider", flexShrink: 0 }}>
         <Tabs
           value={tabIndex}
