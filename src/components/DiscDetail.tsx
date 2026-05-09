@@ -3,7 +3,7 @@
  *   All rights reserved.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Box,
   Button,
@@ -35,7 +35,7 @@ import { useTranslation } from "react-i18next";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import * as Protocol from "../lib/protocol";
 import { useAppStore } from "../lib/store";
-import { generateReport, getPlaylistChartData, writeTextFile } from "../lib/service";
+import { generateReport, getPlaylistChartData, setConfig as saveConfig, writeTextFile } from "../lib/service";
 import { openSaveReportDialog } from "../lib/dialog";
 import { formatBitRate, formatLength45k, formatLengthSeconds, formatSize } from "../lib/format";
 
@@ -95,13 +95,108 @@ function comparePlaylists(
   };
 }
 
+/**
+ * Header cell whose entire surface is clickable for sorting (rather than just
+ * the label text inside MUI's TableSortLabel).
+ */
+function SortableHeaderCell({
+  active,
+  direction,
+  onSort,
+  align,
+  children,
+}: {
+  active: boolean;
+  direction: SortDir;
+  onSort: () => void;
+  align?: "right" | "left" | "center";
+  children: React.ReactNode;
+}) {
+  return (
+    <TableCell
+      align={align}
+      sortDirection={active ? direction : false}
+      onClick={onSort}
+      sx={{
+        fontWeight: "bold",
+        cursor: "pointer",
+        userSelect: "none",
+        "&:hover": { backgroundColor: "action.hover" },
+      }}
+    >
+      <TableSortLabel
+        active={active}
+        direction={active ? direction : "asc"}
+        // The TableCell itself handles the click; keep the label
+        // non-interactive so the cell registers a single click event.
+        hideSortIcon={false}
+        sx={{ pointerEvents: "none" }}
+      >
+        {children}
+      </TableSortLabel>
+    </TableCell>
+  );
+}
+
 export default function DiscDetail() {
   const { t } = useTranslation();
   const disc = useAppStore((s) => s.disc);
   const config = useAppStore((s) => s.config);
+  const setConfigState = useAppStore((s) => s.setConfig);
   const setNotification = useAppStore((s) => s.setDialogNotification);
-  const [sortKey, setSortKey] = useState<PlaylistSortKey>("totalLength");
+  const [sortKey, setSortKey] = useState<PlaylistSortKey>("fileSize");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  // Resizable splitter between the playlist table and the info panel.
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [splitFraction, setSplitFraction] = useState<number>(
+    config?.discInfoSplit ?? 0.4
+  );
+  useEffect(() => {
+    if (config) setSplitFraction(config.discInfoSplit ?? 0.4);
+  }, [config?.discInfoSplit]);
+
+  const draggingRef = useRef(false);
+  const persistSplit = useCallback(
+    (fraction: number) => {
+      if (!config) return;
+      const next = { ...config, discInfoSplit: fraction };
+      saveConfig(next)
+        .then((saved) => setConfigState(saved))
+        .catch(() => {
+          // Non-fatal — drag still works in-memory until the next reload.
+        });
+    },
+    [config, setConfigState]
+  );
+
+  const handleSplitterMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      draggingRef.current = true;
+      const onMove = (ev: MouseEvent) => {
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (!rect || !draggingRef.current) return;
+        const y = ev.clientY - rect.top;
+        const fraction = Math.max(0.1, Math.min(0.9, y / rect.height));
+        setSplitFraction(fraction);
+      };
+      const onUp = () => {
+        draggingRef.current = false;
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        // Read the current value from state via a setState callback so the
+        // closure doesn't capture a stale fraction.
+        setSplitFraction((current) => {
+          persistSplit(current);
+          return current;
+        });
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [persistSplit]
+  );
   const sizePrecision = config?.formatting?.size?.precision ?? Protocol.FormatPrecision.Two;
   const sizeUnit = config?.formatting?.size?.unit ?? Protocol.FormatUnit.KMGT;
   const bitRatePrecision =
@@ -212,10 +307,10 @@ export default function DiscDetail() {
             <Typography variant="h6" noWrap title={disc.discTitle || disc.discName}>
               {disc.discTitle || disc.discName}
             </Typography>
-            <Typography variant="caption" color="text.secondary" component="div" noWrap title={disc.path}>
-              {disc.path}
-            </Typography>
             <Stack direction="row" spacing={3} sx={{ mt: 0.5, flexWrap: "wrap" }}>
+              <Typography variant="caption" title={disc.path} sx={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <b>{t("disc.path")}:</b> {disc.path}
+              </Typography>
               <Typography variant="caption">
                 <b>{t("disc.volume")}:</b> {disc.volumeLabel || "-"}
               </Typography>
@@ -240,82 +335,67 @@ export default function DiscDetail() {
         </Stack>
       </Paper>
 
-      {/* Body: playlists | streams */}
+      {/* Body: playlists / splitter / info panel */}
       <Box
+        ref={containerRef}
         sx={{
           flex: 1,
           minHeight: 0,
-          display: "grid",
-          gridTemplateColumns: "minmax(360px, 36%) 1fr",
-          gap: 1,
+          display: "flex",
+          flexDirection: "column",
         }}
       >
         {/* Playlist list */}
-        <Paper variant="outlined" sx={{ overflow: "auto", minHeight: 0 }}>
+        <Paper
+          variant="outlined"
+          sx={{
+            overflow: "auto",
+            minHeight: 0,
+            flex: `0 0 ${(splitFraction * 100).toFixed(2)}%`,
+          }}
+        >
           <TableContainer>
             <Table size="small" stickyHeader>
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ fontWeight: "bold" }} sortDirection={sortKey === "name" ? sortDir : false}>
-                    <TableSortLabel
-                      active={sortKey === "name"}
-                      direction={sortKey === "name" ? sortDir : "asc"}
-                      onClick={() => handleSort("name")}
-                    >
-                      {t("disc.playlist")}
-                    </TableSortLabel>
-                  </TableCell>
-                  <TableCell
-                    sx={{ fontWeight: "bold" }}
+                  <SortableHeaderCell
+                    active={sortKey === "name"}
+                    direction={sortDir}
+                    onSort={() => handleSort("name")}
+                  >
+                    {t("disc.playlist")}
+                  </SortableHeaderCell>
+                  <SortableHeaderCell
+                    active={sortKey === "groupIndex"}
+                    direction={sortDir}
+                    onSort={() => handleSort("groupIndex")}
                     align="right"
-                    sortDirection={sortKey === "groupIndex" ? sortDir : false}
                   >
-                    <TableSortLabel
-                      active={sortKey === "groupIndex"}
-                      direction={sortKey === "groupIndex" ? sortDir : "asc"}
-                      onClick={() => handleSort("groupIndex")}
-                    >
-                      {t("disc.group")}
-                    </TableSortLabel>
-                  </TableCell>
-                  <TableCell
-                    sx={{ fontWeight: "bold" }}
-                    sortDirection={sortKey === "totalLength" ? sortDir : false}
+                    {t("disc.group")}
+                  </SortableHeaderCell>
+                  <SortableHeaderCell
+                    active={sortKey === "totalLength"}
+                    direction={sortDir}
+                    onSort={() => handleSort("totalLength")}
                   >
-                    <TableSortLabel
-                      active={sortKey === "totalLength"}
-                      direction={sortKey === "totalLength" ? sortDir : "asc"}
-                      onClick={() => handleSort("totalLength")}
-                    >
-                      {t("disc.length")}
-                    </TableSortLabel>
-                  </TableCell>
-                  <TableCell
-                    sx={{ fontWeight: "bold" }}
+                    {t("disc.length")}
+                  </SortableHeaderCell>
+                  <SortableHeaderCell
+                    active={sortKey === "fileSize"}
+                    direction={sortDir}
+                    onSort={() => handleSort("fileSize")}
                     align="right"
-                    sortDirection={sortKey === "fileSize" ? sortDir : false}
                   >
-                    <TableSortLabel
-                      active={sortKey === "fileSize"}
-                      direction={sortKey === "fileSize" ? sortDir : "asc"}
-                      onClick={() => handleSort("fileSize")}
-                    >
-                      {t("disc.estimatedSize")}
-                    </TableSortLabel>
-                  </TableCell>
-                  <TableCell
-                    sx={{ fontWeight: "bold" }}
+                    {t("disc.estimatedSize")}
+                  </SortableHeaderCell>
+                  <SortableHeaderCell
+                    active={sortKey === "measuredSize"}
+                    direction={sortDir}
+                    onSort={() => handleSort("measuredSize")}
                     align="right"
-                    sortDirection={sortKey === "measuredSize" ? sortDir : false}
                   >
-                    <TableSortLabel
-                      active={sortKey === "measuredSize"}
-                      direction={sortKey === "measuredSize" ? sortDir : "asc"}
-                      onClick={() => handleSort("measuredSize")}
-                    >
-                      {t("disc.measuredSize")}
-                    </TableSortLabel>
-                  </TableCell>
+                    {t("disc.measuredSize")}
+                  </SortableHeaderCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -345,8 +425,23 @@ export default function DiscDetail() {
           </TableContainer>
         </Paper>
 
-        {/* Right side: streams + clips for selected playlist */}
-        <Paper variant="outlined" sx={{ overflow: "auto", minHeight: 0, p: 1 }}>
+        {/* Draggable splitter */}
+        <Box
+          onMouseDown={handleSplitterMouseDown}
+          sx={(theme) => ({
+            height: 6,
+            cursor: "row-resize",
+            flexShrink: 0,
+            backgroundColor: theme.palette.divider,
+            transition: "background-color 120ms",
+            "&:hover": {
+              backgroundColor: theme.palette.primary.main,
+            },
+          })}
+        />
+
+        {/* Bottom panel: streams + clips for selected playlist */}
+        <Paper variant="outlined" sx={{ overflow: "auto", minHeight: 0, p: 1, flex: 1 }}>
           {playlist ? (
             <>
               <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: "wrap", gap: 1, alignItems: "center" }}>

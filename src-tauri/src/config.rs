@@ -28,10 +28,16 @@ pub struct Config {
     pub scan: ConfigScan,
     #[serde(default)]
     pub formatting: ConfigFormatting,
+    #[serde(rename = "discInfoSplit", default = "default_disc_info_split")]
+    pub disc_info_split: f32,
     #[serde(default)]
     pub update: ConfigUpdate,
     #[serde(default)]
     pub window: ConfigWindow,
+}
+
+fn default_disc_info_split() -> f32 {
+    0.4
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -124,6 +130,7 @@ impl Default for Config {
             language: Default::default(),
             scan: Default::default(),
             formatting: Default::default(),
+            disc_info_split: 0.4,
             update: Default::default(),
             window: Default::default(),
         }

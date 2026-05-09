@@ -103,6 +103,7 @@ export interface Config {
   language: Language;
   scan: ConfigScan;
   formatting: ConfigFormatting;
+  discInfoSplit: number;
   update: ConfigUpdate;
   window: ConfigWindow;
 }

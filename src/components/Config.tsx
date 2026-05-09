@@ -6,7 +6,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Box,
-  Button,
   FormControl,
   FormControlLabel,
   MenuItem,
@@ -24,7 +23,6 @@ import {
   DarkMode as DarkIcon,
   LightMode as LightIcon,
   Palette as AppearanceIcon,
-  Save as SaveIcon,
   Tune as ScanIcon,
   Numbers as FormatIcon,
 } from "@mui/icons-material";
@@ -78,16 +76,12 @@ export default function Config() {
     if (config && !isInitializedRef.current) {
       setDraft(config);
       isInitializedRef.current = true;
-    } else if (config && isInitializedRef.current) {
-      // Keep persisted fields in sync but preserve unsaved scan-option edits.
-      setDraft((prev) =>
-        prev ? { ...prev, displayMode: config.displayMode, theme: config.theme, language: config.language } : config
-      );
     }
   }, [config]);
 
-  // Apply appearance / theme / language changes to the store immediately so
-  // the rest of the UI re-themes and re-translates without waiting for Save.
+  // Push appearance / theme / language to the store immediately so the rest
+  // of the UI re-themes and re-translates without waiting for the debounced
+  // disk save.
   useEffect(() => {
     if (!isInitializedRef.current || !draft || !config) return;
     if (
@@ -109,6 +103,25 @@ export default function Config() {
     if (!isInitializedRef.current || !draft) return;
     changeLanguage(draft.language);
   }, [draft?.language]);
+
+  // Auto-save: persist the entire draft to disk shortly after any change.
+  // Debounced so text-input edits don't write on every keystroke.
+  useEffect(() => {
+    if (!isInitializedRef.current || !draft) return;
+    const handle = setTimeout(async () => {
+      try {
+        const saved = await saveConfig(draft);
+        setConfigState(saved);
+        changeLanguage(saved.language);
+      } catch (error) {
+        setNotification({
+          title: `${t("settings.settingsSaveError")} ${error}`,
+          type: Protocol.DialogNotificationType.Error,
+        });
+      }
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [draft, setConfigState, setNotification, t]);
 
   if (!draft) {
     return <Box sx={{ p: 2 }}>Loading…</Box>;
@@ -134,23 +147,6 @@ export default function Config() {
 
   const getThemeLabel = (theme: Protocol.Theme) =>
     t(`settings.themeNames.${theme}`, { defaultValue: theme });
-
-  const handleSave = async () => {
-    try {
-      const saved = await saveConfig(draft);
-      setConfigState(saved);
-      changeLanguage(saved.language);
-      setNotification({
-        title: t("settings.settingsSaved"),
-        type: Protocol.DialogNotificationType.Info,
-      });
-    } catch (error) {
-      setNotification({
-        title: `${t("settings.settingsSaveError")} ${error}`,
-        type: Protocol.DialogNotificationType.Error,
-      });
-    }
-  };
 
   return (
     <Box sx={{ width: "100%", maxWidth: 640, mx: "auto", py: 2, px: 1, display: "flex", flexDirection: "column", gap: 2 }}>
@@ -394,17 +390,6 @@ export default function Config() {
         </Stack>
       </Paper>
 
-      <Box sx={{ display: "flex", justifyContent: "center", pt: 1 }}>
-        <Button
-          variant="contained"
-          color="primary"
-          startIcon={<SaveIcon />}
-          onClick={handleSave}
-          sx={{ minWidth: 180, borderRadius: 2, textTransform: "none", fontWeight: 600 }}
-        >
-          {t("settings.save")}
-        </Button>
-      </Box>
     </Box>
   );
 }
