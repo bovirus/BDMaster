@@ -1181,9 +1181,6 @@ function TrackTable({
     ],
     [playlist]
   );
-  // playlist.totalLength is in 45 kHz BD time units; convert to seconds for
-  // the per-track estimated-size calculation.
-  const lengthSeconds = playlist.totalLength / 45000;
   if (tracks.length === 0) {
     return (
       <Typography variant="body2" color="text.secondary" sx={{ p: 1 }}>
@@ -1208,8 +1205,6 @@ function TrackTable({
         <TableBody>
           {tracks.map((s, i) => {
             const bitRate = s.bitRate || s.activeBitRate;
-            const estimatedBytes =
-              bitRate > 0 && lengthSeconds > 0 ? (bitRate * lengthSeconds) / 8 : 0;
             return (
               <TableRow
                 key={`${s.pid}-${i}`}
@@ -1244,8 +1239,8 @@ function TrackTable({
                   )}
                 </TableCell>
                 <TableCell align="right">
-                  {estimatedBytes > 0
-                    ? formatSize(estimatedBytes, sizePrecision, sizeUnit)
+                  {s.estimatedSize > 0
+                    ? formatSize(s.estimatedSize, sizePrecision, sizeUnit)
                     : ""}
                 </TableCell>
                 <TableCell align="right">

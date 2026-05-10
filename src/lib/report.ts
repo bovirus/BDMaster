@@ -407,7 +407,8 @@ function writePlaylistFull(
     const lengthSeconds = clip.length / 45000.0;
     const timeInSeconds = clip.relativeTimeIn / 45000.0;
     const size = clipSize(clip);
-    const bitrateKbps = lengthSeconds > 0 ? Math.round((size * 8.0) / lengthSeconds / 1000.0) : 0;
+    const bitrateKbps =
+      lengthSeconds > 0 ? Math.round((clip.fileSize * 8.0) / lengthSeconds / 1000.0) : 0;
     const displayName =
       clip.angleIndex > 0 ? `${clip.displayName} (${clip.angleIndex})` : clip.displayName;
     line(
@@ -718,8 +719,9 @@ function playlistLengthSeconds(playlist: Protocol.PlaylistInfo): number {
 
 function playlistTotalBitrateMbps(playlist: Protocol.PlaylistInfo): number {
   const lengthSeconds = playlistLengthSeconds(playlist);
-  const size = playlistSize(playlist);
-  return lengthSeconds > 0 ? (size * 8.0) / lengthSeconds / 1_000_000.0 : 0.0;
+  return lengthSeconds > 0
+    ? (playlist.fileSize * 8.0) / lengthSeconds / 1_000_000.0
+    : 0.0;
 }
 
 function chapterReportTable(playlist: Protocol.PlaylistInfo, labels: ReportLabels): ReportTable | null {
@@ -773,7 +775,8 @@ function filesReportTable(playlist: Protocol.PlaylistInfo, labels: ReportLabels)
       .map((clip) => {
         const lengthSeconds = clip.length / 45000.0;
         const size = clipSize(clip);
-        const bitrateKbps = lengthSeconds > 0 ? Math.round((size * 8.0) / lengthSeconds / 1000.0) : 0;
+        const bitrateKbps =
+          lengthSeconds > 0 ? Math.round((clip.fileSize * 8.0) / lengthSeconds / 1000.0) : 0;
         const displayName = clip.angleIndex > 0 ? `${clip.displayName} (${clip.angleIndex})` : clip.displayName;
         return [
           reportCell(displayName),

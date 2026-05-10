@@ -321,6 +321,7 @@ export interface TSStreamInfo {
   description: string;
   bitRate: number;
   activeBitRate: number;
+  estimatedSize: number;
   measuredSize: number;
   isVideoStream: boolean;
   isAudioStream: boolean;

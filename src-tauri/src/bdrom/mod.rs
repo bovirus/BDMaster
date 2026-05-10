@@ -89,6 +89,7 @@ pub fn scan(path_str: &str) -> Result<DiscInfo> {
     // total of payload bytes / elapsed seconds collected during the scan.
     codec_init(&mut disc, &bdrom);
     refresh_ssif_derived_metadata(&mut disc, &bdrom);
+    cache_estimated_stream_sizes(&mut disc);
     Ok(disc)
 }
 
@@ -1082,6 +1083,34 @@ pub(crate) fn recompute_mvc_extension(disc: &mut DiscInfo) {
             .iter()
             .any(|s| TSStreamType::from_u8(s.stream_type) == TSStreamType::MVCVideo)
     });
+}
+
+pub(crate) fn cache_estimated_stream_sizes(disc: &mut DiscInfo) {
+    for pl in disc.playlists.iter_mut() {
+        let total_seconds = pl.total_length as f64 / 45000.0;
+        for stream in pl
+            .video_streams
+            .iter_mut()
+            .chain(pl.audio_streams.iter_mut())
+            .chain(pl.graphics_streams.iter_mut())
+            .chain(pl.text_streams.iter_mut())
+        {
+            stream.estimated_size = estimate_stream_size(stream, total_seconds);
+        }
+    }
+}
+
+pub(crate) fn estimate_stream_size(stream: &TSStreamInfo, total_seconds: f64) -> u64 {
+    let bit_rate = if stream.bit_rate > 0 {
+        stream.bit_rate
+    } else {
+        stream.active_bit_rate
+    };
+    if bit_rate > 0 && total_seconds > 0.0 {
+        (bit_rate as f64 * total_seconds / 8.0).round() as u64
+    } else {
+        0
+    }
 }
 
 /// Open a streaming reader for an M2TS stream entry, regardless of whether

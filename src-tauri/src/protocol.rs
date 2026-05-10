@@ -200,6 +200,8 @@ pub struct TSStreamInfo {
     pub bit_rate: u64,
     #[serde(rename = "activeBitRate")]
     pub active_bit_rate: u64,
+    #[serde(rename = "estimatedSize")]
+    pub estimated_size: u64,
     #[serde(rename = "measuredSize")]
     pub measured_size: u64,
     #[serde(rename = "isVideoStream")]
@@ -275,6 +277,7 @@ impl TSStreamInfo {
             description: String::new(),
             bit_rate: 0,
             active_bit_rate: 0,
+            estimated_size: 0,
             measured_size: 0,
             is_video_stream: false,
             is_audio_stream: false,

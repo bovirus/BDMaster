@@ -26,9 +26,17 @@ use super::codec::{self, CodecScanState};
 use super::m2ts;
 use super::types::TSStreamType;
 use super::{
-    effective_stream_source, is_ssif_mvc_stream, open_bdrom, open_stream_reader_raw,
-    recompute_mvc_extension, refresh_ssif_derived_metadata, BDRom, StreamSource,
+    cache_estimated_stream_sizes, effective_stream_source, estimate_stream_size, is_ssif_mvc_stream,
+    open_bdrom, open_stream_reader_raw, recompute_mvc_extension, refresh_ssif_derived_metadata,
+    BDRom, StreamSource,
 };
+
+#[derive(Debug, Clone, Copy)]
+struct CachedStreamEstimate {
+    bit_rate: u64,
+    active_bit_rate: u64,
+    estimated_size: u64,
+}
 
 /// Read wrapper that reports cumulative bytes consumed at most once per
 /// `min_interval` AND short-circuits to EOF the moment the scan's cancel
@@ -165,6 +173,8 @@ fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
     let mut disc = super::to_disc_info(&bdrom);
     super::codec_init(&mut disc, &bdrom);
     refresh_ssif_derived_metadata(&mut disc, &bdrom);
+    cache_estimated_stream_sizes(&mut disc);
+    let cached_estimates = capture_stream_estimates(&disc);
 
     // 2. Collect every (clip-name → playlist-indices) pair for angle 0. This
     //    is the same union BDInfo builds in PlaylistMap.
@@ -250,6 +260,7 @@ fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
             clip_name,
             &state,
             completed_bytes,
+            &cached_estimates,
         ) {
             Ok(()) => {}
             Err(err) => {
@@ -280,6 +291,7 @@ fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
         // descriptions) so the snapshot we publish reflects what we know so
         // far. Doing this per-file means every poll the user sees up-to-date
         // numbers.
+        restore_stream_estimates(&mut disc, &cached_estimates);
         finalize_after_file(&mut disc);
 
         let mut p = state.progress.lock().unwrap();
@@ -292,6 +304,7 @@ fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
     // partial disc snapshot in place; the frontend reverts to the un-scanned
     // state by re-issuing a basic scan_disc when it sees is_cancelled.
     if !state.cancel.load(Ordering::SeqCst) {
+        restore_stream_estimates(&mut disc, &cached_estimates);
         finalize_after_file(&mut disc);
         let mut p = state.progress.lock().unwrap();
         p.disc = Some(disc);
@@ -319,6 +332,7 @@ fn scan_one_file(
     clip_name: &str,
     state: &Arc<FullScanState>,
     base_completed: u64,
+    cached_estimates: &HashMap<(String, u16), CachedStreamEstimate>,
 ) -> Result<()> {
     // Map of every playlist index that references this clip (angle 0).
     let mut plis: Vec<usize> = Vec::new();
@@ -446,6 +460,7 @@ fn scan_one_file(
                 clip_name,
                 &progress,
                 &base_stream_bytes,
+                cached_estimates,
                 state,
                 base_completed,
             );
@@ -575,6 +590,8 @@ fn scan_one_file(
                 if let Some(b) = per_pid_bytes.get(pid) {
                     mvc.measured_size = (*b as f64 * total_clip_ratio).round() as u64;
                 }
+                mvc.estimated_size =
+                    estimate_stream_size(&mvc, pl.total_length as f64 / 45000.0);
                 if mvc.is_video_stream {
                     pl.video_streams.push(mvc);
                     declared_pids.insert(*pid);
@@ -588,6 +605,8 @@ fn scan_one_file(
             if let Some(b) = per_pid_bytes.get(pid) {
                 hidden.measured_size = (*b as f64 * total_clip_ratio).round() as u64;
             }
+            hidden.estimated_size =
+                estimate_stream_size(&hidden, pl.total_length as f64 / 45000.0);
             pl.has_hidden_tracks = true;
             if hidden.is_video_stream {
                 pl.video_streams.push(hidden);
@@ -604,6 +623,7 @@ fn scan_one_file(
         }
     }
 
+    restore_stream_estimates(disc, cached_estimates);
     refresh_ssif_derived_metadata(disc, bd);
     append_bitrate_samples_and_refresh_chapters(disc, &plis, clip_name, &result.bitrate_samples);
 
@@ -629,16 +649,62 @@ fn capture_stream_measurement_base(disc: &DiscInfo, plis: &[usize]) -> HashMap<(
     base
 }
 
+fn capture_stream_estimates(disc: &DiscInfo) -> HashMap<(String, u16), CachedStreamEstimate> {
+    let mut cached = HashMap::new();
+    for pl in &disc.playlists {
+        for s in pl
+            .video_streams
+            .iter()
+            .chain(pl.audio_streams.iter())
+            .chain(pl.graphics_streams.iter())
+            .chain(pl.text_streams.iter())
+        {
+            cached.insert(
+                (pl.name.clone(), s.pid),
+                CachedStreamEstimate {
+                    bit_rate: s.bit_rate,
+                    active_bit_rate: s.active_bit_rate,
+                    estimated_size: s.estimated_size,
+                },
+            );
+        }
+    }
+    cached
+}
+
+fn restore_stream_estimates(
+    disc: &mut DiscInfo,
+    cached: &HashMap<(String, u16), CachedStreamEstimate>,
+) {
+    for pl in disc.playlists.iter_mut() {
+        for s in pl
+            .video_streams
+            .iter_mut()
+            .chain(pl.audio_streams.iter_mut())
+            .chain(pl.graphics_streams.iter_mut())
+            .chain(pl.text_streams.iter_mut())
+        {
+            if let Some(estimate) = cached.get(&(pl.name.clone(), s.pid)) {
+                s.bit_rate = estimate.bit_rate;
+                s.active_bit_rate = estimate.active_bit_rate;
+                s.estimated_size = estimate.estimated_size;
+            }
+        }
+    }
+}
+
 fn publish_partial_file_snapshot(
     disc: &mut DiscInfo,
     plis: &[usize],
     clip_name: &str,
     progress: &m2ts::M2tsScanProgress,
     base_stream_bytes: &HashMap<(usize, u16), u64>,
+    cached_estimates: &HashMap<(String, u16), CachedStreamEstimate>,
     state: &Arc<FullScanState>,
     base_completed: u64,
 ) {
     apply_partial_file_measurements(disc, plis, clip_name, progress, base_stream_bytes);
+    restore_stream_estimates(disc, cached_estimates);
     finalize_after_file(disc);
 
     let mut p = state.progress.lock().unwrap();
@@ -841,10 +907,9 @@ fn scale_rate(rate: f64, ratio: f64) -> u64 {
     (rate * ratio).max(0.0).round() as u64
 }
 
-/// Refresh playlist-level aggregates after each file finishes: the playlist's
-/// measured_size is the sum of its angle-0 clips', and VBR bit_rate is
-/// recomputed from accumulated per-stream measured_size against playlist
-/// duration. Mirrors BDInfo's UpdatePlaylistBitrates timer callback.
+/// Refresh playlist-level aggregates after each file finishes. Estimated
+/// bitrate/size fields are intentionally left alone; they are cached before
+/// the full scan starts and remain the pre-scan estimate for the whole run.
 fn finalize_after_file(disc: &mut DiscInfo) {
     for pl in disc.playlists.iter_mut() {
         let mut total: u64 = 0;
@@ -855,27 +920,9 @@ fn finalize_after_file(disc: &mut DiscInfo) {
         }
         pl.measured_size = total;
 
-        let total_seconds = pl.total_length as f64 / 45000.0;
-        if total_seconds > 0.0 {
-            for s in pl
-                .video_streams
-                .iter_mut()
-                .chain(pl.audio_streams.iter_mut())
-                .chain(pl.graphics_streams.iter_mut())
-                .chain(pl.text_streams.iter_mut())
-            {
-                if s.measured_size > 0 {
-                    let active = (s.measured_size as f64 * 8.0 / total_seconds).round() as u64;
-                    s.active_bit_rate = active;
-                    if s.is_vbr || s.bit_rate == 0 {
-                        s.bit_rate = active;
-                    }
-                }
-            }
-        }
-
         // Recompute description so newly populated PGS caption counts and
-        // refined audio bit rates surface in the UI.
+        // other codec metadata surface in the UI without rewriting the
+        // cached pre-scan bitrate estimate.
         for s in pl
             .video_streams
             .iter_mut()
@@ -920,10 +967,4 @@ fn copy_codec_metadata(dst: &mut TSStreamInfo, src: &TSStreamInfo) {
     dst.dial_norm = src.dial_norm;
     dst.has_extensions = src.has_extensions;
     dst.core = src.core.clone();
-    if dst.bit_rate == 0 && src.bit_rate > 0 {
-        dst.bit_rate = src.bit_rate;
-    }
-    if dst.active_bit_rate == 0 && src.active_bit_rate > 0 {
-        dst.active_bit_rate = src.active_bit_rate;
-    }
 }
