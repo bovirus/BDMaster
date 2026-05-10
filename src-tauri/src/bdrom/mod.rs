@@ -17,7 +17,7 @@ pub mod types;
 pub mod udf;
 
 use anyhow::{anyhow, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -928,7 +928,6 @@ pub fn build_chart_samples(path: &str, playlist_name: &str) -> Vec<ChartSample> 
 /// every other playlist that references the same clip.
 fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
     use codec::CodecScanState;
-    use std::collections::HashMap as HM;
 
     /// Codec-init result captured per unique clip. `codec_metadata` is the
     /// snapshot of every PID's TSStreamInfo after the codec parsers ran
@@ -937,8 +936,8 @@ fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
     /// are the partial-scan running totals used to estimate bit rate for
     /// VBR streams the codec parser can't pin down.
     struct ClipInitCache {
-        codec_metadata: HM<u16, TSStreamInfo>,
-        per_pid_bytes: HM<u16, u64>,
+        codec_metadata: HashMap<u16, TSStreamInfo>,
+        per_pid_bytes: HashMap<u16, u64>,
         duration_seconds: f64,
     }
 
@@ -946,7 +945,7 @@ fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
     // angle-0 clip. We need the union (not just one "lead") because
     // playlists can subset streams differently — a PID present in this
     // clip's PMT might only appear in a non-lead playlist's MPLS.
-    let mut clip_referencing_plis: HM<String, Vec<usize>> = HM::new();
+    let mut clip_referencing_plis: HashMap<String, Vec<usize>> = HashMap::new();
     for (pli, pl) in disc.playlists.iter().enumerate() {
         for clip in &pl.stream_clips {
             if clip.angle_index != 0 {
@@ -962,7 +961,7 @@ fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
     }
 
     // Phase A.2: scan each unique clip until codecs are initialized.
-    let mut clip_cache: HM<String, ClipInitCache> = HM::new();
+    let mut clip_cache: HashMap<String, ClipInitCache> = HashMap::new();
     for (clip_name, plis) in &clip_referencing_plis {
         let entry = match bd.stream_files.get(clip_name) {
             Some(e) => e,
@@ -973,8 +972,8 @@ fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
         // playlist that references this clip. First playlist with a given
         // PID wins; the codec parser will mutate that one stream and we'll
         // distribute its codec metadata to all other playlists in Phase B.
-        let mut pid_state: HM<u16, CodecScanState> = HM::new();
-        let mut pid_streams: HM<u16, *mut TSStreamInfo> = HM::new();
+        let mut pid_state: HashMap<u16, CodecScanState> = HashMap::new();
+        let mut pid_streams: HashMap<u16, *mut TSStreamInfo> = HashMap::new();
         for &pli in plis {
             let pl = &mut disc.playlists[pli];
             for s in pl.video_streams.iter_mut() {
@@ -996,7 +995,7 @@ fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
 
         // BitRate hint passed to DTS / DTS-HD parsers (they accept a running
         // bitrate computed by the host). Seeded with the MPLS-derived value.
-        let bitrate_hint: HM<u16, i64> = pid_streams
+        let bitrate_hint: HashMap<u16, i64> = pid_streams
             .iter()
             .map(|(pid, p)| unsafe { (*pid, (**p).bit_rate as i64) })
             .collect();
@@ -1017,30 +1016,63 @@ fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
         const CODEC_INIT_BYTE_BUDGET: u64 = 8 * 1024 * 1024;
         let reader = std::io::Read::take(reader, CODEC_INIT_BYTE_BUDGET);
 
+        // PMT may declare PIDs that no playlist's MPLS references — those
+        // are "hidden" tracks (BDInfo's TSPlaylistFile.cs sets IsHidden=true
+        // for any clip stream not in PlaylistStreams). We allocate synthetic
+        // TSStreamInfo entries for them on first PES so the codec parser
+        // can populate their format fields the same way it does for the
+        // real ones. Phase B then attaches a copy to every playlist that
+        // doesn't declare the PID.
+        let mut synthetic_holders: HashMap<u16, Box<TSStreamInfo>> = HashMap::new();
+
         let res = m2ts::scan_m2ts_streaming_from_reader(
             reader,
             |pid, _stream_type, payload, pmt| {
-                if let Some(stream_ptr) = pid_streams.get(&pid) {
-                    let stream = unsafe { &mut **stream_ptr };
+                let target_ptr: Option<*mut TSStreamInfo> =
+                    if let Some(&ptr) = pid_streams.get(&pid) {
+                        Some(ptr)
+                    } else if let Some(&stream_type) = pmt.get(&pid) {
+                        // PMT-declared but not in any MPLS — synthesize.
+                        let mut stub = TSStreamInfo::new(pid, stream_type);
+                        let st = TSStreamType::from_u8(stream_type);
+                        stub.stream_type_text = st.type_text().to_string();
+                        stub.codec_name = st.codec_name().to_string();
+                        stub.codec_short_name = st.codec_short_name().to_string();
+                        stub.is_video_stream = st.is_video();
+                        stub.is_audio_stream = st.is_audio();
+                        stub.is_graphics_stream = st.is_graphics();
+                        stub.is_text_stream = st.is_text();
+                        let mut boxed = Box::new(stub);
+                        let ptr = &mut *boxed as *mut TSStreamInfo;
+                        synthetic_holders.insert(pid, boxed);
+                        pid_streams.insert(pid, ptr);
+                        Some(ptr)
+                    } else {
+                        None
+                    };
+
+                if let Some(ptr) = target_ptr {
+                    let stream = unsafe { &mut *ptr };
                     if !stream.is_initialized {
                         let state = pid_state.entry(pid).or_default();
                         let bitrate = bitrate_hint.get(&pid).copied().unwrap_or(0);
                         codec::scan_stream(stream, state, payload, bitrate, true, false);
                     }
                 }
+
                 // BDInfo-style early-stop: terminate the moment every PMT-
-                // listed PID we're tracking has reported initialized. PIDs
-                // declared by MPLS but absent from this clip's PMT belong
-                // to other clips and will be initialized when those clips
-                // are scanned.
+                // listed PID has reported initialized — including hidden
+                // ones we synthesized above (so their codec details get
+                // captured before we exit). PIDs in PMT that haven't yet
+                // delivered a PES are still pending; keep scanning.
                 if pmt.is_empty() {
-                    return true; // PMT not seen yet — keep reading.
+                    return true;
                 }
                 let any_uninit = pmt.keys().any(|p| {
                     pid_streams
                         .get(p)
                         .map(|ptr| unsafe { !(**ptr).is_initialized })
-                        .unwrap_or(false)
+                        .unwrap_or(true)
                 });
                 any_uninit
             },
@@ -1048,7 +1080,7 @@ fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
 
         match res {
             Ok(r) => {
-                let mut by_pid: HM<u16, u64> = HM::new();
+                let mut by_pid: HashMap<u16, u64> = HashMap::new();
                 for (pid, stat) in &r.streams {
                     by_pid.insert(*pid, stat.total_bytes);
                 }
@@ -1074,7 +1106,7 @@ fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
 
                 // Snapshot codec metadata via the same raw pointers so we
                 // capture whichever playlist owned the mutated stream.
-                let mut codec_metadata: HM<u16, TSStreamInfo> = HM::new();
+                let mut codec_metadata: HashMap<u16, TSStreamInfo> = HashMap::new();
                 for (pid, ptr) in &pid_streams {
                     unsafe {
                         codec_metadata.insert(*pid, (**ptr).clone());
@@ -1096,10 +1128,21 @@ fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
         }
     }
 
-    // Phase B: copy codec metadata from the lead snapshot into every other
-    // playlist's matching streams. The lead playlist itself was written
-    // directly during the scan, so its streams are already initialized.
+    // Phase B: distribute codec metadata. For PIDs the playlist already
+    // declares in MPLS, copy codec details into the existing stream. For
+    // PIDs that appeared in the clip's PMT but not in this playlist's MPLS
+    // (BDInfo's "hidden" tracks), append a new is_hidden=true stream.
     for pl in disc.playlists.iter_mut() {
+        // PIDs the playlist already has from MPLS (used to detect hidden).
+        let mut declared_pids: HashSet<u16> = pl
+            .video_streams
+            .iter()
+            .chain(pl.audio_streams.iter())
+            .chain(pl.graphics_streams.iter())
+            .chain(pl.text_streams.iter())
+            .map(|s| s.pid)
+            .collect();
+
         for clip in &pl.stream_clips {
             if clip.angle_index != 0 {
                 continue;
@@ -1108,6 +1151,8 @@ fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
                 Some(c) => c,
                 None => continue,
             };
+
+            // Update existing streams with codec details.
             for s in pl
                 .video_streams
                 .iter_mut()
@@ -1124,6 +1169,31 @@ fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
                     }
                 }
             }
+
+            // Add hidden streams for PMT PIDs not in this playlist's MPLS.
+            for (pid, meta) in &cached.codec_metadata {
+                if declared_pids.contains(pid) {
+                    continue;
+                }
+                let mut hidden = meta.clone();
+                hidden.is_hidden = true;
+                pl.has_hidden_tracks = true;
+                if hidden.is_video_stream {
+                    pl.video_streams.push(hidden);
+                } else if hidden.is_audio_stream {
+                    pl.audio_streams.push(hidden);
+                } else if hidden.is_graphics_stream {
+                    pl.graphics_streams.push(hidden);
+                } else if hidden.is_text_stream {
+                    pl.text_streams.push(hidden);
+                } else {
+                    // Unknown stream type — drop.
+                    continue;
+                }
+                // Don't add the same hidden PID twice if multiple clips of
+                // the playlist contain it.
+                declared_pids.insert(*pid);
+            }
         }
     }
 
@@ -1132,7 +1202,7 @@ fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
     // divide by total scanned seconds — gives a more representative running
     // average than any single clip's first few seconds.
     for pl in disc.playlists.iter_mut() {
-        let mut per_pid_total_bytes: HM<u16, u64> = HM::new();
+        let mut per_pid_total_bytes: HashMap<u16, u64> = HashMap::new();
         let mut total_seconds: f64 = 0.0;
         for clip in &pl.stream_clips {
             if clip.angle_index != 0 {

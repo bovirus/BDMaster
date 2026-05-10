@@ -90,6 +90,7 @@
     "avgFrameSize": "平均帧大小",
     "maxFrameSize": "最大帧大小",
     "maxFrameTime": "最大帧时间",
+    "hiddenTrack": "隐藏轨道",
     "noPlaylistSelected": "未选择播放列表。",
     "noDiscMarker": "该文件夹似乎不是蓝光光盘 (缺少 BDMV/index.bdmv)。",
     "isUHD": "UHD",

@@ -90,6 +90,7 @@
     "avgFrameSize": "平均畫格大小",
     "maxFrameSize": "最大畫格大小",
     "maxFrameTime": "最大畫格時間",
+    "hiddenTrack": "隱藏軌道",
     "noPlaylistSelected": "未選擇播放清單。",
     "noDiscMarker": "該資料夾似乎不是藍光光碟(缺少 BDMV/index.bdmv)。",
     "isUHD": "UHD",

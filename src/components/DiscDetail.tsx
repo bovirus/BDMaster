@@ -27,6 +27,8 @@ import AudiotrackIcon from "@mui/icons-material/Audiotrack";
 import SubtitlesIcon from "@mui/icons-material/Subtitles";
 import BookmarkIcon from "@mui/icons-material/Bookmark";
 import SummarizeIcon from "@mui/icons-material/Summarize";
+import StreamIcon from "@mui/icons-material/Stream";
+import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import { useTranslation } from "react-i18next";
 import * as Protocol from "../lib/protocol";
 import { useAppStore } from "../lib/store";
@@ -37,6 +39,7 @@ type PlaylistSortKey =
   | "name"
   | "groupIndex"
   | "totalLength"
+  | "streamCount"
   | "videoCount"
   | "audioCount"
   | "subtitleCount"
@@ -79,6 +82,10 @@ function comparePlaylists(
       case "totalLength":
         av = a.totalLength;
         bv = b.totalLength;
+        break;
+      case "streamCount":
+        av = a.streamClips.filter((c) => c.angleIndex === 0).length;
+        bv = b.streamClips.filter((c) => c.angleIndex === 0).length;
         break;
       case "videoCount":
         av = a.videoStreams.length;
@@ -239,10 +246,10 @@ export default function DiscDetail() {
   // table (with the button row beneath it) on the right.
   const infoPanelRef = useRef<HTMLDivElement | null>(null);
   const [infoSplitFraction, setInfoSplitFraction] = useState<number>(
-    config?.infoPanelSplit ?? 0.5
+    config?.infoPanelSplit ?? 0.4
   );
   useEffect(() => {
-    if (config) setInfoSplitFraction(config.infoPanelSplit ?? 0.5);
+    if (config) setInfoSplitFraction(config.infoPanelSplit ?? 0.4);
   }, [config?.infoPanelSplit]);
   const infoDraggingRef = useRef(false);
   const persistInfoSplit = useCallback(
@@ -403,6 +410,16 @@ export default function DiscDetail() {
                     {t("disc.length")}
                   </SortableHeaderCell>
                   <SortableHeaderCell
+                    active={sortKey === "streamCount"}
+                    direction={sortDir}
+                    onSort={() => handleSort("streamCount")}
+                    align="right"
+                  >
+                    <Tooltip title={t("disc.streamFiles")}>
+                      <StreamIcon fontSize="small" sx={{ verticalAlign: "middle" }} />
+                    </Tooltip>
+                  </SortableHeaderCell>
+                  <SortableHeaderCell
                     active={sortKey === "videoCount"}
                     direction={sortDir}
                     onSort={() => handleSort("videoCount")}
@@ -475,6 +492,14 @@ export default function DiscDetail() {
                     <TableCell>{p.name}</TableCell>
                     <TableCell align="right">{p.groupIndex || ""}</TableCell>
                     <TableCell>{formatLength45k(p.totalLength)}</TableCell>
+                    <TableCell align="right">
+                      {(() => {
+                        const streamCount = p.streamClips.filter(
+                          (c) => c.angleIndex === 0
+                        ).length;
+                        return streamCount > 0 ? streamCount : "";
+                      })()}
+                    </TableCell>
                     <TableCell align="right">
                       {p.videoStreams.length > 0 ? p.videoStreams.length : ""}
                     </TableCell>
@@ -558,17 +583,41 @@ export default function DiscDetail() {
           </TableContainer>
         </Paper>
 
-        {/* Horizontal splitter between playlist and bottom row */}
+        {/* Horizontal splitter between playlist and bottom row.
+            Modern split-pane pattern: a wider transparent click area for
+            forgiving hit-testing, a subtle always-visible centered "grip"
+            pill that advertises the affordance, and a soft hover state
+            that highlights the grip + tints the whole bar with the theme
+            primary colour. */}
         <Box
+          role="separator"
+          aria-orientation="horizontal"
           onMouseDown={handleSplitterMouseDown}
           sx={(theme) => ({
-            height: 6,
+            height: 10,
+            my: "2px",
             cursor: "row-resize",
             flexShrink: 0,
-            backgroundColor: theme.palette.divider,
-            transition: "background-color 120ms",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            borderRadius: 1,
+            transition: "background-color 150ms",
+            "&::after": {
+              content: '""',
+              display: "block",
+              width: 40,
+              height: 3,
+              borderRadius: 1.5,
+              backgroundColor: theme.palette.action.disabled,
+              transition: "background-color 150ms, width 150ms",
+            },
             "&:hover": {
+              backgroundColor: theme.palette.action.hover,
+            },
+            "&:hover::after": {
               backgroundColor: theme.palette.primary.main,
+              width: 56,
             },
           })}
         />
@@ -606,16 +655,39 @@ export default function DiscDetail() {
                 />
               </Paper>
 
-              {/* Vertical splitter */}
+              {/* Vertical splitter — same pattern as the horizontal one
+                  rotated 90°: wider drag area, centered grip pill, soft
+                  hover highlight. */}
               <Box
+                role="separator"
+                aria-orientation="vertical"
                 onMouseDown={handleInfoSplitterMouseDown}
                 sx={(theme) => ({
-                  width: 6,
+                  width: 10,
+                  mx: "2px",
                   cursor: "col-resize",
                   flexShrink: 0,
-                  backgroundColor: theme.palette.divider,
-                  transition: "background-color 120ms",
-                  "&:hover": { backgroundColor: theme.palette.primary.main },
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderRadius: 1,
+                  transition: "background-color 150ms",
+                  "&::after": {
+                    content: '""',
+                    display: "block",
+                    width: 3,
+                    height: 40,
+                    borderRadius: 1.5,
+                    backgroundColor: theme.palette.action.disabled,
+                    transition: "background-color 150ms, height 150ms",
+                  },
+                  "&:hover": {
+                    backgroundColor: theme.palette.action.hover,
+                  },
+                  "&:hover::after": {
+                    backgroundColor: theme.palette.primary.main,
+                    height: 56,
+                  },
                 })}
               />
 
@@ -816,8 +888,24 @@ function TrackTable({
             const estimatedBytes =
               bitRate > 0 && lengthSeconds > 0 ? (bitRate * lengthSeconds) / 8 : 0;
             return (
-              <TableRow key={`${s.pid}-${i}`}>
-                <TableCell>{`0x${s.pid.toString(16).toUpperCase().padStart(4, "0")}`}</TableCell>
+              <TableRow
+                key={`${s.pid}-${i}`}
+                // Hidden tracks render in a muted color so they're visually
+                // distinct from declared (MPLS) streams.
+                sx={s.isHidden ? { color: "text.secondary", "& .MuiTableCell-root": { color: "text.secondary" } } : undefined}
+              >
+                <TableCell>
+                  {s.isHidden && (
+                    <Tooltip title={t("disc.hiddenTrack")}>
+                      <VisibilityOffIcon
+                        // fontSize: "inherit" makes the icon scale to the
+                        // text size, so it doesn't push the row taller.
+                        sx={{ fontSize: "inherit", verticalAlign: "middle", mr: 0.5 }}
+                      />
+                    </Tooltip>
+                  )}
+                  {`0x${s.pid.toString(16).toUpperCase().padStart(4, "0")}`}
+                </TableCell>
                 <TableCell>{s.codecShortName || s.codecName}</TableCell>
                 <TableCell>{s.languageName || s.languageCode}</TableCell>
                 <TableCell align="right">

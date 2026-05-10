@@ -90,6 +90,7 @@
     "avgFrameSize": "Tamaño de Cuadro Medio",
     "maxFrameSize": "Tamaño de Cuadro Máx",
     "maxFrameTime": "Tiempo de Cuadro Máx",
+    "hiddenTrack": "Pista Oculta",
     "noPlaylistSelected": "Ninguna lista de reproducción seleccionada.",
     "noDiscMarker": "La carpeta no parece ser un Blu-ray (sin BDMV/index.bdmv).",
     "isUHD": "UHD",

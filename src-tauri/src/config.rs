@@ -43,7 +43,7 @@ fn default_disc_info_split() -> f32 {
 }
 
 fn default_info_panel_split() -> f32 {
-    0.5
+    0.4
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -137,7 +137,7 @@ impl Default for Config {
             scan: Default::default(),
             formatting: Default::default(),
             disc_info_split: 0.5,
-            info_panel_split: 0.5,
+            info_panel_split: 0.4,
             update: Default::default(),
             window: Default::default(),
         }

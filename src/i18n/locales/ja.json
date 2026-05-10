@@ -90,6 +90,7 @@
     "avgFrameSize": "平均フレームサイズ",
     "maxFrameSize": "最大フレームサイズ",
     "maxFrameTime": "最大フレーム時間",
+    "hiddenTrack": "非表示トラック",
     "noPlaylistSelected": "プレイリストが選択されていません。",
     "noDiscMarker": "フォルダーは Blu-ray ではないようです (BDMV/index.bdmv が見つかりません)。",
     "isUHD": "UHD",

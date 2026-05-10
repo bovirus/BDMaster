@@ -90,6 +90,7 @@
     "avgFrameSize": "Durchschn. Bildgröße",
     "maxFrameSize": "Max. Bildgröße",
     "maxFrameTime": "Max. Bildzeit",
+    "hiddenTrack": "Versteckter Titel",
     "noPlaylistSelected": "Keine Wiedergabeliste ausgewählt.",
     "noDiscMarker": "Der Ordner scheint keine Blu-ray zu sein (keine BDMV/index.bdmv).",
     "isUHD": "UHD",
