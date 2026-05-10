@@ -6,12 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Box,
-  Button,
   Chip,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   IconButton,
   Paper,
   Stack,
@@ -25,23 +20,18 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import ContentCopyIcon from "@mui/icons-material/ContentCopy";
-import SaveIcon from "@mui/icons-material/Save";
 import ShowChartIcon from "@mui/icons-material/ShowChart";
 import DescriptionIcon from "@mui/icons-material/Description";
-import CloseIcon from "@mui/icons-material/Close";
 import MovieIcon from "@mui/icons-material/Movie";
 import AudiotrackIcon from "@mui/icons-material/Audiotrack";
 import SubtitlesIcon from "@mui/icons-material/Subtitles";
 import BookmarkIcon from "@mui/icons-material/Bookmark";
 import SummarizeIcon from "@mui/icons-material/Summarize";
 import { useTranslation } from "react-i18next";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import * as Protocol from "../lib/protocol";
 import { useAppStore } from "../lib/store";
-import { generateReport, getPlaylistChartData, setConfig as saveConfig, writeTextFile } from "../lib/service";
-import { openSaveReportDialog } from "../lib/dialog";
-import { formatBitRate, formatLength45k, formatLengthSeconds, formatSize } from "../lib/format";
+import { setConfig as saveConfig } from "../lib/service";
+import { formatLength45k, formatBitRate, formatSize } from "../lib/format";
 
 type PlaylistSortKey =
   | "name"
@@ -173,7 +163,6 @@ export default function DiscDetail() {
   const disc = useAppStore((s) => s.disc);
   const config = useAppStore((s) => s.config);
   const setConfigState = useAppStore((s) => s.setConfig);
-  const setNotification = useAppStore((s) => s.setDialogNotification);
   const [sortKey, setSortKey] = useState<PlaylistSortKey>("fileSize");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -233,10 +222,6 @@ export default function DiscDetail() {
     config?.formatting?.bitRate?.precision ?? Protocol.FormatPrecision.Two;
   const bitRateUnit = config?.formatting?.bitRate?.unit ?? Protocol.FormatUnit.KMGT;
   const [selectedPlaylist, setSelectedPlaylist] = useState<string | null>(null);
-  const [reportText, setReportText] = useState<string | null>(null);
-  const [reportTitle, setReportTitle] = useState<string>("");
-  const [chartOpen, setChartOpen] = useState(false);
-  const [chartData, setChartData] = useState<{ time: number; bitRate: number }[]>([]);
 
   // Sort state for the Stream (clip) table inside the info panel.
   const [streamSortKey, setStreamSortKey] = useState<StreamSortKey>("index");
@@ -312,6 +297,22 @@ export default function DiscDetail() {
     setTabQuickSummaryStatus(Protocol.ControlStatus.Selected);
   };
 
+  // Open the Full Report tab for the given playlist.
+  const setTabFullReportStatus = useAppStore((s) => s.setTabFullReportStatus);
+  const setFullReportPlaylist = useAppStore((s) => s.setFullReportPlaylist);
+  const handleViewFullReport = (name: string) => {
+    setFullReportPlaylist(name);
+    setTabFullReportStatus(Protocol.ControlStatus.Selected);
+  };
+
+  // Open the Bit Rate tab for the given playlist.
+  const setTabBitRateStatus = useAppStore((s) => s.setTabBitRateStatus);
+  const setBitRatePlaylist = useAppStore((s) => s.setBitRatePlaylist);
+  const handleViewBitRate = (name: string) => {
+    setBitRatePlaylist(name);
+    setTabBitRateStatus(Protocol.ControlStatus.Selected);
+  };
+
   const sortedPlaylists = useMemo(() => {
     if (!disc) return [];
     return stableSort(disc.playlists, comparePlaylists(sortKey, sortDir));
@@ -341,65 +342,6 @@ export default function DiscDetail() {
   if (!disc) {
     return <Box sx={{ p: 2 }}>Loading…</Box>;
   }
-
-  const handleGenerateReport = async (full: boolean) => {
-    try {
-      const text = await generateReport(
-        disc.path,
-        full,
-        selectedPlaylist ? [selectedPlaylist] : null
-      );
-      setReportText(text);
-      setReportTitle(full ? t("disc.generateFullReport") : t("disc.generateQuickSummary"));
-    } catch (error) {
-      setNotification({
-        title: `${error}`,
-        type: Protocol.DialogNotificationType.Error,
-      });
-    }
-  };
-
-  const handleCopyReport = async () => {
-    if (!reportText) return;
-    await writeText(reportText);
-    setNotification({
-      title: "Report copied to clipboard.",
-      type: Protocol.DialogNotificationType.Info,
-    });
-  };
-
-  const handleSaveReport = async () => {
-    if (!reportText) return;
-    const filePath = await openSaveReportDialog();
-    if (filePath) {
-      try {
-        await writeTextFile(filePath as string, reportText);
-        setNotification({
-          title: `Saved to ${filePath}`,
-          type: Protocol.DialogNotificationType.Info,
-        });
-      } catch (error) {
-        setNotification({
-          title: `${error}`,
-          type: Protocol.DialogNotificationType.Error,
-        });
-      }
-    }
-  };
-
-  const handleViewChart = async () => {
-    if (!selectedPlaylist) return;
-    try {
-      const data = await getPlaylistChartData(disc.path, selectedPlaylist);
-      setChartData(data);
-      setChartOpen(true);
-    } catch (error) {
-      setNotification({
-        title: `${error}`,
-        type: Protocol.DialogNotificationType.Error,
-      });
-    }
-  };
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1, p: 1, height: "100%" }}>
@@ -581,18 +523,6 @@ export default function DiscDetail() {
                     </TableCell>
                     <TableCell align="center" padding="none">
                       <Stack direction="row" spacing={0.5} sx={{ justifyContent: "center" }}>
-                        <Tooltip title={t("disc.generateQuickSummary")}>
-                          <IconButton
-                            size="small"
-                            sx={{ p: 0 }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleViewQuickSummary(p.name);
-                            }}
-                          >
-                            <SummarizeIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
                         {p.chapters.length > 0 && (
                           <Tooltip title={t("disc.viewChapters")}>
                             <IconButton
@@ -607,6 +537,42 @@ export default function DiscDetail() {
                             </IconButton>
                           </Tooltip>
                         )}
+                        <Tooltip title={t("disc.generateQuickSummary")}>
+                          <IconButton
+                            size="small"
+                            sx={{ p: 0 }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleViewQuickSummary(p.name);
+                            }}
+                          >
+                            <SummarizeIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title={t("disc.generateFullReport")}>
+                          <IconButton
+                            size="small"
+                            sx={{ p: 0 }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleViewFullReport(p.name);
+                            }}
+                          >
+                            <DescriptionIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title={t("disc.viewBitRateReport")}>
+                          <IconButton
+                            size="small"
+                            sx={{ p: 0 }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleViewBitRate(p.name);
+                            }}
+                          >
+                            <ShowChartIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
                       </Stack>
                     </TableCell>
                   </TableRow>
@@ -677,45 +643,16 @@ export default function DiscDetail() {
                 })}
               />
 
-              {/* Right column: track table over button row */}
-              <Box
-                sx={{
-                  flex: 1,
-                  minHeight: 0,
-                  minWidth: 0,
-                  display: "flex",
-                  flexDirection: "column",
-                }}
-              >
-                <Paper variant="outlined" sx={{ overflow: "auto", minHeight: 0, flex: 1 }}>
-                  <TrackTable
-                    playlist={playlist}
-                    bitRatePrecision={bitRatePrecision}
-                    bitRateUnit={bitRateUnit}
-                    sizePrecision={sizePrecision}
-                    sizeUnit={sizeUnit}
-                  />
-                </Paper>
-
-                <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: "wrap", gap: 1, alignItems: "center" }}>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<DescriptionIcon />}
-                    onClick={() => handleGenerateReport(true)}
-                  >
-                    {t("disc.generateFullReport")}
-                  </Button>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<ShowChartIcon />}
-                    onClick={handleViewChart}
-                  >
-                    {t("disc.viewBitRateReport")}
-                  </Button>
-                </Stack>
-              </Box>
+              {/* Track table */}
+              <Paper variant="outlined" sx={{ overflow: "auto", minHeight: 0, flex: 1 }}>
+                <TrackTable
+                  playlist={playlist}
+                  bitRatePrecision={bitRatePrecision}
+                  bitRateUnit={bitRateUnit}
+                  sizePrecision={sizePrecision}
+                  sizeUnit={sizeUnit}
+                />
+              </Paper>
             </>
           ) : (
             <Typography variant="body2" color="text.secondary" sx={{ p: 1 }}>
@@ -724,58 +661,6 @@ export default function DiscDetail() {
           )}
         </Box>
       </Box>
-
-      {/* Report dialog */}
-      <Dialog open={reportText !== null} onClose={() => setReportText(null)} maxWidth="lg" fullWidth>
-        <DialogTitle>
-          {reportTitle}
-          <IconButton
-            onClick={() => setReportText(null)}
-            sx={{ position: "absolute", right: 8, top: 8 }}
-          >
-            <CloseIcon />
-          </IconButton>
-        </DialogTitle>
-        <DialogContent dividers>
-          <Box
-            component="pre"
-            sx={{
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-              fontSize: "0.75rem",
-              whiteSpace: "pre-wrap",
-              m: 0,
-              maxHeight: "70vh",
-              overflow: "auto",
-            }}
-          >
-            {reportText}
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button startIcon={<ContentCopyIcon />} onClick={handleCopyReport}>
-            {t("disc.copyReport")}
-          </Button>
-          <Button startIcon={<SaveIcon />} onClick={handleSaveReport}>
-            {t("disc.saveReport")}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Chart dialog */}
-      <Dialog open={chartOpen} onClose={() => setChartOpen(false)} maxWidth="lg" fullWidth>
-        <DialogTitle>
-          {t("disc.viewBitRateReport")}
-          <IconButton
-            onClick={() => setChartOpen(false)}
-            sx={{ position: "absolute", right: 8, top: 8 }}
-          >
-            <CloseIcon />
-          </IconButton>
-        </DialogTitle>
-        <DialogContent dividers>
-          <BitrateChart data={chartData} />
-        </DialogContent>
-      </Dialog>
     </Box>
   );
 }
@@ -964,39 +849,5 @@ function TrackTable({
         </TableBody>
       </Table>
     </TableContainer>
-  );
-}
-
-function BitrateChart({ data }: { data: { time: number; bitRate: number }[] }) {
-  if (data.length === 0) {
-    return <Typography variant="body2">No bitrate data.</Typography>;
-  }
-  const width = 800;
-  const height = 300;
-  const padX = 40;
-  const padY = 20;
-  const maxBitRate = Math.max(...data.map((d) => d.bitRate), 1);
-  const maxTime = Math.max(...data.map((d) => d.time), 1);
-  const points = data
-    .map((d) => {
-      const x = padX + ((d.time / maxTime) * (width - 2 * padX));
-      const y = height - padY - ((d.bitRate / maxBitRate) * (height - 2 * padY));
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-  return (
-    <Box>
-      <svg width={width} height={height} style={{ background: "rgba(0,0,0,0.04)" }}>
-        <polyline points={points} fill="none" stroke="#0288d1" strokeWidth="1.5" />
-        <line x1={padX} y1={height - padY} x2={width - padX} y2={height - padY} stroke="#999" />
-        <line x1={padX} y1={padY} x2={padX} y2={height - padY} stroke="#999" />
-        <text x={padX} y={padY - 4} fontSize="10" fill="#666">
-          {formatBitRate(maxBitRate)}
-        </text>
-        <text x={width - padX} y={height - padY + 12} fontSize="10" fill="#666" textAnchor="end">
-          {formatLengthSeconds(maxTime)}
-        </text>
-      </svg>
-    </Box>
   );
 }

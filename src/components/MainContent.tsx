@@ -18,6 +18,8 @@ import {
 import CloseIcon from "@mui/icons-material/Close";
 import BookmarkIcon from "@mui/icons-material/Bookmark";
 import SummarizeIcon from "@mui/icons-material/Summarize";
+import DescriptionIcon from "@mui/icons-material/Description";
+import ShowChartIcon from "@mui/icons-material/ShowChart";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow, type DragDropEvent } from "@tauri-apps/api/window";
 import type { Event, UnlistenFn } from "@tauri-apps/api/event";
@@ -31,6 +33,8 @@ import Config from "./Config";
 import About from "./About";
 import ChaptersTab from "./ChaptersTab";
 import QuickSummaryTab from "./QuickSummaryTab";
+import FullReportTab from "./FullReportTab";
+import BitRateTab from "./BitRateTab";
 
 const RELEASES_URL = "https://github.com/caoccao/BDMaster/releases";
 
@@ -50,12 +54,18 @@ export default function MainContent() {
   const tabSettingsStatus = useAppStore((state) => state.tabSettingsStatus);
   const tabChaptersStatus = useAppStore((state) => state.tabChaptersStatus);
   const tabQuickSummaryStatus = useAppStore((state) => state.tabQuickSummaryStatus);
+  const tabFullReportStatus = useAppStore((state) => state.tabFullReportStatus);
+  const tabBitRateStatus = useAppStore((state) => state.tabBitRateStatus);
   const setTabAboutStatus = useAppStore((state) => state.setTabAboutStatus);
   const setTabSettingsStatus = useAppStore((state) => state.setTabSettingsStatus);
   const setTabChaptersStatus = useAppStore((state) => state.setTabChaptersStatus);
   const setTabQuickSummaryStatus = useAppStore((state) => state.setTabQuickSummaryStatus);
+  const setTabFullReportStatus = useAppStore((state) => state.setTabFullReportStatus);
+  const setTabBitRateStatus = useAppStore((state) => state.setTabBitRateStatus);
   const chapterPlaylist = useAppStore((state) => state.chapterPlaylist);
   const quickSummaryPlaylist = useAppStore((state) => state.quickSummaryPlaylist);
+  const fullReportPlaylist = useAppStore((state) => state.fullReportPlaylist);
+  const bitRatePlaylist = useAppStore((state) => state.bitRatePlaylist);
 
   const [newVersion, setNewVersion] = useState<string | null>(null);
   const [skipChecked, setSkipChecked] = useState(false);
@@ -103,6 +113,12 @@ export default function MainContent() {
       if (tabQuickSummaryStatus !== Protocol.ControlStatus.Hidden) {
         controls.push({ type: Protocol.TabType.QuickSummary, index: 0 });
       }
+      if (tabFullReportStatus !== Protocol.ControlStatus.Hidden) {
+        controls.push({ type: Protocol.TabType.FullReport, index: 0 });
+      }
+      if (tabBitRateStatus !== Protocol.ControlStatus.Hidden) {
+        controls.push({ type: Protocol.TabType.BitRate, index: 0 });
+      }
       controls.forEach((c, i) => (c.index = i));
 
       const current = prev[tabIndex];
@@ -114,7 +130,7 @@ export default function MainContent() {
       }
       return controls;
     });
-  }, [tabAboutStatus, tabSettingsStatus, tabChaptersStatus, tabQuickSummaryStatus]);
+  }, [tabAboutStatus, tabSettingsStatus, tabChaptersStatus, tabQuickSummaryStatus, tabFullReportStatus, tabBitRateStatus]);
 
   // Handle Selected status: jump to that tab.
   useEffect(() => {
@@ -157,6 +173,26 @@ export default function MainContent() {
     }
   }, [tabQuickSummaryStatus, tabControls, setTabQuickSummaryStatus]);
 
+  useEffect(() => {
+    if (tabFullReportStatus === Protocol.ControlStatus.Selected) {
+      const t = tabControls.find((c) => c.type === Protocol.TabType.FullReport);
+      if (t) {
+        setTabIndex(t.index);
+        setTabFullReportStatus(Protocol.ControlStatus.Visible);
+      }
+    }
+  }, [tabFullReportStatus, tabControls, setTabFullReportStatus]);
+
+  useEffect(() => {
+    if (tabBitRateStatus === Protocol.ControlStatus.Selected) {
+      const t = tabControls.find((c) => c.type === Protocol.TabType.BitRate);
+      if (t) {
+        setTabIndex(t.index);
+        setTabBitRateStatus(Protocol.ControlStatus.Visible);
+      }
+    }
+  }, [tabBitRateStatus, tabControls, setTabBitRateStatus]);
+
   // Keep tabIndex within bounds.
   useEffect(() => {
     if (tabIndex >= tabControls.length && tabControls.length > 0) {
@@ -181,9 +217,15 @@ export default function MainContent() {
         case Protocol.TabType.QuickSummary:
           setTabQuickSummaryStatus(Protocol.ControlStatus.Hidden);
           break;
+        case Protocol.TabType.FullReport:
+          setTabFullReportStatus(Protocol.ControlStatus.Hidden);
+          break;
+        case Protocol.TabType.BitRate:
+          setTabBitRateStatus(Protocol.ControlStatus.Hidden);
+          break;
       }
     },
-    [tabControls, setTabAboutStatus, setTabSettingsStatus, setTabChaptersStatus, setTabQuickSummaryStatus]
+    [tabControls, setTabAboutStatus, setTabSettingsStatus, setTabChaptersStatus, setTabQuickSummaryStatus, setTabFullReportStatus, setTabBitRateStatus]
   );
 
   // Keyboard shortcuts.
@@ -259,6 +301,24 @@ export default function MainContent() {
             <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
               <SummarizeIcon sx={{ fontSize: 16 }} />
               <span>{quickSummaryPlaylist ?? ""}</span>
+            </Box>
+          </Tooltip>
+        );
+      case Protocol.TabType.FullReport:
+        return (
+          <Tooltip title={t("tabs.fullReport")}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+              <DescriptionIcon sx={{ fontSize: 16 }} />
+              <span>{fullReportPlaylist ?? ""}</span>
+            </Box>
+          </Tooltip>
+        );
+      case Protocol.TabType.BitRate:
+        return (
+          <Tooltip title={t("tabs.bitRate")}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+              <ShowChartIcon sx={{ fontSize: 16 }} />
+              <span>{bitRatePlaylist ?? ""}</span>
             </Box>
           </Tooltip>
         );
@@ -374,6 +434,8 @@ export default function MainContent() {
               {control.type === Protocol.TabType.DiscInfo && <DiscInfoTab />}
               {control.type === Protocol.TabType.Chapters && <ChaptersTab />}
               {control.type === Protocol.TabType.QuickSummary && <QuickSummaryTab />}
+              {control.type === Protocol.TabType.FullReport && <FullReportTab />}
+              {control.type === Protocol.TabType.BitRate && <BitRateTab />}
             </Box>
           );
         })}

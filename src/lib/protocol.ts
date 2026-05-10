@@ -198,6 +198,8 @@ export enum TabType {
   DiscInfo,
   Chapters,
   QuickSummary,
+  FullReport,
+  BitRate,
 }
 
 export interface UpdateCheckResult {

@@ -26,10 +26,16 @@ interface AppState {
   tabSettingsStatus: Protocol.ControlStatus;
   tabChaptersStatus: Protocol.ControlStatus;
   tabQuickSummaryStatus: Protocol.ControlStatus;
+  tabFullReportStatus: Protocol.ControlStatus;
+  tabBitRateStatus: Protocol.ControlStatus;
   // Which playlist's chapters the Chapters tab should display.
   chapterPlaylist: string | null;
   // Which playlist's quick summary the QuickSummary tab should display.
   quickSummaryPlaylist: string | null;
+  // Which playlist's full report the FullReport tab should display.
+  fullReportPlaylist: string | null;
+  // Which playlist's bit-rate chart the BitRate tab should display.
+  bitRatePlaylist: string | null;
 
   // Actions
   initConfig: () => Promise<void>;
@@ -40,8 +46,12 @@ interface AppState {
   setTabSettingsStatus: (s: Protocol.ControlStatus) => void;
   setTabChaptersStatus: (s: Protocol.ControlStatus) => void;
   setTabQuickSummaryStatus: (s: Protocol.ControlStatus) => void;
+  setTabFullReportStatus: (s: Protocol.ControlStatus) => void;
+  setTabBitRateStatus: (s: Protocol.ControlStatus) => void;
   setChapterPlaylist: (name: string | null) => void;
   setQuickSummaryPlaylist: (name: string | null) => void;
+  setFullReportPlaylist: (name: string | null) => void;
+  setBitRatePlaylist: (name: string | null) => void;
   setDisc: (disc: Protocol.DiscInfo | null) => void;
   clearDisc: () => void;
   setScanningPath: (path: string | null) => void;
@@ -57,8 +67,12 @@ export const useAppStore = create<AppState>((set) => ({
   tabSettingsStatus: Protocol.ControlStatus.Hidden,
   tabChaptersStatus: Protocol.ControlStatus.Hidden,
   tabQuickSummaryStatus: Protocol.ControlStatus.Hidden,
+  tabFullReportStatus: Protocol.ControlStatus.Hidden,
+  tabBitRateStatus: Protocol.ControlStatus.Hidden,
   chapterPlaylist: null,
   quickSummaryPlaylist: null,
+  fullReportPlaylist: null,
+  bitRatePlaylist: null,
 
   initConfig: async () => {
     try {
@@ -84,8 +98,12 @@ export const useAppStore = create<AppState>((set) => ({
   setTabSettingsStatus: (tabSettingsStatus) => set({ tabSettingsStatus }),
   setTabChaptersStatus: (tabChaptersStatus) => set({ tabChaptersStatus }),
   setTabQuickSummaryStatus: (tabQuickSummaryStatus) => set({ tabQuickSummaryStatus }),
+  setTabFullReportStatus: (tabFullReportStatus) => set({ tabFullReportStatus }),
+  setTabBitRateStatus: (tabBitRateStatus) => set({ tabBitRateStatus }),
   setChapterPlaylist: (chapterPlaylist) => set({ chapterPlaylist }),
   setQuickSummaryPlaylist: (quickSummaryPlaylist) => set({ quickSummaryPlaylist }),
+  setFullReportPlaylist: (fullReportPlaylist) => set({ fullReportPlaylist }),
+  setBitRatePlaylist: (bitRatePlaylist) => set({ bitRatePlaylist }),
   setDisc: (disc) => set({ disc }),
   clearDisc: () => set({ disc: null }),
   setScanningPath: (scanningPath) => set({ scanningPath }),
