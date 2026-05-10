@@ -25,8 +25,11 @@ interface AppState {
   tabAboutStatus: Protocol.ControlStatus;
   tabSettingsStatus: Protocol.ControlStatus;
   tabChaptersStatus: Protocol.ControlStatus;
+  tabQuickSummaryStatus: Protocol.ControlStatus;
   // Which playlist's chapters the Chapters tab should display.
   chapterPlaylist: string | null;
+  // Which playlist's quick summary the QuickSummary tab should display.
+  quickSummaryPlaylist: string | null;
 
   // Actions
   initConfig: () => Promise<void>;
@@ -36,7 +39,9 @@ interface AppState {
   setTabAboutStatus: (s: Protocol.ControlStatus) => void;
   setTabSettingsStatus: (s: Protocol.ControlStatus) => void;
   setTabChaptersStatus: (s: Protocol.ControlStatus) => void;
+  setTabQuickSummaryStatus: (s: Protocol.ControlStatus) => void;
   setChapterPlaylist: (name: string | null) => void;
+  setQuickSummaryPlaylist: (name: string | null) => void;
   setDisc: (disc: Protocol.DiscInfo | null) => void;
   clearDisc: () => void;
   setScanningPath: (path: string | null) => void;
@@ -51,7 +56,9 @@ export const useAppStore = create<AppState>((set) => ({
   tabAboutStatus: Protocol.ControlStatus.Hidden,
   tabSettingsStatus: Protocol.ControlStatus.Hidden,
   tabChaptersStatus: Protocol.ControlStatus.Hidden,
+  tabQuickSummaryStatus: Protocol.ControlStatus.Hidden,
   chapterPlaylist: null,
+  quickSummaryPlaylist: null,
 
   initConfig: async () => {
     try {
@@ -76,7 +83,9 @@ export const useAppStore = create<AppState>((set) => ({
   setTabAboutStatus: (tabAboutStatus) => set({ tabAboutStatus }),
   setTabSettingsStatus: (tabSettingsStatus) => set({ tabSettingsStatus }),
   setTabChaptersStatus: (tabChaptersStatus) => set({ tabChaptersStatus }),
+  setTabQuickSummaryStatus: (tabQuickSummaryStatus) => set({ tabQuickSummaryStatus }),
   setChapterPlaylist: (chapterPlaylist) => set({ chapterPlaylist }),
+  setQuickSummaryPlaylist: (quickSummaryPlaylist) => set({ quickSummaryPlaylist }),
   setDisc: (disc) => set({ disc }),
   clearDisc: () => set({ disc: null }),
   setScanningPath: (scanningPath) => set({ scanningPath }),

@@ -6,8 +6,9 @@
 import { useMemo } from "react";
 import {
   Box,
-  Paper,
-  Stack,
+  Card,
+  CardContent,
+  CardHeader,
   Table,
   TableBody,
   TableCell,
@@ -41,35 +42,39 @@ export default function ChaptersTab() {
   }
 
   return (
-    <Box sx={{ p: 1, display: "flex", flexDirection: "column", gap: 1, height: "100%" }}>
-      <Stack direction="row" spacing={3} sx={{ flexWrap: "wrap" }}>
-        <Typography variant="caption">
-          <b>{t("disc.playlist")}:</b> {playlist.name}
-        </Typography>
-        <Typography variant="caption">
-          <b>{t("disc.chapters")}:</b> {playlist.chapters.length}
-        </Typography>
-      </Stack>
-      <Paper variant="outlined" sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-        <TableContainer>
-          <Table size="small" stickyHeader>
-            <TableHead>
-              <TableRow>
-                <TableCell sx={{ fontWeight: "bold" }} align="right">#</TableCell>
-                <TableCell sx={{ fontWeight: "bold" }}>{t("disc.length")}</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {playlist.chapters.map((sec, i) => (
-                <TableRow key={i}>
-                  <TableCell align="right">{i + 1}</TableCell>
-                  <TableCell>{formatLengthSeconds(sec)}</TableCell>
+    <Box sx={{ p: 1, display: "flex", flexDirection: "column", height: "100%" }}>
+      <Card
+        variant="outlined"
+        sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
+      >
+        <CardHeader
+          title={`${t("disc.playlist")}: ${playlist.name}`}
+          subheader={`${t("disc.chapters")}: ${playlist.chapters.length}`}
+          titleTypographyProps={{ variant: "subtitle1" }}
+          subheaderTypographyProps={{ variant: "caption" }}
+          sx={{ py: 1 }}
+        />
+        <CardContent sx={{ flex: 1, minHeight: 0, overflow: "auto", pt: 0, "&:last-child": { pb: 1 } }}>
+          <TableContainer>
+            <Table size="small" stickyHeader>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: "bold" }} align="right">#</TableCell>
+                  <TableCell sx={{ fontWeight: "bold" }}>{t("disc.length")}</TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Paper>
+              </TableHead>
+              <TableBody>
+                {playlist.chapters.map((sec, i) => (
+                  <TableRow key={i}>
+                    <TableCell align="right">{i + 1}</TableCell>
+                    <TableCell>{formatLengthSeconds(sec)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </CardContent>
+      </Card>
     </Box>
   );
 }

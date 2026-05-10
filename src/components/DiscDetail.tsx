@@ -34,6 +34,7 @@ import MovieIcon from "@mui/icons-material/Movie";
 import AudiotrackIcon from "@mui/icons-material/Audiotrack";
 import SubtitlesIcon from "@mui/icons-material/Subtitles";
 import BookmarkIcon from "@mui/icons-material/Bookmark";
+import SummarizeIcon from "@mui/icons-material/Summarize";
 import { useTranslation } from "react-i18next";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import * as Protocol from "../lib/protocol";
@@ -295,13 +296,20 @@ export default function DiscDetail() {
     [persistInfoSplit]
   );
 
-  // Open the Chapters tab for the currently selected playlist.
+  // Open the Chapters tab for the given playlist.
   const setTabChaptersStatus = useAppStore((s) => s.setTabChaptersStatus);
   const setChapterPlaylist = useAppStore((s) => s.setChapterPlaylist);
-  const handleViewChapters = () => {
-    if (!selectedPlaylist) return;
-    setChapterPlaylist(selectedPlaylist);
+  const handleViewChapters = (name: string) => {
+    setChapterPlaylist(name);
     setTabChaptersStatus(Protocol.ControlStatus.Selected);
+  };
+
+  // Open the Quick Summary tab for the given playlist.
+  const setTabQuickSummaryStatus = useAppStore((s) => s.setTabQuickSummaryStatus);
+  const setQuickSummaryPlaylist = useAppStore((s) => s.setQuickSummaryPlaylist);
+  const handleViewQuickSummary = (name: string) => {
+    setQuickSummaryPlaylist(name);
+    setTabQuickSummaryStatus(Protocol.ControlStatus.Selected);
   };
 
   const sortedPlaylists = useMemo(() => {
@@ -532,6 +540,9 @@ export default function DiscDetail() {
                   >
                     {t("disc.measuredSize")}
                   </SortableHeaderCell>
+                  <TableCell align="center" sx={{ fontWeight: "bold" }}>
+                    {t("disc.actions")}
+                  </TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -567,6 +578,36 @@ export default function DiscDetail() {
                       {p.measuredSize > 0
                         ? formatSize(p.measuredSize, sizePrecision, sizeUnit)
                         : "—"}
+                    </TableCell>
+                    <TableCell align="center" padding="none">
+                      <Stack direction="row" spacing={0.5} sx={{ justifyContent: "center" }}>
+                        <Tooltip title={t("disc.generateQuickSummary")}>
+                          <IconButton
+                            size="small"
+                            sx={{ p: 0 }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleViewQuickSummary(p.name);
+                            }}
+                          >
+                            <SummarizeIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        {p.chapters.length > 0 && (
+                          <Tooltip title={t("disc.viewChapters")}>
+                            <IconButton
+                              size="small"
+                              sx={{ p: 0 }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleViewChapters(p.name);
+                              }}
+                            >
+                              <BookmarkIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                      </Stack>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -661,14 +702,6 @@ export default function DiscDetail() {
                     size="small"
                     variant="outlined"
                     startIcon={<DescriptionIcon />}
-                    onClick={() => handleGenerateReport(false)}
-                  >
-                    {t("disc.generateQuickSummary")}
-                  </Button>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<DescriptionIcon />}
                     onClick={() => handleGenerateReport(true)}
                   >
                     {t("disc.generateFullReport")}
@@ -681,16 +714,6 @@ export default function DiscDetail() {
                   >
                     {t("disc.viewBitRateReport")}
                   </Button>
-                  {playlist.chapters.length > 0 && (
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      startIcon={<DescriptionIcon />}
-                      onClick={handleViewChapters}
-                    >
-                      {t("disc.viewChapter")}
-                    </Button>
-                  )}
                 </Stack>
               </Box>
             </>

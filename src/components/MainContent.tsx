@@ -16,6 +16,8 @@ import {
   Tooltip,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
+import BookmarkIcon from "@mui/icons-material/Bookmark";
+import SummarizeIcon from "@mui/icons-material/Summarize";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow, type DragDropEvent } from "@tauri-apps/api/window";
 import type { Event, UnlistenFn } from "@tauri-apps/api/event";
@@ -28,6 +30,7 @@ import DiscInfoTab from "./DiscInfoTab";
 import Config from "./Config";
 import About from "./About";
 import ChaptersTab from "./ChaptersTab";
+import QuickSummaryTab from "./QuickSummaryTab";
 
 const RELEASES_URL = "https://github.com/caoccao/BDMaster/releases";
 
@@ -46,9 +49,13 @@ export default function MainContent() {
   const tabAboutStatus = useAppStore((state) => state.tabAboutStatus);
   const tabSettingsStatus = useAppStore((state) => state.tabSettingsStatus);
   const tabChaptersStatus = useAppStore((state) => state.tabChaptersStatus);
+  const tabQuickSummaryStatus = useAppStore((state) => state.tabQuickSummaryStatus);
   const setTabAboutStatus = useAppStore((state) => state.setTabAboutStatus);
   const setTabSettingsStatus = useAppStore((state) => state.setTabSettingsStatus);
   const setTabChaptersStatus = useAppStore((state) => state.setTabChaptersStatus);
+  const setTabQuickSummaryStatus = useAppStore((state) => state.setTabQuickSummaryStatus);
+  const chapterPlaylist = useAppStore((state) => state.chapterPlaylist);
+  const quickSummaryPlaylist = useAppStore((state) => state.quickSummaryPlaylist);
 
   const [newVersion, setNewVersion] = useState<string | null>(null);
   const [skipChecked, setSkipChecked] = useState(false);
@@ -93,6 +100,9 @@ export default function MainContent() {
       if (tabChaptersStatus !== Protocol.ControlStatus.Hidden) {
         controls.push({ type: Protocol.TabType.Chapters, index: 0 });
       }
+      if (tabQuickSummaryStatus !== Protocol.ControlStatus.Hidden) {
+        controls.push({ type: Protocol.TabType.QuickSummary, index: 0 });
+      }
       controls.forEach((c, i) => (c.index = i));
 
       const current = prev[tabIndex];
@@ -104,7 +114,7 @@ export default function MainContent() {
       }
       return controls;
     });
-  }, [tabAboutStatus, tabSettingsStatus, tabChaptersStatus]);
+  }, [tabAboutStatus, tabSettingsStatus, tabChaptersStatus, tabQuickSummaryStatus]);
 
   // Handle Selected status: jump to that tab.
   useEffect(() => {
@@ -137,6 +147,16 @@ export default function MainContent() {
     }
   }, [tabChaptersStatus, tabControls, setTabChaptersStatus]);
 
+  useEffect(() => {
+    if (tabQuickSummaryStatus === Protocol.ControlStatus.Selected) {
+      const t = tabControls.find((c) => c.type === Protocol.TabType.QuickSummary);
+      if (t) {
+        setTabIndex(t.index);
+        setTabQuickSummaryStatus(Protocol.ControlStatus.Visible);
+      }
+    }
+  }, [tabQuickSummaryStatus, tabControls, setTabQuickSummaryStatus]);
+
   // Keep tabIndex within bounds.
   useEffect(() => {
     if (tabIndex >= tabControls.length && tabControls.length > 0) {
@@ -158,9 +178,12 @@ export default function MainContent() {
         case Protocol.TabType.Chapters:
           setTabChaptersStatus(Protocol.ControlStatus.Hidden);
           break;
+        case Protocol.TabType.QuickSummary:
+          setTabQuickSummaryStatus(Protocol.ControlStatus.Hidden);
+          break;
       }
     },
-    [tabControls, setTabAboutStatus, setTabSettingsStatus, setTabChaptersStatus]
+    [tabControls, setTabAboutStatus, setTabSettingsStatus, setTabChaptersStatus, setTabQuickSummaryStatus]
   );
 
   // Keyboard shortcuts.
@@ -215,10 +238,30 @@ export default function MainContent() {
 
   const getTabLabel = (control: TabControl) => {
     switch (control.type) {
-      case Protocol.TabType.About: return t("tabs.about");
-      case Protocol.TabType.Config: return t("tabs.settings");
-      case Protocol.TabType.DiscInfo: return t("tabs.discInfo");
-      case Protocol.TabType.Chapters: return t("tabs.chapters");
+      case Protocol.TabType.About:
+        return <span>{t("tabs.about")}</span>;
+      case Protocol.TabType.Config:
+        return <span>{t("tabs.settings")}</span>;
+      case Protocol.TabType.DiscInfo:
+        return <span>{t("tabs.discInfo")}</span>;
+      case Protocol.TabType.Chapters:
+        return (
+          <Tooltip title={t("tabs.chapters")}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+              <BookmarkIcon sx={{ fontSize: 16 }} />
+              <span>{chapterPlaylist ?? ""}</span>
+            </Box>
+          </Tooltip>
+        );
+      case Protocol.TabType.QuickSummary:
+        return (
+          <Tooltip title={t("tabs.quickSummary")}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+              <SummarizeIcon sx={{ fontSize: 16 }} />
+              <span>{quickSummaryPlaylist ?? ""}</span>
+            </Box>
+          </Tooltip>
+        );
     }
   };
 
@@ -276,7 +319,7 @@ export default function MainContent() {
               style={{ minHeight: "24px" }}
               label={
                 <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                  <span>{getTabLabel(control)}</span>
+                  {getTabLabel(control)}
                   {control.type !== Protocol.TabType.DiscInfo && (
                     <Tooltip title={t("tabs.close")}>
                       <IconButton
@@ -330,6 +373,7 @@ export default function MainContent() {
               {control.type === Protocol.TabType.Config && <Config />}
               {control.type === Protocol.TabType.DiscInfo && <DiscInfoTab />}
               {control.type === Protocol.TabType.Chapters && <ChaptersTab />}
+              {control.type === Protocol.TabType.QuickSummary && <QuickSummaryTab />}
             </Box>
           );
         })}

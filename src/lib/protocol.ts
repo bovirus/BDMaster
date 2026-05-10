@@ -197,6 +197,7 @@ export enum TabType {
   Config,
   DiscInfo,
   Chapters,
+  QuickSummary,
 }
 
 export interface UpdateCheckResult {

@@ -75,7 +75,10 @@ function App() {
         palette: { ...getPaletteByTheme(selectedTheme, mode) },
         typography: { fontSize: 12 },
         components: {
-          MuiButton: { defaultProps: { size: "small" } },
+          MuiButton: {
+            defaultProps: { size: "small" },
+            styleOverrides: { root: { textTransform: "none" } },
+          },
           MuiButtonGroup: { defaultProps: { size: "small" } },
           MuiTextField: { defaultProps: { size: "small" } },
           MuiSelect: { defaultProps: { size: "small" } },
