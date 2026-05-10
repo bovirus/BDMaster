@@ -212,10 +212,6 @@ pub struct ConfigScan {
     pub filter_short_playlists: bool,
     #[serde(rename = "filterShortPlaylistsValue", default = "default_filter_short_value")]
     pub filter_short_playlists_value: u32,
-    #[serde(rename = "useImagePrefix", default)]
-    pub use_image_prefix: bool,
-    #[serde(rename = "useImagePrefixValue", default)]
-    pub use_image_prefix_value: String,
 }
 
 fn default_true() -> bool { true }
@@ -228,8 +224,6 @@ impl Default for ConfigScan {
             filter_looping_playlists: true,
             filter_short_playlists: true,
             filter_short_playlists_value: 20,
-            use_image_prefix: false,
-            use_image_prefix_value: String::new(),
         }
     }
 }

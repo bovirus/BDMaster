@@ -697,6 +697,7 @@ fn extract_title_from_xml(xml: &str) -> Option<String> {
 }
 
 pub(crate) fn to_disc_info(bd: &BDRom) -> DiscInfo {
+    let scan_config = crate::config::get_config().scan;
     let path_str = bd.path.to_string_lossy().to_string();
     let disc_name = bd
         .path
@@ -718,7 +719,22 @@ pub(crate) fn to_disc_info(bd: &BDRom) -> DiscInfo {
     // Sort playlists by name and assign group indices. Two playlists belong
     // to the same group if they share at least one stream-clip name —
     // mirroring BDInfo's playlist grouping in FormMain.cs.
-    let mut playlist_names: Vec<&String> = bd.playlists.keys().collect();
+    let mut playlist_names: Vec<&String> = bd
+        .playlists
+        .iter()
+        .filter_map(|(name, pl)| {
+            if playlist_is_valid_for_scan(
+                pl,
+                scan_config.filter_looping_playlists,
+                scan_config.filter_short_playlists,
+                scan_config.filter_short_playlists_value,
+            ) {
+                Some(name)
+            } else {
+                None
+            }
+        })
+        .collect();
     playlist_names.sort();
     let mut groups: Vec<Vec<&String>> = Vec::new();
     let mut group_index_by_name: std::collections::HashMap<String, u32> =
@@ -896,7 +912,7 @@ fn build_playlist_info(pl: &PlaylistFile, bd: &BDRom, group_index: u32) -> Playl
         measured_size: 0,
         total_length: total_length_45k.max(0) as u64,
         has_hidden_tracks: false,
-        has_loops: false,
+        has_loops: playlist_has_loops(pl),
         is_custom: false,
         chapters: pl.chapters.clone(),
         chapter_metrics: Vec::new(),
@@ -908,6 +924,44 @@ fn build_playlist_info(pl: &PlaylistFile, bd: &BDRom, group_index: u32) -> Playl
         text_streams,
         total_angles: pl.angle_count,
     }
+}
+
+fn playlist_is_valid_for_scan(
+    pl: &PlaylistFile,
+    filter_looping_playlists: bool,
+    filter_short_playlists: bool,
+    filter_short_playlists_value: u32,
+) -> bool {
+    if filter_short_playlists {
+        let total_seconds = playlist_total_length_45k(pl) as f64 / 45000.0;
+        if total_seconds < filter_short_playlists_value as f64 {
+            return false;
+        }
+    }
+
+    if filter_looping_playlists && playlist_has_loops(pl) {
+        return false;
+    }
+
+    true
+}
+
+fn playlist_total_length_45k(pl: &PlaylistFile) -> i64 {
+    pl.stream_clips
+        .iter()
+        .filter(|c| c.angle_index == 0)
+        .map(|c| (c.time_out - c.time_in).max(0))
+        .sum()
+}
+
+fn playlist_has_loops(pl: &PlaylistFile) -> bool {
+    let mut clip_times: HashSet<(String, i64)> = HashSet::new();
+    for clip in pl.stream_clips.iter().filter(|c| c.angle_index == 0) {
+        if !clip_times.insert((clip.name.clone(), clip.time_in)) {
+            return true;
+        }
+    }
+    false
 }
 
 fn playlist_stream_to_info(s: &PlaylistStream) -> TSStreamInfo {

@@ -150,8 +150,6 @@
     "filterLoopingPlaylists": "过滤循环播放列表",
     "filterShortPlaylists": "过滤短播放列表",
     "filterShortPlaylistsValue": "最短时长 (秒)",
-    "useImagePrefix": "使用镜像前缀",
-    "useImagePrefixValue": "镜像前缀",
     "formatting": "格式化",
     "bitRate": "比特率",
     "size": "大小",

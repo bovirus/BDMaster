@@ -387,22 +387,6 @@ export default function Config() {
               />
             </Stack>
           </SettingRow>
-          <SettingRow label={t("settings.useImagePrefix")}>
-            <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-              <Switch
-                checked={draft.scan.useImagePrefix}
-                onChange={(e) => updateScan({ useImagePrefix: e.target.checked })}
-              />
-              <TextField
-                size="small"
-                placeholder={t("settings.useImagePrefixValue")}
-                value={draft.scan.useImagePrefixValue}
-                onChange={(e) => updateScan({ useImagePrefixValue: e.target.value })}
-                disabled={!draft.scan.useImagePrefix}
-                sx={{ width: 200 }}
-              />
-            </Stack>
-          </SettingRow>
         </Stack>
       </Paper>
 

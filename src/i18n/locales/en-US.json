@@ -150,8 +150,6 @@
     "filterLoopingPlaylists": "Filter Looping Playlists",
     "filterShortPlaylists": "Filter Short Playlists",
     "filterShortPlaylistsValue": "Minimum length (seconds)",
-    "useImagePrefix": "Use Image Prefix",
-    "useImagePrefixValue": "Image Prefix",
     "formatting": "Formatting",
     "bitRate": "Bit Rate",
     "size": "Size",

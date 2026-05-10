@@ -150,8 +150,6 @@
     "filterLoopingPlaylists": "過濾循環播放清單",
     "filterShortPlaylists": "過濾短播放清單",
     "filterShortPlaylistsValue": "最短長度(秒)",
-    "useImagePrefix": "使用映像前綴",
-    "useImagePrefixValue": "映像前綴",
     "formatting": "格式化",
     "bitRate": "位元率",
     "size": "大小",

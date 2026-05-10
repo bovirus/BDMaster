@@ -104,8 +104,6 @@ export interface ConfigScan {
   filterLoopingPlaylists: boolean;
   filterShortPlaylists: boolean;
   filterShortPlaylistsValue: number;
-  useImagePrefix: boolean;
-  useImagePrefixValue: string;
 }
 
 export interface Config {

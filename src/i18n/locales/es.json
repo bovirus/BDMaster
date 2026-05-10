@@ -150,8 +150,6 @@
     "filterLoopingPlaylists": "Filtrar listas de reproducción en bucle",
     "filterShortPlaylists": "Filtrar listas de reproducción cortas",
     "filterShortPlaylistsValue": "Duración mínima (segundos)",
-    "useImagePrefix": "Usar prefijo de imagen",
-    "useImagePrefixValue": "Prefijo de imagen",
     "formatting": "Formato",
     "bitRate": "Tasa de bits",
     "size": "Tamaño",

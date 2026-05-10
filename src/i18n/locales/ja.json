@@ -150,8 +150,6 @@
     "filterLoopingPlaylists": "ループするプレイリストを除外",
     "filterShortPlaylists": "短いプレイリストを除外",
     "filterShortPlaylistsValue": "最小の長さ (秒)",
-    "useImagePrefix": "イメージプレフィックスを使用",
-    "useImagePrefixValue": "イメージプレフィックス",
     "formatting": "書式",
     "bitRate": "ビットレート",
     "size": "サイズ",
