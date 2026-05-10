@@ -146,7 +146,7 @@ export default function DiscDetail() {
   const [sortKey, setSortKey] = useState<PlaylistSortKey>("fileSize");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
-  // Resizable splitter between the playlist table and the info panel.
+  // Horizontal splitter between the playlist table (top) and the bottom row.
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [splitFraction, setSplitFraction] = useState<number>(
     config?.discInfoSplit ?? 0.5
@@ -176,8 +176,8 @@ export default function DiscDetail() {
       const onMove = (ev: MouseEvent) => {
         const rect = containerRef.current?.getBoundingClientRect();
         if (!rect || !draggingRef.current) return;
-        const x = ev.clientX - rect.left;
-        const fraction = Math.max(0.1, Math.min(0.9, x / rect.width));
+        const y = ev.clientY - rect.top;
+        const fraction = Math.max(0.1, Math.min(0.9, y / rect.height));
         setSplitFraction(fraction);
       };
       const onUp = () => {
@@ -219,8 +219,8 @@ export default function DiscDetail() {
     }
   };
 
-  // Horizontal splitter inside the info panel: stream table on top, track
-  // table below, button row pinned at the bottom.
+  // Vertical splitter in the bottom row: stream table on the left, track
+  // table (with the button row beneath it) on the right.
   const infoPanelRef = useRef<HTMLDivElement | null>(null);
   const [infoSplitFraction, setInfoSplitFraction] = useState<number>(
     config?.infoPanelSplit ?? 0.5
@@ -246,8 +246,8 @@ export default function DiscDetail() {
       const onMove = (ev: MouseEvent) => {
         const rect = infoPanelRef.current?.getBoundingClientRect();
         if (!rect || !infoDraggingRef.current) return;
-        const y = ev.clientY - rect.top;
-        const fraction = Math.max(0.1, Math.min(0.9, y / rect.height));
+        const x = ev.clientX - rect.left;
+        const fraction = Math.max(0.1, Math.min(0.9, x / rect.width));
         setInfoSplitFraction(fraction);
       };
       const onUp = () => {
@@ -400,17 +400,17 @@ export default function DiscDetail() {
         </Stack>
       </Paper>
 
-      {/* Body: playlists | splitter | info panel */}
+      {/* Body: playlist (top) — splitter — stream | splitter | track + buttons */}
       <Box
         ref={containerRef}
         sx={{
           flex: 1,
           minHeight: 0,
           display: "flex",
-          flexDirection: "row",
+          flexDirection: "column",
         }}
       >
-        {/* Playlist list */}
+        {/* Playlist list (full row) */}
         <Paper
           variant="outlined"
           sx={{
@@ -491,12 +491,12 @@ export default function DiscDetail() {
           </TableContainer>
         </Paper>
 
-        {/* Draggable vertical splitter */}
+        {/* Horizontal splitter between playlist and bottom row */}
         <Box
           onMouseDown={handleSplitterMouseDown}
           sx={(theme) => ({
-            width: 6,
-            cursor: "col-resize",
+            height: 6,
+            cursor: "row-resize",
             flexShrink: 0,
             backgroundColor: theme.palette.divider,
             transition: "background-color 120ms",
@@ -506,7 +506,7 @@ export default function DiscDetail() {
           })}
         />
 
-        {/* Right panel: stream table | splitter | track table | buttons */}
+        {/* Bottom row: stream table | splitter | (track table + buttons) */}
         <Box
           ref={infoPanelRef}
           sx={{
@@ -514,8 +514,7 @@ export default function DiscDetail() {
             minHeight: 0,
             minWidth: 0,
             display: "flex",
-            flexDirection: "column",
-            gap: 0,
+            flexDirection: "row",
           }}
         >
           {playlist ? (
@@ -526,6 +525,7 @@ export default function DiscDetail() {
                 sx={{
                   overflow: "auto",
                   minHeight: 0,
+                  minWidth: 0,
                   flex: `0 0 ${(infoSplitFraction * 100).toFixed(2)}%`,
                 }}
               >
@@ -539,12 +539,12 @@ export default function DiscDetail() {
                 />
               </Paper>
 
-              {/* Horizontal splitter */}
+              {/* Vertical splitter */}
               <Box
                 onMouseDown={handleInfoSplitterMouseDown}
                 sx={(theme) => ({
-                  height: 6,
-                  cursor: "row-resize",
+                  width: 6,
+                  cursor: "col-resize",
                   flexShrink: 0,
                   backgroundColor: theme.palette.divider,
                   transition: "background-color 120ms",
@@ -552,54 +552,63 @@ export default function DiscDetail() {
                 })}
               />
 
-              {/* Track table */}
-              <Paper variant="outlined" sx={{ overflow: "auto", minHeight: 0, flex: 1 }}>
-                <TrackTable
-                  playlist={playlist}
-                  bitRatePrecision={bitRatePrecision}
-                  bitRateUnit={bitRateUnit}
-                  sizePrecision={sizePrecision}
-                  sizeUnit={sizeUnit}
-                />
-              </Paper>
+              {/* Right column: track table over button row */}
+              <Box
+                sx={{
+                  flex: 1,
+                  minHeight: 0,
+                  minWidth: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
+                <Paper variant="outlined" sx={{ overflow: "auto", minHeight: 0, flex: 1 }}>
+                  <TrackTable
+                    playlist={playlist}
+                    bitRatePrecision={bitRatePrecision}
+                    bitRateUnit={bitRateUnit}
+                    sizePrecision={sizePrecision}
+                    sizeUnit={sizeUnit}
+                  />
+                </Paper>
 
-              {/* Button row */}
-              <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: "wrap", gap: 1, alignItems: "center" }}>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<DescriptionIcon />}
-                  onClick={() => handleGenerateReport(false)}
-                >
-                  {t("disc.generateQuickSummary")}
-                </Button>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<DescriptionIcon />}
-                  onClick={() => handleGenerateReport(true)}
-                >
-                  {t("disc.generateFullReport")}
-                </Button>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<ShowChartIcon />}
-                  onClick={handleViewChart}
-                >
-                  {t("disc.viewBitRateReport")}
-                </Button>
-                {playlist.chapters.length > 0 && (
+                <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: "wrap", gap: 1, alignItems: "center" }}>
                   <Button
                     size="small"
                     variant="outlined"
                     startIcon={<DescriptionIcon />}
-                    onClick={handleViewChapters}
+                    onClick={() => handleGenerateReport(false)}
                   >
-                    {t("disc.viewChapter")}
+                    {t("disc.generateQuickSummary")}
                   </Button>
-                )}
-              </Stack>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<DescriptionIcon />}
+                    onClick={() => handleGenerateReport(true)}
+                  >
+                    {t("disc.generateFullReport")}
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<ShowChartIcon />}
+                    onClick={handleViewChart}
+                  >
+                    {t("disc.viewBitRateReport")}
+                  </Button>
+                  {playlist.chapters.length > 0 && (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<DescriptionIcon />}
+                      onClick={handleViewChapters}
+                    >
+                      {t("disc.viewChapter")}
+                    </Button>
+                  )}
+                </Stack>
+              </Box>
             </>
           ) : (
             <Typography variant="body2" color="text.secondary" sx={{ p: 1 }}>
