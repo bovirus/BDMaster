@@ -68,7 +68,6 @@
     "viewDetails": "檢視詳細資料",
     "viewChart": "檢視位元率圖表",
     "viewBitRateReport": "檢視位元率報告",
-    "viewChapters": "檢視章節",
     "openInMkvToolNixGui": "在 MKVToolNix GUI 中開啟",
     "openInMkvToolNixGuiFailed": "無法開啟 MKVToolNix GUI：{{message}}",
     "mkvToolNixGuiNotConfigured": "尚未設定 MKVToolNix GUI。請在「設定」中指定 MKVToolNix 路徑。",
@@ -113,7 +112,9 @@
     "scanning": "正在掃描 {{file}}…",
     "scanFailed": "掃描失敗：{{message}}",
     "elapsed": "已用時",
-    "remaining": "剩餘"
+    "remaining": "剩餘",
+    "reportCopied": "報告已複製到剪貼簿。",
+    "savedTo": "已儲存到 {{path}}"
   },
   "settings": {
     "title": "設定",
@@ -184,6 +185,36 @@
   },
   "fileFilter": {
     "text": "文字",
-    "json": "JSON"
+    "json": "JSON",
+    "html": "HTML"
+  },
+  "report": {
+    "name": "名稱",
+    "value": "值",
+    "discTitle": "光碟標題",
+    "discVolume": "光碟卷名",
+    "discPath": "光碟路徑",
+    "discSize": "光碟大小",
+    "discLabel": "光碟標籤",
+    "protection": "保護",
+    "extras": "額外資訊",
+    "playlistReport": "播放清單報告",
+    "overview": "概覽",
+    "streams": "串流",
+    "files": "檔案",
+    "clips": "片段",
+    "movieSize": "影片大小",
+    "totalBitrate": "總位元率",
+    "videoBitrate": "視訊位元率",
+    "mainAudioTrack": "主要音軌",
+    "secondaryAudioTrack": "次要音軌",
+    "total": "總計",
+    "none": "（無）",
+    "hmsMs": "時:分:秒.毫秒",
+    "emptyValue": "-",
+    "bytes": "位元組",
+    "kbps": "kbps",
+    "mbps": "Mbps",
+    "application": "應用程式"
   }
 }

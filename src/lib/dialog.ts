@@ -14,8 +14,10 @@ export async function openDiscDirectoryDialog() {
   }
 }
 
-export async function openSaveReportDialog() {
-  return await save({
-    filters: [{ name: i18n.t("fileFilter.text"), extensions: ["txt"] }],
-  });
+export async function openSaveReportDialog(kind: "text" | "html" = "text") {
+  const filter =
+    kind === "html"
+      ? { name: i18n.t("fileFilter.html"), extensions: ["html", "htm"] }
+      : { name: i18n.t("fileFilter.text"), extensions: ["txt"] };
+  return await save({ filters: [filter] });
 }

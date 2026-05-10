@@ -68,7 +68,6 @@
     "viewDetails": "Details anzeigen",
     "viewChart": "Bitraten-Diagramm anzeigen",
     "viewBitRateReport": "Bitraten-Bericht anzeigen",
-    "viewChapters": "Kapitel anzeigen",
     "openInMkvToolNixGui": "In MKVToolNix GUI öffnen",
     "openInMkvToolNixGuiFailed": "MKVToolNix GUI konnte nicht geöffnet werden: {{message}}",
     "mkvToolNixGuiNotConfigured": "MKVToolNix GUI ist nicht konfiguriert. Bitte legen Sie den MKVToolNix-Pfad in den Einstellungen fest.",
@@ -113,7 +112,9 @@
     "scanning": "Scannt {{file}}…",
     "scanFailed": "Scan fehlgeschlagen: {{message}}",
     "elapsed": "Verstrichen",
-    "remaining": "Verbleibend"
+    "remaining": "Verbleibend",
+    "reportCopied": "Bericht wurde in die Zwischenablage kopiert.",
+    "savedTo": "Gespeichert unter {{path}}"
   },
   "settings": {
     "title": "Einstellungen",
@@ -184,6 +185,36 @@
   },
   "fileFilter": {
     "text": "Text",
-    "json": "JSON"
+    "json": "JSON",
+    "html": "HTML"
+  },
+  "report": {
+    "name": "Name",
+    "value": "Wert",
+    "discTitle": "Disc-Titel",
+    "discVolume": "Disc-Volume",
+    "discPath": "Disc-Pfad",
+    "discSize": "Disc-Größe",
+    "discLabel": "Disc-Label",
+    "protection": "Schutz",
+    "extras": "Zusatzinformationen",
+    "playlistReport": "Playlist-Bericht",
+    "overview": "Übersicht",
+    "streams": "Datenströme",
+    "files": "Dateien",
+    "clips": "Abschnitte",
+    "movieSize": "Filmgröße",
+    "totalBitrate": "Gesamtbitrate",
+    "videoBitrate": "Videobitrate",
+    "mainAudioTrack": "Haupt-Audiospur",
+    "secondaryAudioTrack": "Sekundäre Audiospur",
+    "total": "Gesamt",
+    "none": "(keine)",
+    "hmsMs": "Std:Min:Sek.ms",
+    "emptyValue": "-",
+    "bytes": "Bytes",
+    "kbps": "kbps",
+    "mbps": "Mbps",
+    "application": "Anwendung"
   }
 }

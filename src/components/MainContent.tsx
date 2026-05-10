@@ -16,7 +16,6 @@ import {
   Tooltip,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
-import BookmarkIcon from "@mui/icons-material/Bookmark";
 import SummarizeIcon from "@mui/icons-material/Summarize";
 import DescriptionIcon from "@mui/icons-material/Description";
 import ShowChartIcon from "@mui/icons-material/ShowChart";
@@ -31,14 +30,13 @@ import { getLaunchArgs, getUpdateResult, skipVersion } from "../lib/service";
 import DiscInfoTab from "./DiscInfoTab";
 import Config from "./Config";
 import About from "./About";
-import ChaptersTab from "./ChaptersTab";
 import QuickSummaryTab from "./QuickSummaryTab";
 import FullReportTab from "./FullReportTab";
 import BitRateTab from "./BitRateTab";
 
 const RELEASES_URL = "https://github.com/caoccao/BDMaster/releases";
 
-type PlaylistDetailView = "quickSummary" | "fullReport" | "chapters" | "bitRate";
+type PlaylistDetailView = "quickSummary" | "fullReport" | "bitRate";
 
 function PlaylistDetailTab({ playlistName }: { playlistName: string | null }) {
   const { t } = useTranslation();
@@ -82,12 +80,6 @@ function PlaylistDetailTab({ playlistName }: { playlistName: string | null }) {
           label={t("tabs.fullReport")}
         />
         <Tab
-          value="chapters"
-          icon={<BookmarkIcon sx={{ fontSize: 18 }} />}
-          iconPosition="start"
-          label={t("disc.viewChapters")}
-        />
-        <Tab
           value="bitRate"
           icon={<ShowChartIcon sx={{ fontSize: 18 }} />}
           iconPosition="start"
@@ -97,7 +89,6 @@ function PlaylistDetailTab({ playlistName }: { playlistName: string | null }) {
       <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "auto", pl: 1 }}>
         {activeView === "quickSummary" && <QuickSummaryTab playlistName={playlistName} />}
         {activeView === "fullReport" && <FullReportTab playlistName={playlistName} />}
-        {activeView === "chapters" && <ChaptersTab playlistName={playlistName} />}
         {activeView === "bitRate" && <BitRateTab playlistName={playlistName} />}
       </Box>
     </Box>
@@ -212,15 +203,6 @@ export default function MainContent() {
         return <span>{t("tabs.discInfo")}</span>;
       case Protocol.TabType.Playlist:
         return <span>{tab.playlistName ?? ""}</span>;
-      case Protocol.TabType.Chapters:
-        return (
-          <Tooltip title={t("tabs.chapters")}>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-              <BookmarkIcon sx={{ fontSize: 16 }} />
-              <span>{tab.playlistName ?? ""}</span>
-            </Box>
-          </Tooltip>
-        );
       case Protocol.TabType.QuickSummary:
         return (
           <Tooltip title={t("tabs.quickSummary")}>
@@ -261,8 +243,6 @@ export default function MainContent() {
         return <DiscInfoTab />;
       case Protocol.TabType.Playlist:
         return <PlaylistDetailTab playlistName={tab.playlistName ?? null} />;
-      case Protocol.TabType.Chapters:
-        return <ChaptersTab playlistName={tab.playlistName ?? null} />;
       case Protocol.TabType.QuickSummary:
         return <QuickSummaryTab playlistName={tab.playlistName ?? null} />;
       case Protocol.TabType.FullReport:

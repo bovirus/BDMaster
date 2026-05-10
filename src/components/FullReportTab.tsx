@@ -3,13 +3,15 @@
  *   All rights reserved.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Box,
   Button,
   Card,
   CardContent,
   CardHeader,
+  Checkbox,
+  FormControlLabel,
   Stack,
   Typography,
 } from "@mui/material";
@@ -21,36 +23,48 @@ import * as Protocol from "../lib/protocol";
 import { useAppStore } from "../lib/store";
 import { writeTextFile } from "../lib/service";
 import { openSaveReportDialog } from "../lib/dialog";
-import { generateFullReport } from "../lib/report";
+import {
+  generateFullReport,
+  generateFullReportDocument,
+} from "../lib/report";
+import { createTranslatedReportLabels } from "../lib/reportI18n";
+import ReportDocumentView from "./ReportDocumentView";
 
 export default function FullReportTab({ playlistName }: { playlistName: string | null }) {
   const { t } = useTranslation();
   const disc = useAppStore((s) => s.disc);
   const about = useAppStore((s) => s.about);
   const setNotification = useAppStore((s) => s.setDialogNotification);
+  const [showText, setShowText] = useState(false);
+  const reportLabels = useMemo(() => createTranslatedReportLabels(t), [t]);
 
   const text = useMemo(() => {
     if (!disc || !playlistName) return null;
-    return generateFullReport(disc, [playlistName], about?.appVersion);
-  }, [disc, playlistName, about?.appVersion]);
+    return generateFullReport(disc, [playlistName], about?.appVersion, reportLabels);
+  }, [disc, playlistName, about?.appVersion, reportLabels]);
+
+  const document = useMemo(() => {
+    if (!disc || !playlistName) return null;
+    return generateFullReportDocument(disc, [playlistName], about?.appVersion, reportLabels);
+  }, [disc, playlistName, about?.appVersion, reportLabels]);
 
   const handleCopy = async () => {
     if (!text) return;
     await writeText(text);
     setNotification({
-      title: "Report copied to clipboard.",
+      title: t("disc.reportCopied"),
       type: Protocol.DialogNotificationType.Info,
     });
   };
 
   const handleSave = async () => {
     if (!text) return;
-    const filePath = await openSaveReportDialog();
+    const filePath = await openSaveReportDialog("text");
     if (filePath) {
       try {
         await writeTextFile(filePath as string, text);
         setNotification({
-          title: `Saved to ${filePath}`,
+          title: t("disc.savedTo", { path: filePath }),
           type: Protocol.DialogNotificationType.Info,
         });
       } catch (e) {
@@ -82,7 +96,18 @@ export default function FullReportTab({ playlistName }: { playlistName: string |
           title={`${t("disc.playlist")}: ${playlistName}`}
           titleTypographyProps={{ variant: "subtitle1" }}
           action={
-            <Stack direction="row" spacing={1}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+              <FormControlLabel
+                label={t("fileFilter.text")}
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={showText}
+                    onChange={(event) => setShowText(event.target.checked)}
+                  />
+                }
+                sx={{ mr: 0.5 }}
+              />
               <Button
                 size="small"
                 variant="outlined"
@@ -108,17 +133,23 @@ export default function FullReportTab({ playlistName }: { playlistName: string |
         <CardContent
           sx={{ flex: 1, minHeight: 0, overflow: "auto", pt: 0, "&:last-child": { pb: 1 } }}
         >
-          <Box
-            component="pre"
-            sx={{
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-              fontSize: "0.75rem",
-              whiteSpace: "pre-wrap",
-              m: 0,
-            }}
-          >
-            {text ?? "-"}
-          </Box>
+          {showText ? (
+            <Box
+              component="pre"
+              sx={{
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+                fontSize: "0.75rem",
+                whiteSpace: "pre-wrap",
+                m: 0,
+              }}
+            >
+              {text ?? "-"}
+            </Box>
+          ) : document ? (
+            <ReportDocumentView document={document} />
+          ) : (
+            <Typography variant="body2" color="text.secondary">-</Typography>
+          )}
         </CardContent>
       </Card>
     </Box>

@@ -68,7 +68,6 @@
     "viewDetails": "詳細を表示",
     "viewChart": "ビットレートグラフを表示",
     "viewBitRateReport": "ビットレートレポートを表示",
-    "viewChapters": "チャプターを表示",
     "openInMkvToolNixGui": "MKVToolNix GUI で開く",
     "openInMkvToolNixGuiFailed": "MKVToolNix GUI を開けませんでした: {{message}}",
     "mkvToolNixGuiNotConfigured": "MKVToolNix GUI が設定されていません。設定で MKVToolNix のパスを指定してください。",
@@ -113,7 +112,9 @@
     "scanning": "{{file}} をスキャン中…",
     "scanFailed": "スキャンに失敗しました: {{message}}",
     "elapsed": "経過",
-    "remaining": "残り"
+    "remaining": "残り",
+    "reportCopied": "レポートをクリップボードにコピーしました。",
+    "savedTo": "{{path}} に保存しました"
   },
   "settings": {
     "title": "設定",
@@ -184,6 +185,36 @@
   },
   "fileFilter": {
     "text": "テキスト",
-    "json": "JSON"
+    "json": "JSON",
+    "html": "HTML"
+  },
+  "report": {
+    "name": "名前",
+    "value": "値",
+    "discTitle": "ディスクタイトル",
+    "discVolume": "ディスクボリューム",
+    "discPath": "ディスクパス",
+    "discSize": "ディスクサイズ",
+    "discLabel": "ディスクラベル",
+    "protection": "保護",
+    "extras": "追加情報",
+    "playlistReport": "プレイリストレポート",
+    "overview": "概要",
+    "streams": "ストリーム",
+    "files": "ファイル",
+    "clips": "クリップ",
+    "movieSize": "ムービーサイズ",
+    "totalBitrate": "総ビットレート",
+    "videoBitrate": "映像ビットレート",
+    "mainAudioTrack": "メイン音声トラック",
+    "secondaryAudioTrack": "セカンダリ音声トラック",
+    "total": "合計",
+    "none": "（なし）",
+    "hmsMs": "時:分:秒.ミリ秒",
+    "emptyValue": "-",
+    "bytes": "バイト",
+    "kbps": "kbps",
+    "mbps": "Mbps",
+    "application": "アプリケーション"
   }
 }

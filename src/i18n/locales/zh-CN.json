@@ -68,7 +68,6 @@
     "viewDetails": "查看详情",
     "viewChart": "查看比特率图表",
     "viewBitRateReport": "查看比特率报告",
-    "viewChapters": "查看章节",
     "openInMkvToolNixGui": "在 MKVToolNix GUI 中打开",
     "openInMkvToolNixGuiFailed": "无法打开 MKVToolNix GUI：{{message}}",
     "mkvToolNixGuiNotConfigured": "尚未配置 MKVToolNix GUI。请在“设置”中指定 MKVToolNix 路径。",
@@ -113,7 +112,9 @@
     "scanning": "正在扫描 {{file}}…",
     "scanFailed": "扫描失败：{{message}}",
     "elapsed": "已用时",
-    "remaining": "剩余"
+    "remaining": "剩余",
+    "reportCopied": "报告已复制到剪贴板。",
+    "savedTo": "已保存到 {{path}}"
   },
   "settings": {
     "title": "设置",
@@ -184,6 +185,36 @@
   },
   "fileFilter": {
     "text": "文本",
-    "json": "JSON"
+    "json": "JSON",
+    "html": "HTML"
+  },
+  "report": {
+    "name": "名称",
+    "value": "值",
+    "discTitle": "光盘标题",
+    "discVolume": "光盘卷名",
+    "discPath": "光盘路径",
+    "discSize": "光盘大小",
+    "discLabel": "光盘卷标",
+    "protection": "保护",
+    "extras": "附加信息",
+    "playlistReport": "播放列表报告",
+    "overview": "概览",
+    "streams": "流",
+    "files": "文件",
+    "clips": "片段",
+    "movieSize": "影片大小",
+    "totalBitrate": "总码率",
+    "videoBitrate": "视频码率",
+    "mainAudioTrack": "主音轨",
+    "secondaryAudioTrack": "第二音轨",
+    "total": "总计",
+    "none": "（无）",
+    "hmsMs": "时:分:秒.毫秒",
+    "emptyValue": "-",
+    "bytes": "字节",
+    "kbps": "kbps",
+    "mbps": "Mbps",
+    "application": "应用程序"
   }
 }

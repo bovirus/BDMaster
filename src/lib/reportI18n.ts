@@ -1,0 +1,67 @@
+/*
+ *   Copyright (c) 2026. caoccao.com Sam Cao
+ *   All rights reserved.
+ */
+
+import type { TFunction } from "i18next";
+import type { ReportLabels } from "./report";
+
+export function createTranslatedReportLabels(t: TFunction): Partial<ReportLabels> {
+  return {
+    name: t("report.name"),
+    value: t("report.value"),
+    quickSummary: t("tabs.quickSummary"),
+    fullReport: t("tabs.fullReport"),
+    discInfo: t("tabs.discInfo"),
+    discTitle: t("report.discTitle"),
+    discVolume: t("report.discVolume"),
+    discPath: t("report.discPath"),
+    discSize: t("report.discSize"),
+    discLabel: t("report.discLabel"),
+    protection: t("report.protection"),
+    extras: t("report.extras"),
+    application: t("report.application"),
+    playlists: t("disc.playlists"),
+    playlist: t("disc.playlist"),
+    playlistReport: t("report.playlistReport"),
+    overview: t("report.overview"),
+    streams: t("report.streams"),
+    files: t("report.files"),
+    chapters: t("disc.chapters"),
+    clips: t("report.clips"),
+    length: t("disc.length"),
+    size: t("disc.size"),
+    video: t("disc.videoStreams"),
+    audio: t("disc.audioStreams"),
+    subtitles: t("disc.subtitles"),
+    text: t("disc.textStreams"),
+    pid: t("disc.pid"),
+    codec: t("disc.codec"),
+    description: t("disc.description"),
+    language: t("disc.language"),
+    bitrate: t("disc.bitRate"),
+    title: t("disc.title"),
+    movieSize: t("report.movieSize"),
+    totalBitrate: t("report.totalBitrate"),
+    videoBitrate: t("report.videoBitrate"),
+    mainAudioTrack: t("report.mainAudioTrack"),
+    secondaryAudioTrack: t("report.secondaryAudioTrack"),
+    timeIn: t("disc.timeIn"),
+    avgVideoRate: t("disc.avgVideoRate"),
+    max1SecRate: t("disc.max1SecRate"),
+    max1SecTime: t("disc.max1SecTime"),
+    max5SecRate: t("disc.max5SecRate"),
+    max5SecTime: t("disc.max5SecTime"),
+    max10SecRate: t("disc.max10SecRate"),
+    max10SecTime: t("disc.max10SecTime"),
+    avgFrameSize: t("disc.avgFrameSize"),
+    maxFrameSize: t("disc.maxFrameSize"),
+    maxFrameTime: t("disc.maxFrameTime"),
+    total: t("report.total"),
+    bytes: t("report.bytes"),
+    kbps: t("report.kbps"),
+    mbps: t("report.mbps"),
+    none: t("report.none"),
+    hmsMs: t("report.hmsMs"),
+  };
+}
