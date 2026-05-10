@@ -1163,6 +1163,57 @@ fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
             }
         }
 
+        // Refine VBR video bit_rate using the playlist's total bandwidth.
+        // The codec-init partial scan only reads ~8 MB per clip, so its
+        // running average for VBR streams is biased toward whatever happens
+        // in the first few seconds. Total bandwidth (angle-0 clip bytes ×
+        // 8 / total length) is exact, and audio bit rates are mostly
+        // codec-fixed and accurate — so the residual is a much better
+        // estimate of the dominant VBR video stream's actual average.
+        let total_length_s = pl.total_length as f64 / 45000.0;
+        if total_length_s > 0.0 && !pl.video_streams.is_empty() {
+            let mut angle0_bytes: u64 = 0;
+            for c in &pl.stream_clips {
+                if c.angle_index == 0 {
+                    angle0_bytes += c.file_size;
+                }
+            }
+            if angle0_bytes > 0 {
+                let total_bps = angle0_bytes as f64 * 8.0 / total_length_s;
+                let non_video_bps: f64 = pl
+                    .audio_streams
+                    .iter()
+                    .chain(pl.graphics_streams.iter())
+                    .chain(pl.text_streams.iter())
+                    .map(|s| s.bit_rate as f64)
+                    .sum();
+                let video_residual = total_bps - non_video_bps;
+                if video_residual > 0.0 {
+                    let total_video_partial: f64 = pl
+                        .video_streams
+                        .iter()
+                        .map(|s| s.bit_rate as f64)
+                        .sum();
+                    if total_video_partial > 0.0 {
+                        // Multiple video streams (e.g. MVC + AVC for 3D):
+                        // split the residual proportionally to their
+                        // partial-scan averages.
+                        for s in pl.video_streams.iter_mut() {
+                            let proportion = s.bit_rate as f64 / total_video_partial;
+                            s.bit_rate = (video_residual * proportion).max(0.0) as u64;
+                        }
+                    } else {
+                        // Single uninitialized video stream — give it the
+                        // entire residual (still better than 0).
+                        let per_video = video_residual / pl.video_streams.len() as f64;
+                        for s in pl.video_streams.iter_mut() {
+                            s.bit_rate = per_video.max(0.0) as u64;
+                        }
+                    }
+                }
+            }
+        }
+
         // Description is recomputed once all underlying fields are populated
         // so it reflects codec init + audio CoreStream linkage.
         for s in pl

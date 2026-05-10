@@ -776,6 +776,7 @@ function TrackTable({
   sizePrecision: Protocol.FormatPrecision;
   sizeUnit: Protocol.FormatUnit;
 }) {
+  const { t } = useTranslation();
   const tracks = useMemo(
     () => [
       ...playlist.videoStreams,
@@ -785,6 +786,9 @@ function TrackTable({
     ],
     [playlist]
   );
+  // playlist.totalLength is in 45 kHz BD time units; convert to seconds for
+  // the per-track estimated-size calculation.
+  const lengthSeconds = playlist.totalLength / 45000;
   if (tracks.length === 0) {
     return (
       <Typography variant="body2" color="text.secondary" sx={{ p: 1 }}>
@@ -802,26 +806,37 @@ function TrackTable({
             <TableCell sx={{ fontWeight: "bold" }}>Language</TableCell>
             <TableCell sx={{ fontWeight: "bold" }} align="right">Bit Rate</TableCell>
             <TableCell sx={{ fontWeight: "bold" }}>Description</TableCell>
+            <TableCell sx={{ fontWeight: "bold" }} align="right">{t("disc.estimatedSize")}</TableCell>
             <TableCell sx={{ fontWeight: "bold" }} align="right">Measured Size</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
-          {tracks.map((s, i) => (
-            <TableRow key={`${s.pid}-${i}`}>
-              <TableCell>{`0x${s.pid.toString(16).toUpperCase().padStart(4, "0")}`}</TableCell>
-              <TableCell>{s.codecShortName || s.codecName}</TableCell>
-              <TableCell>{s.languageName || s.languageCode}</TableCell>
-              <TableCell align="right">
-                {formatBitRate(s.bitRate || s.activeBitRate, bitRatePrecision, bitRateUnit)}
-              </TableCell>
-              <TableCell>{s.description}</TableCell>
-              <TableCell align="right">
-                {s.measuredSize > 0
-                  ? formatSize(s.measuredSize, sizePrecision, sizeUnit)
-                  : "—"}
-              </TableCell>
-            </TableRow>
-          ))}
+          {tracks.map((s, i) => {
+            const bitRate = s.bitRate || s.activeBitRate;
+            const estimatedBytes =
+              bitRate > 0 && lengthSeconds > 0 ? (bitRate * lengthSeconds) / 8 : 0;
+            return (
+              <TableRow key={`${s.pid}-${i}`}>
+                <TableCell>{`0x${s.pid.toString(16).toUpperCase().padStart(4, "0")}`}</TableCell>
+                <TableCell>{s.codecShortName || s.codecName}</TableCell>
+                <TableCell>{s.languageName || s.languageCode}</TableCell>
+                <TableCell align="right">
+                  {formatBitRate(bitRate, bitRatePrecision, bitRateUnit)}
+                </TableCell>
+                <TableCell>{s.description}</TableCell>
+                <TableCell align="right">
+                  {estimatedBytes > 0
+                    ? formatSize(estimatedBytes, sizePrecision, sizeUnit)
+                    : ""}
+                </TableCell>
+                <TableCell align="right">
+                  {s.measuredSize > 0
+                    ? formatSize(s.measuredSize, sizePrecision, sizeUnit)
+                    : "—"}
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </TableContainer>
