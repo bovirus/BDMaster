@@ -274,22 +274,22 @@ export default function DiscDetail() {
     setTabChaptersStatus(Protocol.ControlStatus.Selected);
   };
 
+  const sortedPlaylists = useMemo(() => {
+    if (!disc) return [];
+    return stableSort(disc.playlists, comparePlaylists(sortKey, sortDir));
+  }, [disc, sortKey, sortDir]);
+
   useEffect(() => {
     if (!disc) return;
-    if (disc.playlists.length > 0 && !selectedPlaylist) {
-      setSelectedPlaylist(disc.playlists[0].name);
+    if (sortedPlaylists.length > 0 && !selectedPlaylist) {
+      setSelectedPlaylist(sortedPlaylists[0].name);
     }
-  }, [disc, selectedPlaylist]);
+  }, [disc, sortedPlaylists, selectedPlaylist]);
 
   const playlist = useMemo(() => {
     if (!disc || !selectedPlaylist) return null;
     return disc.playlists.find((p) => p.name === selectedPlaylist) ?? null;
   }, [disc, selectedPlaylist]);
-
-  const sortedPlaylists = useMemo(() => {
-    if (!disc) return [];
-    return stableSort(disc.playlists, comparePlaylists(sortKey, sortDir));
-  }, [disc, sortKey, sortDir]);
 
   const handleSort = (key: PlaylistSortKey) => {
     if (sortKey === key) {
