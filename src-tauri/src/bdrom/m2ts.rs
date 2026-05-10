@@ -18,16 +18,21 @@ use std::path::Path;
 
 /// Run the streaming scan against an opaque reader. The native and UDF code
 /// paths both funnel into this entry point.
+///
+/// The callback signature is `fn(pid, stream_type, pes_payload, pmt) -> bool`
+/// where `pmt` is the live PID → stream-type table populated from PAT/PMT.
+/// Returning `false` terminates the scan early — that's how the codec-init
+/// pass aborts as soon as every PMT-listed PID has reported initialized.
 pub fn scan_m2ts_streaming_from_reader<R, F>(reader: R, mut on_pes: F) -> Result<M2tsScanResult>
 where
     R: Read,
-    F: FnMut(u16, u8, &[u8]) -> bool,
+    F: FnMut(u16, u8, &[u8], &HashMap<u16, u8>) -> bool,
 {
-    scan_inner(reader, |pid, st, payload| on_pes(pid, st, payload))
+    scan_inner(reader, |pid, st, payload, pmt| on_pes(pid, st, payload, pmt))
 }
 
 pub fn scan_m2ts_from_reader<R: Read>(reader: R) -> Result<M2tsScanResult> {
-    scan_inner(reader, |_, _, _| true)
+    scan_inner(reader, |_, _, _, _| true)
 }
 
 const TS_PACKET_SIZE: usize = 188;
@@ -64,7 +69,7 @@ const SAMPLE_INTERVAL_SECONDS: f64 = 1.0;
 /// `File`.
 pub fn scan_m2ts_streaming<F>(path: &Path, on_pes: F) -> Result<M2tsScanResult>
 where
-    F: FnMut(u16, u8, &[u8]) -> bool,
+    F: FnMut(u16, u8, &[u8], &HashMap<u16, u8>) -> bool,
 {
     let file = File::open(path)?;
     let reader = BufReader::with_capacity(1 << 20, file);
@@ -74,7 +79,7 @@ where
 fn scan_inner<R, F>(reader: R, mut on_pes: F) -> Result<M2tsScanResult>
 where
     R: Read,
-    F: FnMut(u16, u8, &[u8]) -> bool,
+    F: FnMut(u16, u8, &[u8], &HashMap<u16, u8>) -> bool,
 {
     let mut reader = reader;
     let mut packet = [0u8; M2TS_PACKET_SIZE];
@@ -191,7 +196,7 @@ where
                 if let Some(prev) = pending_pes.remove(&pid) {
                     if !prev.is_empty() {
                         let stream_type = *pid_to_stream_type.get(&pid).unwrap_or(&0);
-                        if !on_pes(pid, stream_type, &prev) {
+                        if !on_pes(pid, stream_type, &prev, &pid_to_stream_type) {
                             break 'outer;
                         }
                     }
@@ -225,7 +230,7 @@ where
     for (pid, buf) in pending_pes.into_iter() {
         if !buf.is_empty() {
             let stream_type = *pid_to_stream_type.get(&pid).unwrap_or(&0);
-            on_pes(pid, stream_type, &buf);
+            on_pes(pid, stream_type, &buf, &pid_to_stream_type);
         }
     }
 

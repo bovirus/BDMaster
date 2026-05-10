@@ -65,7 +65,18 @@ pub struct BDRom {
 pub fn scan(path_str: &str) -> Result<DiscInfo> {
     let path = Path::new(path_str);
     let bdrom = open_bdrom(path)?;
-    Ok(to_disc_info(&bdrom))
+    let mut disc = to_disc_info(&bdrom);
+    // Codec initialization pass — mirrors BDInfo's `streamFile.Scan(playlists,
+    // isFullScan: false)`. For every unique M2TS clip we open the stream once
+    // and feed its PES payloads to the codec parsers until every relevant PID
+    // has reported `is_initialized`, at which point the scan early-stops. This
+    // populates per-stream codec details (codec_name, height, frame rate,
+    // encoding profile, channel layout, sample rate, bit depth, …) and the
+    // codec-fixed bit_rate (LPCM, AC3, DTS, MPA, …). For VBR streams that
+    // codec parsers can't pin down, we estimate bit_rate from the running
+    // total of payload bytes / elapsed seconds collected during the scan.
+    codec_init(&mut disc, &bdrom);
+    Ok(disc)
 }
 
 fn open_bdrom(path: &Path) -> Result<BDRom> {
@@ -834,7 +845,15 @@ fn open_stream_reader(
         }
         StreamSource::Iso(fe) => {
             if let DiscSource::Iso(image) = &bd.source {
-                Ok(Box::new(UdfFileReader::new(image.clone(), fe)?))
+                // Wrap with BufReader: every UdfFileReader::read locks the
+                // shared image mutex, seeks, and reads. Without buffering,
+                // a 5 MB codec-init scan triggers tens of thousands of
+                // mutex+seek+read cycles. A 1 MB buffer cuts that to a
+                // handful of refills.
+                Ok(Box::new(std::io::BufReader::with_capacity(
+                    1 << 20,
+                    UdfFileReader::new(image.clone(), fe)?,
+                )))
             } else {
                 Err(anyhow!("ISO stream source without ISO disc source"))
             }
@@ -898,4 +917,306 @@ pub fn build_chart_samples(path: &str, playlist_name: &str) -> Vec<ChartSample> 
         }
     }
     samples
+}
+
+/// Run a one-shot codec init pass over every unique angle-0 clip on the disc.
+/// For each clip we open the M2TS reader, dispatch reassembled PES payloads
+/// to the matching codec parser, and stop reading the moment every PMT-
+/// listed PID has reported `is_initialized` (mirrors BDInfo's
+/// `ScanStream` finish condition over `Streams.Values`). Codec-derived
+/// fields populated during the scan are then snapshotted and copied to
+/// every other playlist that references the same clip.
+fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
+    use codec::CodecScanState;
+    use std::collections::HashMap as HM;
+
+    /// Codec-init result captured per unique clip. `codec_metadata` is the
+    /// snapshot of every PID's TSStreamInfo after the codec parsers ran
+    /// (taken via the same raw pointers used during the scan, so it always
+    /// reflects the mutated state). `per_pid_bytes` and `duration_seconds`
+    /// are the partial-scan running totals used to estimate bit rate for
+    /// VBR streams the codec parser can't pin down.
+    struct ClipInitCache {
+        codec_metadata: HM<u16, TSStreamInfo>,
+        per_pid_bytes: HM<u16, u64>,
+        duration_seconds: f64,
+    }
+
+    // Phase A.1: collect every playlist index that references each unique
+    // angle-0 clip. We need the union (not just one "lead") because
+    // playlists can subset streams differently — a PID present in this
+    // clip's PMT might only appear in a non-lead playlist's MPLS.
+    let mut clip_referencing_plis: HM<String, Vec<usize>> = HM::new();
+    for (pli, pl) in disc.playlists.iter().enumerate() {
+        for clip in &pl.stream_clips {
+            if clip.angle_index != 0 {
+                continue;
+            }
+            let entry = clip_referencing_plis
+                .entry(clip.name.clone())
+                .or_default();
+            if !entry.contains(&pli) {
+                entry.push(pli);
+            }
+        }
+    }
+
+    // Phase A.2: scan each unique clip until codecs are initialized.
+    let mut clip_cache: HM<String, ClipInitCache> = HM::new();
+    for (clip_name, plis) in &clip_referencing_plis {
+        let entry = match bd.stream_files.get(clip_name) {
+            Some(e) => e,
+            None => continue,
+        };
+
+        // Build a single PID -> *mut TSStreamInfo table merged across every
+        // playlist that references this clip. First playlist with a given
+        // PID wins; the codec parser will mutate that one stream and we'll
+        // distribute its codec metadata to all other playlists in Phase B.
+        let mut pid_state: HM<u16, CodecScanState> = HM::new();
+        let mut pid_streams: HM<u16, *mut TSStreamInfo> = HM::new();
+        for &pli in plis {
+            let pl = &mut disc.playlists[pli];
+            for s in pl.video_streams.iter_mut() {
+                pid_streams.entry(s.pid).or_insert(s as *mut TSStreamInfo);
+            }
+            for s in pl.audio_streams.iter_mut() {
+                pid_streams.entry(s.pid).or_insert(s as *mut TSStreamInfo);
+            }
+            for s in pl.graphics_streams.iter_mut() {
+                pid_streams.entry(s.pid).or_insert(s as *mut TSStreamInfo);
+            }
+            for s in pl.text_streams.iter_mut() {
+                pid_streams.entry(s.pid).or_insert(s as *mut TSStreamInfo);
+            }
+        }
+        if pid_streams.is_empty() {
+            continue;
+        }
+
+        // BitRate hint passed to DTS / DTS-HD parsers (they accept a running
+        // bitrate computed by the host). Seeded with the MPLS-derived value.
+        let bitrate_hint: HM<u16, i64> = pid_streams
+            .iter()
+            .map(|(pid, p)| unsafe { (*pid, (**p).bit_rate as i64) })
+            .collect();
+
+        let reader = match open_stream_reader(bd, &entry.0) {
+            Ok(r) => r,
+            Err(err) => {
+                log::warn!("codec scan {}: {}", clip_name, err);
+                continue;
+            }
+        };
+
+        // Safety cap on bytes read per clip. The PMT-driven early-stop
+        // normally fires within the first ~1 MB on a well-formed Blu-ray,
+        // but if anything goes wrong (multi-packet PMT we don't fully
+        // reassemble, codec parser that never initializes a particular
+        // PID, etc.) this guarantees the codec init pass stays fast.
+        const CODEC_INIT_BYTE_BUDGET: u64 = 8 * 1024 * 1024;
+        let reader = std::io::Read::take(reader, CODEC_INIT_BYTE_BUDGET);
+
+        let res = m2ts::scan_m2ts_streaming_from_reader(
+            reader,
+            |pid, _stream_type, payload, pmt| {
+                if let Some(stream_ptr) = pid_streams.get(&pid) {
+                    let stream = unsafe { &mut **stream_ptr };
+                    if !stream.is_initialized {
+                        let state = pid_state.entry(pid).or_default();
+                        let bitrate = bitrate_hint.get(&pid).copied().unwrap_or(0);
+                        codec::scan_stream(stream, state, payload, bitrate, true, false);
+                    }
+                }
+                // BDInfo-style early-stop: terminate the moment every PMT-
+                // listed PID we're tracking has reported initialized. PIDs
+                // declared by MPLS but absent from this clip's PMT belong
+                // to other clips and will be initialized when those clips
+                // are scanned.
+                if pmt.is_empty() {
+                    return true; // PMT not seen yet — keep reading.
+                }
+                let any_uninit = pmt.keys().any(|p| {
+                    pid_streams
+                        .get(p)
+                        .map(|ptr| unsafe { !(**ptr).is_initialized })
+                        .unwrap_or(false)
+                });
+                any_uninit
+            },
+        );
+
+        match res {
+            Ok(r) => {
+                let mut by_pid: HM<u16, u64> = HM::new();
+                for (pid, stat) in &r.streams {
+                    by_pid.insert(*pid, stat.total_bytes);
+                }
+                let duration = r.duration_seconds;
+
+                // Estimate bit_rate for VBR streams from running totals.
+                // We mutate the very streams pid_streams pointed at, so the
+                // snapshot taken below reflects these updates too.
+                if duration > 0.0 {
+                    for (pid, ptr) in &pid_streams {
+                        if let Some(b) = by_pid.get(pid) {
+                            let active = (*b as f64 * 8.0 / duration).round() as u64;
+                            unsafe {
+                                let s = &mut **ptr;
+                                s.active_bit_rate = active;
+                                if s.is_vbr || s.bit_rate == 0 {
+                                    s.bit_rate = active;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Snapshot codec metadata via the same raw pointers so we
+                // capture whichever playlist owned the mutated stream.
+                let mut codec_metadata: HM<u16, TSStreamInfo> = HM::new();
+                for (pid, ptr) in &pid_streams {
+                    unsafe {
+                        codec_metadata.insert(*pid, (**ptr).clone());
+                    }
+                }
+
+                clip_cache.insert(
+                    clip_name.clone(),
+                    ClipInitCache {
+                        codec_metadata,
+                        per_pid_bytes: by_pid,
+                        duration_seconds: duration,
+                    },
+                );
+            }
+            Err(err) => {
+                log::warn!("codec scan {}: {}", clip_name, err);
+            }
+        }
+    }
+
+    // Phase B: copy codec metadata from the lead snapshot into every other
+    // playlist's matching streams. The lead playlist itself was written
+    // directly during the scan, so its streams are already initialized.
+    for pl in disc.playlists.iter_mut() {
+        for clip in &pl.stream_clips {
+            if clip.angle_index != 0 {
+                continue;
+            }
+            let cached = match clip_cache.get(&clip.name) {
+                Some(c) => c,
+                None => continue,
+            };
+            for s in pl
+                .video_streams
+                .iter_mut()
+                .chain(pl.audio_streams.iter_mut())
+                .chain(pl.graphics_streams.iter_mut())
+                .chain(pl.text_streams.iter_mut())
+            {
+                if s.is_initialized {
+                    continue;
+                }
+                if let Some(meta) = cached.codec_metadata.get(&s.pid) {
+                    if meta.is_initialized {
+                        copy_codec_metadata(s, meta);
+                    }
+                }
+            }
+        }
+    }
+
+    // For VBR streams that didn't get a fixed bit rate from the codec
+    // parser, accumulate per-PID bytes across all clips of the playlist and
+    // divide by total scanned seconds — gives a more representative running
+    // average than any single clip's first few seconds.
+    for pl in disc.playlists.iter_mut() {
+        let mut per_pid_total_bytes: HM<u16, u64> = HM::new();
+        let mut total_seconds: f64 = 0.0;
+        for clip in &pl.stream_clips {
+            if clip.angle_index != 0 {
+                continue;
+            }
+            if let Some(cached) = clip_cache.get(&clip.name) {
+                total_seconds += cached.duration_seconds;
+                for (pid, bytes) in &cached.per_pid_bytes {
+                    *per_pid_total_bytes.entry(*pid).or_insert(0) += *bytes;
+                }
+            }
+        }
+        if total_seconds > 0.0 {
+            for s in pl
+                .video_streams
+                .iter_mut()
+                .chain(pl.audio_streams.iter_mut())
+                .chain(pl.graphics_streams.iter_mut())
+                .chain(pl.text_streams.iter_mut())
+            {
+                if let Some(b) = per_pid_total_bytes.get(&s.pid) {
+                    let active = (*b as f64 * 8.0 / total_seconds).round() as u64;
+                    s.active_bit_rate = active;
+                    if s.is_vbr || s.bit_rate == 0 {
+                        s.bit_rate = active;
+                    }
+                }
+            }
+        }
+
+        // Description is recomputed once all underlying fields are populated
+        // so it reflects codec init + audio CoreStream linkage.
+        for s in pl
+            .video_streams
+            .iter_mut()
+            .chain(pl.audio_streams.iter_mut())
+            .chain(pl.graphics_streams.iter_mut())
+            .chain(pl.text_streams.iter_mut())
+        {
+            codec::finalize_description(s);
+        }
+    }
+}
+
+/// Copy codec-derived fields from the lead playlist's snapshot into a
+/// sibling stream on a different playlist that shares the same underlying
+/// clip + PID. Leaves measurement and language fields alone.
+fn copy_codec_metadata(dst: &mut TSStreamInfo, src: &TSStreamInfo) {
+    if !src.is_initialized {
+        return;
+    }
+    dst.is_initialized = true;
+    dst.is_vbr = src.is_vbr;
+    dst.codec_name = src.codec_name.clone();
+    dst.codec_short_name = src.codec_short_name.clone();
+    dst.stream_type_text = src.stream_type_text.clone();
+    dst.description = src.description.clone();
+    dst.width = src.width;
+    dst.height = src.height;
+    dst.framerate = src.framerate.clone();
+    dst.frame_rate_enumerator = src.frame_rate_enumerator;
+    dst.frame_rate_denominator = src.frame_rate_denominator;
+    dst.aspect_ratio = src.aspect_ratio.clone();
+    dst.aspect_ratio_code = src.aspect_ratio_code;
+    dst.video_format = src.video_format.clone();
+    dst.is_interlaced = src.is_interlaced;
+    dst.encoding_profile = src.encoding_profile.clone();
+    dst.extended_format_info = src.extended_format_info.clone();
+    dst.base_view = src.base_view;
+    dst.channel_count = src.channel_count;
+    dst.lfe = src.lfe;
+    dst.sample_rate = src.sample_rate;
+    dst.bit_depth = src.bit_depth;
+    dst.channel_layout = src.channel_layout.clone();
+    dst.audio_mode = src.audio_mode.clone();
+    dst.dial_norm = src.dial_norm;
+    dst.has_extensions = src.has_extensions;
+    dst.core = src.core.clone();
+    dst.captions = src.captions;
+    dst.forced_captions = src.forced_captions;
+    if dst.bit_rate == 0 && src.bit_rate > 0 {
+        dst.bit_rate = src.bit_rate;
+    }
+    if dst.active_bit_rate == 0 && src.active_bit_rate > 0 {
+        dst.active_bit_rate = src.active_bit_rate;
+    }
 }
