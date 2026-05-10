@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 import { useAppStore } from "../lib/store";
 import * as Protocol from "../lib/protocol";
 import { openDiscDirectoryDialog } from "../lib/dialog";
+import { cancelFullScan } from "../lib/service";
 
 export default function Toolbar() {
   const { t } = useTranslation();
@@ -27,6 +28,9 @@ export default function Toolbar() {
   const clearDisc = useAppStore((state) => state.clearDisc);
 
   const handleClear = useCallback(() => {
+    // Cancel any in-flight full scan first so the worker thread releases
+    // the M2TS reader before we wipe the disc state from the store.
+    cancelFullScan().catch(() => {});
     clearDisc();
   }, [clearDisc]);
 

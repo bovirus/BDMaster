@@ -34,6 +34,18 @@ export async function scanDisc(path: string): Promise<Protocol.DiscInfo> {
   return await invoke<Protocol.DiscInfo>("scan_disc", { path });
 }
 
+export async function startFullScan(path: string): Promise<void> {
+  return await invoke<void>("start_full_scan", { path });
+}
+
+export async function cancelFullScan(): Promise<void> {
+  return await invoke<void>("cancel_full_scan");
+}
+
+export async function getScanProgress(): Promise<Protocol.ScanProgress> {
+  return await invoke<Protocol.ScanProgress>("get_scan_progress");
+}
+
 export async function generateReport(
   path: string,
   full: boolean,

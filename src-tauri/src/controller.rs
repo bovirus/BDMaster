@@ -7,6 +7,7 @@ use anyhow::Result;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::bdrom;
 use crate::config;
@@ -34,6 +35,18 @@ pub async fn set_config(c: config::Config) -> Result<config::Config> {
 
 pub async fn scan_disc(path: String) -> Result<DiscInfo> {
     bdrom::scan(&path)
+}
+
+pub fn start_full_scan(path: String, state: Arc<FullScanState>) {
+    bdrom::full_scan::start(path, state);
+}
+
+pub fn cancel_full_scan(state: &FullScanState) {
+    bdrom::full_scan::cancel(state);
+}
+
+pub fn get_scan_progress(state: &FullScanState) -> ScanProgressInfo {
+    bdrom::full_scan::snapshot(state)
 }
 
 pub async fn generate_report(

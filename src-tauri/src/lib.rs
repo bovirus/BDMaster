@@ -15,7 +15,7 @@ mod constants;
 mod controller;
 mod protocol;
 
-use protocol::{UpdateCheckResult, UpdateCheckState};
+use protocol::{FullScanState, ScanProgressInfo, UpdateCheckResult, UpdateCheckState};
 
 fn convert_error(error: anyhow::Error) -> String {
     error.to_string()
@@ -59,6 +59,21 @@ async fn scan_disc(path: String) -> Result<protocol::DiscInfo, String> {
 }
 
 #[tauri::command]
+fn start_full_scan(path: String, state: tauri::State<'_, Arc<FullScanState>>) {
+    controller::start_full_scan(path, state.inner().clone());
+}
+
+#[tauri::command]
+fn cancel_full_scan(state: tauri::State<'_, Arc<FullScanState>>) {
+    controller::cancel_full_scan(state.inner());
+}
+
+#[tauri::command]
+fn get_scan_progress(state: tauri::State<'_, Arc<FullScanState>>) -> ScanProgressInfo {
+    controller::get_scan_progress(state.inner())
+}
+
+#[tauri::command]
 async fn generate_report(
     path: String,
     full: bool,
@@ -94,6 +109,7 @@ pub fn run() {
         .manage(UpdateCheckState {
             result: Arc::new(Mutex::new(None)),
         })
+        .manage(Arc::new(FullScanState::new()))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -222,6 +238,15 @@ pub fn run() {
                         log::error!("Couldn't save window state: {}", err);
                     }
                 }
+                tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
+                    // Cancel any running full scan so the worker thread
+                    // exits before the process unwinds. Without this the
+                    // disc reader can keep churning on shutdown and trip
+                    // panics on dropped Tauri state.
+                    if let Some(state) = window.try_state::<Arc<FullScanState>>() {
+                        controller::cancel_full_scan(state.inner());
+                    }
+                }
                 _ => {}
             }
         })
@@ -233,6 +258,9 @@ pub fn run() {
             skip_version,
             get_launch_args,
             scan_disc,
+            start_full_scan,
+            cancel_full_scan,
+            get_scan_progress,
             generate_report,
             get_playlist_chart_data,
             write_text_file,

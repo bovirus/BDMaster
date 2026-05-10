@@ -32,6 +32,13 @@ interface AppState {
   disc: Protocol.DiscInfo | null;
   scanningPath: string | null;
 
+  // Full-scan state. `fullScanProgress` is the latest snapshot from the
+  // backend's polling endpoint; `fullScanCompletedFor` records the disc path
+  // for which a full scan has finished so the badge sticks across tab
+  // switches until a new disc is loaded.
+  fullScanProgress: Protocol.ScanProgress | null;
+  fullScanCompletedFor: string | null;
+
   // Tabs: index 0 is always DiscInfo and is non-closable.
   openTabs: OpenTab[];
   activeTabIndex: number;
@@ -44,6 +51,8 @@ interface AppState {
   setDisc: (disc: Protocol.DiscInfo | null) => void;
   clearDisc: () => void;
   setScanningPath: (path: string | null) => void;
+  setFullScanProgress: (p: Protocol.ScanProgress | null) => void;
+  setFullScanCompletedFor: (path: string | null) => void;
 
   /** Open or focus a tab. Reuses an existing tab with the same
    *  `(type, playlistName)` key; otherwise appends a new tab and selects it. */
@@ -64,6 +73,8 @@ export const useAppStore = create<AppState>((set) => ({
   dialogNotification: null,
   disc: null,
   scanningPath: null,
+  fullScanProgress: null,
+  fullScanCompletedFor: null,
 
   openTabs: DEFAULT_TABS,
   activeTabIndex: 0,
@@ -89,20 +100,35 @@ export const useAppStore = create<AppState>((set) => ({
   setConfig: (config) => set({ config }),
   setDialogNotification: (dialogNotification) => set({ dialogNotification }),
   setDisc: (disc) =>
-    set(() => ({
-      disc,
-      // Loading a new disc invalidates per-playlist tabs from the previous
-      // disc; reset to a clean slate.
-      openTabs: DEFAULT_TABS,
-      activeTabIndex: 0,
-    })),
+    set((state) => {
+      // Updating the same disc (e.g. live updates from a running full scan)
+      // mustn't reset the scan progress / completed badge or the tabs the
+      // user has open. Only loading a different disc should clear that
+      // session state.
+      const samePath =
+        state.disc !== null && disc !== null && state.disc.path === disc.path;
+      if (samePath) {
+        return { disc };
+      }
+      return {
+        disc,
+        openTabs: DEFAULT_TABS,
+        activeTabIndex: 0,
+        fullScanProgress: null,
+        fullScanCompletedFor: null,
+      };
+    }),
   clearDisc: () =>
     set(() => ({
       disc: null,
       openTabs: DEFAULT_TABS,
       activeTabIndex: 0,
+      fullScanProgress: null,
+      fullScanCompletedFor: null,
     })),
   setScanningPath: (scanningPath) => set({ scanningPath }),
+  setFullScanProgress: (fullScanProgress) => set({ fullScanProgress }),
+  setFullScanCompletedFor: (fullScanCompletedFor) => set({ fullScanCompletedFor }),
 
   openTab: (type, playlistName) =>
     set((state) => {

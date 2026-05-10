@@ -6,8 +6,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Box,
+  Button,
   Chip,
   IconButton,
+  LinearProgress,
   Paper,
   Stack,
   Table,
@@ -32,7 +34,12 @@ import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import { useTranslation } from "react-i18next";
 import * as Protocol from "../lib/protocol";
 import { useAppStore } from "../lib/store";
-import { setConfig as saveConfig } from "../lib/service";
+import {
+  setConfig as saveConfig,
+  startFullScan,
+  cancelFullScan,
+  getScanProgress,
+} from "../lib/service";
 import { formatLength45k, formatBitRate, formatSize } from "../lib/format";
 
 type PlaylistSortKey =
@@ -170,8 +177,137 @@ export default function DiscDetail() {
   const disc = useAppStore((s) => s.disc);
   const config = useAppStore((s) => s.config);
   const setConfigState = useAppStore((s) => s.setConfig);
+  const setDisc = useAppStore((s) => s.setDisc);
+  const fullScanProgress = useAppStore((s) => s.fullScanProgress);
+  const setFullScanProgress = useAppStore((s) => s.setFullScanProgress);
+  const fullScanCompletedFor = useAppStore((s) => s.fullScanCompletedFor);
+  const setFullScanCompletedFor = useAppStore((s) => s.setFullScanCompletedFor);
+  const setDialogNotification = useAppStore((s) => s.setDialogNotification);
   const [sortKey, setSortKey] = useState<PlaylistSortKey>("fileSize");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  const isScanning = !!fullScanProgress?.isRunning;
+  const scanComplete = !!disc && fullScanCompletedFor === disc.path;
+
+  // Periodically poll the backend for the scan snapshot. Started when the
+  // user clicks Scan, cancelled when the worker reports done or errored.
+  // Last successful snapshot is mirrored into the store so the disc tables
+  // re-render with updated measured sizes / bit rates as the scan proceeds.
+  //
+  // `expectedPathRef` records the disc path the running scan was started
+  // for. If the user swaps to a different disc mid-scan the backend keeps
+  // working on the old one — without this guard we'd overwrite the freshly
+  // loaded disc's tables with the stale scan's snapshot.
+  const pollTimerRef = useRef<number | null>(null);
+  const lastVersionRef = useRef<number>(0);
+  const expectedPathRef = useRef<string | null>(null);
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current !== null) {
+      window.clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+  useEffect(() => () => stopPolling(), [stopPolling]);
+
+  const tick = useCallback(async () => {
+    try {
+      const progress = await getScanProgress();
+      const expected = expectedPathRef.current;
+      // Drop snapshots that no longer apply to the disc we started scanning
+      // (the user has loaded a different disc since). The backend keeps
+      // running but we don't propagate its updates to the new disc.
+      if (expected && progress.path && progress.path !== expected) {
+        stopPolling();
+        return;
+      }
+      setFullScanProgress(progress);
+      // Replace the live disc snapshot only when the worker actually wrote
+      // new data (version bumps on every measured-size update). Avoids a
+      // pointless re-render when the worker is mid-file and only the
+      // finished_bytes counter has moved.
+      if (progress.disc && progress.version !== lastVersionRef.current) {
+        lastVersionRef.current = progress.version;
+        setDisc(progress.disc);
+      }
+      if (!progress.isRunning) {
+        stopPolling();
+        if (progress.isCompleted && progress.disc) {
+          setFullScanCompletedFor(progress.disc.path);
+        } else if (progress.isCancelled) {
+          // Cancelled scans leave the partial measurements in place and
+          // simply revert the button back to "Scan". No notification.
+        } else if (progress.error) {
+          setDialogNotification({
+            title: t("disc.scanFailed", { message: progress.error }),
+            type: Protocol.DialogNotificationType.Error,
+          });
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch scan progress:", err);
+      stopPolling();
+    }
+  }, [setFullScanProgress, setDisc, setFullScanCompletedFor, setDialogNotification, stopPolling, t]);
+
+  const handleScan = useCallback(async () => {
+    if (!disc) return;
+    if (isScanning || scanComplete) return;
+    lastVersionRef.current = 0;
+    expectedPathRef.current = disc.path;
+    try {
+      await startFullScan(disc.path);
+    } catch (err) {
+      setDialogNotification({
+        title: t("disc.scanFailed", { message: String(err) }),
+        type: Protocol.DialogNotificationType.Error,
+      });
+      return;
+    }
+    // Kick the first poll immediately so the progress bar appears without
+    // a one-second delay, then keep ticking every second per the spec.
+    tick();
+    stopPolling();
+    pollTimerRef.current = window.setInterval(tick, 1000);
+  }, [disc, isScanning, scanComplete, tick, stopPolling, setDialogNotification, t]);
+
+  const handleCancelScan = useCallback(async () => {
+    try {
+      await cancelFullScan();
+    } catch (err) {
+      console.error("Failed to cancel scan:", err);
+    }
+    // Pull a fresh snapshot right away so the UI reverts to "Scan" without
+    // waiting for the next polling tick.
+    tick();
+  }, [tick]);
+
+  // Resume polling on mount (e.g. after a frontend reload) if the backend
+  // is still in the middle of a scan for the currently displayed disc.
+  useEffect(() => {
+    if (!disc) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const p = await getScanProgress();
+        if (cancelled || !p.isRunning) return;
+        if (p.path && p.path !== disc.path) return;
+        expectedPathRef.current = disc.path;
+        lastVersionRef.current = 0;
+        setFullScanProgress(p);
+        if (p.disc) setDisc(p.disc);
+        stopPolling();
+        pollTimerRef.current = window.setInterval(tick, 1000);
+      } catch {
+        // Non-fatal: if the resume probe fails we just don't poll. The user
+        // can re-trigger Scan if needed.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Only re-evaluate when the active disc changes (path is the identity).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [disc?.path]);
 
   // Horizontal splitter between the playlist table (top) and the bottom row.
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -360,7 +496,71 @@ export default function DiscDetail() {
             {disc.hasMVCExtension && <Chip size="small" label={t("disc.hasMVCExtension")} />}
             {disc.hasHEVCStreams && <Chip size="small" label={t("disc.hasHEVCStreams")} />}
           </Stack>
+          {/* Scan control. While the scan is running this becomes the
+              Cancel button; once a scan completes successfully it's
+              replaced by the success badge. Cancelling reverts to Scan. */}
+          <Box sx={{ alignSelf: "flex-start", flexShrink: 0 }}>
+            {scanComplete ? (
+              <Chip
+                size="small"
+                color="success"
+                label={t("disc.scanCompleted")}
+              />
+            ) : isScanning ? (
+              <Button
+                variant="contained"
+                size="small"
+                color="error"
+                onClick={handleCancelScan}
+              >
+                {t("disc.cancelScan")}
+              </Button>
+            ) : (
+              <Button
+                variant="contained"
+                size="small"
+                onClick={handleScan}
+              >
+                {t("disc.scan")}
+              </Button>
+            )}
+          </Box>
         </Stack>
+        {/* Progress bar lives in the card body (per the spec). 50px tall,
+            primary colour, only visible while a scan is running. */}
+        {isScanning && fullScanProgress && (
+          <Box sx={{ mt: 1.5 }}>
+            <LinearProgress
+              variant={
+                fullScanProgress.totalBytes > 0 ? "determinate" : "indeterminate"
+              }
+              value={
+                fullScanProgress.totalBytes > 0
+                  ? Math.min(
+                      100,
+                      Math.max(
+                        0,
+                        (fullScanProgress.finishedBytes /
+                          fullScanProgress.totalBytes) *
+                          100
+                      )
+                    )
+                  : undefined
+              }
+              color="primary"
+              sx={{ height: 50, borderRadius: 1 }}
+            />
+            {fullScanProgress.currentFile && (
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ mt: 0.5, display: "block" }}
+              >
+                {t("disc.scanning", { file: fullScanProgress.currentFile })}
+              </Typography>
+            )}
+          </Box>
+        )}
       </Paper>
 
       {/* Body: playlist (top) — splitter — stream | splitter | track + buttons */}

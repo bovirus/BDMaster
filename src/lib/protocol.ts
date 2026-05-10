@@ -314,10 +314,15 @@ export interface TSStreamInfo {
 
 export interface ScanProgress {
   path: string;
-  phase: string;
-  current: number;
-  total: number;
-  message: string | null;
+  totalBytes: number;
+  finishedBytes: number;
+  isRunning: boolean;
+  isCompleted: boolean;
+  isCancelled: boolean;
+  error: string | null;
+  currentFile: string | null;
+  disc: DiscInfo | null;
+  version: number;
 }
 
 export function getLanguages(): Language[] {

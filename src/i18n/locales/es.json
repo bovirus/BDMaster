@@ -100,7 +100,12 @@
     "hasBdJava": "BD-Java",
     "hasBdPlus": "BD+",
     "hasMVCExtension": "MVC",
-    "hasHEVCStreams": "HEVC"
+    "hasHEVCStreams": "HEVC",
+    "scan": "Escanear",
+    "cancelScan": "Cancelar escaneo",
+    "scanCompleted": "Escaneo completado",
+    "scanning": "Escaneando {{file}}…",
+    "scanFailed": "Error al escanear: {{message}}"
   },
   "settings": {
     "title": "Configuración",

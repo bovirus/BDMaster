@@ -9,6 +9,7 @@
 
 pub mod clpi;
 pub mod codec;
+pub mod full_scan;
 pub mod lang;
 pub mod m2ts;
 pub mod mpls;
@@ -79,7 +80,7 @@ pub fn scan(path_str: &str) -> Result<DiscInfo> {
     Ok(disc)
 }
 
-fn open_bdrom(path: &Path) -> Result<BDRom> {
+pub(crate) fn open_bdrom(path: &Path) -> Result<BDRom> {
     if !path.exists() {
         return Err(anyhow!("Path does not exist: {}", path.display()));
     }
@@ -834,7 +835,7 @@ fn playlist_stream_to_info(s: &PlaylistStream) -> TSStreamInfo {
 
 /// Open a streaming reader for an M2TS stream entry, regardless of whether
 /// the disc source is a directory or an ISO image.
-fn open_stream_reader(
+pub(crate) fn open_stream_reader(
     bd: &BDRom,
     src: &StreamSource,
 ) -> Result<Box<dyn std::io::Read + Send>> {

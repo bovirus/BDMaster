@@ -271,3 +271,44 @@ pub struct ChartSample {
     #[serde(rename = "bitRate")]
     pub bit_rate: u64,
 }
+
+/// Snapshot of a running (or just-finished) full scan. The frontend polls for
+/// this once a second. `disc` carries the latest measured-size / bit-rate
+/// values so the tables update progressively. `version` increments whenever
+/// the worker writes a new snapshot, letting the client re-render only on
+/// real changes.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ScanProgressInfo {
+    pub path: String,
+    #[serde(rename = "totalBytes")]
+    pub total_bytes: u64,
+    #[serde(rename = "finishedBytes")]
+    pub finished_bytes: u64,
+    #[serde(rename = "isRunning")]
+    pub is_running: bool,
+    #[serde(rename = "isCompleted")]
+    pub is_completed: bool,
+    #[serde(rename = "isCancelled")]
+    pub is_cancelled: bool,
+    pub error: Option<String>,
+    #[serde(rename = "currentFile")]
+    pub current_file: Option<String>,
+    pub disc: Option<DiscInfo>,
+    pub version: u64,
+}
+
+pub struct FullScanState {
+    pub running: std::sync::atomic::AtomicBool,
+    pub cancel: std::sync::atomic::AtomicBool,
+    pub progress: Arc<Mutex<ScanProgressInfo>>,
+}
+
+impl FullScanState {
+    pub fn new() -> Self {
+        Self {
+            running: std::sync::atomic::AtomicBool::new(false),
+            cancel: std::sync::atomic::AtomicBool::new(false),
+            progress: Arc::new(Mutex::new(ScanProgressInfo::default())),
+        }
+    }
+}

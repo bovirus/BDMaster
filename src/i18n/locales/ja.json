@@ -100,7 +100,12 @@
     "hasBdJava": "BD-Java",
     "hasBdPlus": "BD+",
     "hasMVCExtension": "MVC",
-    "hasHEVCStreams": "HEVC"
+    "hasHEVCStreams": "HEVC",
+    "scan": "スキャン",
+    "cancelScan": "スキャンを中止",
+    "scanCompleted": "スキャン完了",
+    "scanning": "{{file}} をスキャン中…",
+    "scanFailed": "スキャンに失敗しました: {{message}}"
   },
   "settings": {
     "title": "設定",
