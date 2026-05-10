@@ -66,7 +66,7 @@
     "description": "描述",
     "bitRate": "比特率",
     "viewDetails": "查看详情",
-    "viewChart": "查看比特率图表",
+    "viewChart": "比特率图表",
     "viewBitRateReport": "查看比特率报告",
     "openInMkvToolNixGui": "在 MKVToolNix GUI 中打开",
     "openInMkvToolNixGuiFailed": "无法打开 MKVToolNix GUI：{{message}}",

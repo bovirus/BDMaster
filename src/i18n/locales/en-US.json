@@ -66,7 +66,7 @@
     "description": "Description",
     "bitRate": "Bit Rate",
     "viewDetails": "View Details",
-    "viewChart": "View Bitrate Chart",
+    "viewChart": "Bit Rate Chart",
     "viewBitRateReport": "View Bit Rate Report",
     "openInMkvToolNixGui": "Open in MKVToolNix GUI",
     "openInMkvToolNixGuiFailed": "Failed to open MKVToolNix GUI: {{message}}",

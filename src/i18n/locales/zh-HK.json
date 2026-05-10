@@ -66,7 +66,7 @@
     "description": "描述",
     "bitRate": "位元率",
     "viewDetails": "檢視詳細資料",
-    "viewChart": "檢視位元率圖表",
+    "viewChart": "位元率圖表",
     "viewBitRateReport": "檢視位元率報告",
     "openInMkvToolNixGui": "在 MKVToolNix GUI 中開啟",
     "openInMkvToolNixGuiFailed": "無法開啟 MKVToolNix GUI：{{message}}",

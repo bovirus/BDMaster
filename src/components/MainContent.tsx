@@ -40,7 +40,16 @@ type PlaylistDetailView = "quickSummary" | "fullReport" | "bitRate";
 
 function PlaylistDetailTab({ playlistName }: { playlistName: string | null }) {
   const { t } = useTranslation();
+  const disc = useAppStore((state) => state.disc);
+  const fullScanCompletedFor = useAppStore((state) => state.fullScanCompletedFor);
   const [activeView, setActiveView] = useState<PlaylistDetailView>("quickSummary");
+  const isBitRateAvailable = !!disc && fullScanCompletedFor === disc.path;
+
+  useEffect(() => {
+    if (!isBitRateAvailable && activeView === "bitRate") {
+      setActiveView("quickSummary");
+    }
+  }, [activeView, isBitRateAvailable]);
 
   return (
     <Box sx={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
@@ -81,9 +90,11 @@ function PlaylistDetailTab({ playlistName }: { playlistName: string | null }) {
         />
         <Tab
           value="bitRate"
+          disabled={!isBitRateAvailable}
           icon={<ShowChartIcon sx={{ fontSize: 18 }} />}
           iconPosition="start"
-          label={t("disc.viewBitRateReport")}
+          label={t("tabs.bitRate")}
+          title={!isBitRateAvailable ? t("disc.scan") : undefined}
         />
       </Tabs>
       <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "auto", pl: 1 }}>
@@ -101,6 +112,9 @@ export default function MainContent() {
   const activeTabIndex = useAppStore((state) => state.activeTabIndex);
   const setActiveTabIndex = useAppStore((state) => state.setActiveTabIndex);
   const closeTab = useAppStore((state) => state.closeTab);
+  const disc = useAppStore((state) => state.disc);
+  const fullScanCompletedFor = useAppStore((state) => state.fullScanCompletedFor);
+  const isBitRateAvailable = !!disc && fullScanCompletedFor === disc.path;
 
   const [newVersion, setNewVersion] = useState<string | null>(null);
   const [skipChecked, setSkipChecked] = useState(false);
@@ -131,6 +145,12 @@ export default function MainContent() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (openTabs[activeTabIndex]?.type === Protocol.TabType.BitRate && !isBitRateAvailable) {
+      setActiveTabIndex(0);
+    }
+  }, [activeTabIndex, isBitRateAvailable, openTabs, setActiveTabIndex]);
 
   // Keyboard shortcuts.
   useEffect(() => {

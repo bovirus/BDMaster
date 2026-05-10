@@ -66,7 +66,7 @@
     "description": "Description",
     "bitRate": "Débit",
     "viewDetails": "Voir les détails",
-    "viewChart": "Voir le graphique de débit",
+    "viewChart": "Graphique de débit",
     "viewBitRateReport": "Voir le rapport de débit",
     "openInMkvToolNixGui": "Ouvrir dans MKVToolNix GUI",
     "openInMkvToolNixGuiFailed": "Échec de l'ouverture de MKVToolNix GUI : {{message}}",

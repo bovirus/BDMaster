@@ -66,7 +66,7 @@
     "description": "Descripción",
     "bitRate": "Tasa de bits",
     "viewDetails": "Ver detalles",
-    "viewChart": "Ver gráfico de tasa de bits",
+    "viewChart": "Gráfico de tasa de bits",
     "viewBitRateReport": "Ver informe de tasa de bits",
     "openInMkvToolNixGui": "Abrir en MKVToolNix GUI",
     "openInMkvToolNixGuiFailed": "No se pudo abrir MKVToolNix GUI: {{message}}",
