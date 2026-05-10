@@ -13,10 +13,9 @@ interface DialogNotification {
 }
 
 /**
- * One open tab in the main content area. Per-playlist views (Chapters,
- * QuickSummary, FullReport, BitRate) are keyed by `(type, playlistName)` so
- * each (type, playlist) combination gets its own tab. About/Config/DiscInfo
- * have no playlist.
+ * One open tab in the main content area. Playlist tabs are keyed by playlist
+ * name; their internal report/chapter/bitrate views are handled by a nested
+ * tab container. About/Config/DiscInfo have no playlist.
  */
 export interface OpenTab {
   type: Protocol.TabType;

@@ -38,6 +38,72 @@ import BitRateTab from "./BitRateTab";
 
 const RELEASES_URL = "https://github.com/caoccao/BDMaster/releases";
 
+type PlaylistDetailView = "quickSummary" | "fullReport" | "chapters" | "bitRate";
+
+function PlaylistDetailTab({ playlistName }: { playlistName: string | null }) {
+  const { t } = useTranslation();
+  const [activeView, setActiveView] = useState<PlaylistDetailView>("quickSummary");
+
+  return (
+    <Box sx={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
+      <Tabs
+        orientation="vertical"
+        value={activeView}
+        onChange={(_, value) => setActiveView(value)}
+        sx={{
+          borderRight: 1,
+          borderColor: "divider",
+          flexShrink: 0,
+          minWidth: 180,
+          "& .MuiTab-root": {
+            alignItems: "center",
+            justifyContent: "flex-start",
+            minHeight: 40,
+            px: 1.5,
+            textAlign: "left",
+            textTransform: "none",
+          },
+          "& .MuiTab-iconWrapper": {
+            minWidth: 24,
+            mr: 1,
+          },
+        }}
+      >
+        <Tab
+          value="quickSummary"
+          icon={<SummarizeIcon sx={{ fontSize: 18 }} />}
+          iconPosition="start"
+          label={t("tabs.quickSummary")}
+        />
+        <Tab
+          value="fullReport"
+          icon={<DescriptionIcon sx={{ fontSize: 18 }} />}
+          iconPosition="start"
+          label={t("tabs.fullReport")}
+        />
+        <Tab
+          value="chapters"
+          icon={<BookmarkIcon sx={{ fontSize: 18 }} />}
+          iconPosition="start"
+          label={t("disc.viewChapters")}
+        />
+        <Tab
+          value="bitRate"
+          icon={<ShowChartIcon sx={{ fontSize: 18 }} />}
+          iconPosition="start"
+          label={t("disc.viewBitRateReport")}
+        />
+      </Tabs>
+      <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "auto", pl: 1 }}>
+        {activeView === "quickSummary" && <QuickSummaryTab playlistName={playlistName} />}
+        {activeView === "fullReport" && <FullReportTab playlistName={playlistName} />}
+        {activeView === "chapters" && <ChaptersTab playlistName={playlistName} />}
+        {activeView === "bitRate" && <BitRateTab playlistName={playlistName} />}
+      </Box>
+    </Box>
+  );
+}
+
 export default function MainContent() {
   const { t } = useTranslation();
   const openTabs = useAppStore((state) => state.openTabs);
@@ -144,6 +210,8 @@ export default function MainContent() {
         return <span>{t("tabs.settings")}</span>;
       case Protocol.TabType.DiscInfo:
         return <span>{t("tabs.discInfo")}</span>;
+      case Protocol.TabType.Playlist:
+        return <span>{tab.playlistName ?? ""}</span>;
       case Protocol.TabType.Chapters:
         return (
           <Tooltip title={t("tabs.chapters")}>
@@ -191,6 +259,8 @@ export default function MainContent() {
         return <Config />;
       case Protocol.TabType.DiscInfo:
         return <DiscInfoTab />;
+      case Protocol.TabType.Playlist:
+        return <PlaylistDetailTab playlistName={tab.playlistName ?? null} />;
       case Protocol.TabType.Chapters:
         return <ChaptersTab playlistName={tab.playlistName ?? null} />;
       case Protocol.TabType.QuickSummary:

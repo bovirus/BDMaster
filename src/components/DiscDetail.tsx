@@ -8,8 +8,8 @@ import {
   Box,
   Button,
   Chip,
-  Divider,
   IconButton,
+  Link,
   LinearProgress,
   Paper,
   Stack,
@@ -23,13 +23,10 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import ShowChartIcon from "@mui/icons-material/ShowChart";
-import DescriptionIcon from "@mui/icons-material/Description";
 import MovieIcon from "@mui/icons-material/Movie";
 import AudiotrackIcon from "@mui/icons-material/Audiotrack";
 import SubtitlesIcon from "@mui/icons-material/Subtitles";
 import BookmarkIcon from "@mui/icons-material/Bookmark";
-import SummarizeIcon from "@mui/icons-material/Summarize";
 import StreamIcon from "@mui/icons-material/Stream";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import { useTranslation } from "react-i18next";
@@ -241,7 +238,7 @@ export default function DiscDetail() {
   const isIsoDisc = (disc?.path ?? "").toLowerCase().endsWith(".iso");
   const showMkvToolNixButton = mkvtoolnixAvailable && !isIsoDisc;
   const showBetterMediaInfoButton = betterMediaInfoAvailable && !isIsoDisc;
-  const showExternalToolDivider = showMkvToolNixButton || showBetterMediaInfoButton;
+  const showActionsColumn = showMkvToolNixButton || showBetterMediaInfoButton;
 
   const isScanning = !!fullScanProgress?.isRunning;
   const scanComplete = !!disc && fullScanCompletedFor === disc.path;
@@ -481,13 +478,8 @@ export default function DiscDetail() {
     [persistInfoSplit]
   );
 
-  // Open or focus the per-(type, playlist) tab. Reuses an existing tab with
-  // the same key, otherwise opens a new one.
   const openTab = useAppStore((s) => s.openTab);
-  const handleViewChapters = (name: string) => openTab(Protocol.TabType.Chapters, name);
-  const handleViewQuickSummary = (name: string) => openTab(Protocol.TabType.QuickSummary, name);
-  const handleViewFullReport = (name: string) => openTab(Protocol.TabType.FullReport, name);
-  const handleViewBitRate = (name: string) => openTab(Protocol.TabType.BitRate, name);
+  const handleOpenPlaylistTab = (name: string) => openTab(Protocol.TabType.Playlist, name);
   const handleOpenInMkvToolNixGui = async (name: string) => {
     if (!disc) return;
     try {
@@ -802,9 +794,11 @@ export default function DiscDetail() {
                   >
                     {t("disc.measuredSize")}
                   </SortableHeaderCell>
-                  <TableCell align="center" sx={{ fontWeight: "bold" }}>
-                    {t("disc.actions")}
-                  </TableCell>
+                  {showActionsColumn && (
+                    <TableCell align="center" sx={{ fontWeight: "bold" }}>
+                      {t("disc.actions")}
+                    </TableCell>
+                  )}
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -816,7 +810,19 @@ export default function DiscDetail() {
                     onClick={() => setSelectedPlaylist(p.name)}
                     sx={{ cursor: "pointer" }}
                   >
-                    <TableCell>{p.name}</TableCell>
+                    <TableCell>
+                      <Link
+                        component="button"
+                        underline="hover"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenPlaylistTab(p.name);
+                        }}
+                        sx={{ font: "inherit", cursor: "pointer" }}
+                      >
+                        {p.name}
+                      </Link>
+                    </TableCell>
                     <TableCell align="right">{p.groupIndex || ""}</TableCell>
                     <TableCell>{formatLength45k(p.totalLength)}</TableCell>
                     <TableCell align="right">
@@ -849,104 +855,50 @@ export default function DiscDetail() {
                         ? formatSize(p.measuredSize, sizePrecision, sizeUnit)
                         : "—"}
                     </TableCell>
-                    <TableCell align="center" padding="none">
-                      <Stack direction="row" spacing={0.5} sx={{ justifyContent: "center", alignItems: "center" }}>
-                        {showMkvToolNixButton && (
-                          <Tooltip title={t("disc.openInMkvToolNixGui")}>
-                            <IconButton
-                              size="small"
-                              sx={{ p: 0 }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenInMkvToolNixGui(p.name);
-                              }}
-                            >
-                              <Box
-                                component="img"
-                                src="images/mkvmerge.png"
-                                alt="MKVToolNix"
-                                sx={{ width: 18, height: 18, objectFit: "contain" }}
-                              />
-                            </IconButton>
-                          </Tooltip>
-                        )}
-                        {showBetterMediaInfoButton && (
-                          <Tooltip title={t("disc.openInBetterMediaInfo")}>
-                            <IconButton
-                              size="small"
-                              sx={{ p: 0 }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenInBetterMediaInfo(p.name);
-                              }}
-                            >
-                              <Box
-                                component="img"
-                                src="images/bettermediainfo.png"
-                                alt="BetterMediaInfo"
-                                sx={{ width: 18, height: 18, objectFit: "contain" }}
-                              />
-                            </IconButton>
-                          </Tooltip>
-                        )}
-                        {showExternalToolDivider && (
-                          <Divider orientation="vertical" flexItem sx={{ mx: 0.25 }} />
-                        )}
-                        {p.chapters.length > 0 && (
-                          <>
-                            <Tooltip title={t("disc.viewChapters")}>
+                    {showActionsColumn && (
+                      <TableCell align="center" padding="none">
+                        <Stack direction="row" spacing={0.5} sx={{ justifyContent: "center", alignItems: "center" }}>
+                          {showMkvToolNixButton && (
+                            <Tooltip title={t("disc.openInMkvToolNixGui")}>
                               <IconButton
                                 size="small"
                                 sx={{ p: 0 }}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleViewChapters(p.name);
+                                  handleOpenInMkvToolNixGui(p.name);
                                 }}
                               >
-                                <BookmarkIcon fontSize="small" />
+                                <Box
+                                  component="img"
+                                  src="images/mkvmerge.png"
+                                  alt="MKVToolNix"
+                                  sx={{ width: 18, height: 18, objectFit: "contain" }}
+                                />
                               </IconButton>
                             </Tooltip>
-                            <Divider orientation="vertical" flexItem sx={{ mx: 0.25 }} />
-                          </>
-                        )}
-                        <Tooltip title={t("disc.generateQuickSummary")}>
-                          <IconButton
-                            size="small"
-                            sx={{ p: 0 }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleViewQuickSummary(p.name);
-                            }}
-                          >
-                            <SummarizeIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title={t("disc.generateFullReport")}>
-                          <IconButton
-                            size="small"
-                            sx={{ p: 0 }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleViewFullReport(p.name);
-                            }}
-                          >
-                            <DescriptionIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title={t("disc.viewBitRateReport")}>
-                          <IconButton
-                            size="small"
-                            sx={{ p: 0 }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleViewBitRate(p.name);
-                            }}
-                          >
-                            <ShowChartIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </Stack>
-                    </TableCell>
+                          )}
+                          {showBetterMediaInfoButton && (
+                            <Tooltip title={t("disc.openInBetterMediaInfo")}>
+                              <IconButton
+                                size="small"
+                                sx={{ p: 0 }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenInBetterMediaInfo(p.name);
+                                }}
+                              >
+                                <Box
+                                  component="img"
+                                  src="images/bettermediainfo.png"
+                                  alt="BetterMediaInfo"
+                                  sx={{ width: 18, height: 18, objectFit: "contain" }}
+                                />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                        </Stack>
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>

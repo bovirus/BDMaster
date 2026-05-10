@@ -208,6 +208,7 @@ export enum TabType {
   About,
   Config,
   DiscInfo,
+  Playlist,
   Chapters,
   QuickSummary,
   FullReport,
