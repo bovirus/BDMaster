@@ -100,18 +100,12 @@ export interface ConfigWindow {
 }
 
 export interface ConfigScan {
-  generateStreamDiagnostics: boolean;
   enableSsifSupport: boolean;
   filterLoopingPlaylists: boolean;
   filterShortPlaylists: boolean;
   filterShortPlaylistsValue: number;
   useImagePrefix: boolean;
   useImagePrefixValue: string;
-  keepStreamOrder: boolean;
-  generateTextSummary: boolean;
-  autosaveReport: boolean;
-  displayChapterCount: boolean;
-  enableExtendedStreamDiagnostics: boolean;
 }
 
 export interface Config {

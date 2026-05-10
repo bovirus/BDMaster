@@ -350,12 +350,6 @@ export default function Config() {
       <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
         <SectionHeader icon={<ScanIcon />} title={t("settings.scan")} />
         <Stack>
-          <SettingRow label={t("settings.generateStreamDiagnostics")}>
-            <Switch
-              checked={draft.scan.generateStreamDiagnostics}
-              onChange={(e) => updateScan({ generateStreamDiagnostics: e.target.checked })}
-            />
-          </SettingRow>
           <SettingRow label={t("settings.enableSsifSupport")}>
             <Switch
               checked={draft.scan.enableSsifSupport}
@@ -408,36 +402,6 @@ export default function Config() {
                 sx={{ width: 200 }}
               />
             </Stack>
-          </SettingRow>
-          <SettingRow label={t("settings.keepStreamOrder")}>
-            <Switch
-              checked={draft.scan.keepStreamOrder}
-              onChange={(e) => updateScan({ keepStreamOrder: e.target.checked })}
-            />
-          </SettingRow>
-          <SettingRow label={t("settings.generateTextSummary")}>
-            <Switch
-              checked={draft.scan.generateTextSummary}
-              onChange={(e) => updateScan({ generateTextSummary: e.target.checked })}
-            />
-          </SettingRow>
-          <SettingRow label={t("settings.autosaveReport")}>
-            <Switch
-              checked={draft.scan.autosaveReport}
-              onChange={(e) => updateScan({ autosaveReport: e.target.checked })}
-            />
-          </SettingRow>
-          <SettingRow label={t("settings.displayChapterCount")}>
-            <Switch
-              checked={draft.scan.displayChapterCount}
-              onChange={(e) => updateScan({ displayChapterCount: e.target.checked })}
-            />
-          </SettingRow>
-          <SettingRow label={t("settings.enableExtendedStreamDiagnostics")}>
-            <Switch
-              checked={draft.scan.enableExtendedStreamDiagnostics}
-              onChange={(e) => updateScan({ enableExtendedStreamDiagnostics: e.target.checked })}
-            />
           </SettingRow>
         </Stack>
       </Paper>

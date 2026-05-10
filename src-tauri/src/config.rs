@@ -204,8 +204,6 @@ impl Default for ConfigBetterMediaInfo {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ConfigScan {
-    #[serde(rename = "generateStreamDiagnostics", default = "default_true")]
-    pub generate_stream_diagnostics: bool,
     #[serde(rename = "enableSsifSupport", default = "default_true")]
     pub enable_ssif_support: bool,
     #[serde(rename = "filterLoopingPlaylists", default = "default_true")]
@@ -218,16 +216,6 @@ pub struct ConfigScan {
     pub use_image_prefix: bool,
     #[serde(rename = "useImagePrefixValue", default)]
     pub use_image_prefix_value: String,
-    #[serde(rename = "keepStreamOrder", default = "default_true")]
-    pub keep_stream_order: bool,
-    #[serde(rename = "generateTextSummary", default = "default_true")]
-    pub generate_text_summary: bool,
-    #[serde(rename = "autosaveReport", default)]
-    pub autosave_report: bool,
-    #[serde(rename = "displayChapterCount", default = "default_true")]
-    pub display_chapter_count: bool,
-    #[serde(rename = "enableExtendedStreamDiagnostics", default)]
-    pub enable_extended_stream_diagnostics: bool,
 }
 
 fn default_true() -> bool { true }
@@ -236,18 +224,12 @@ fn default_filter_short_value() -> u32 { 20 }
 impl Default for ConfigScan {
     fn default() -> Self {
         Self {
-            generate_stream_diagnostics: true,
             enable_ssif_support: true,
             filter_looping_playlists: true,
             filter_short_playlists: true,
             filter_short_playlists_value: 20,
             use_image_prefix: false,
             use_image_prefix_value: String::new(),
-            keep_stream_order: true,
-            generate_text_summary: true,
-            autosave_report: false,
-            display_chapter_count: true,
-            enable_extended_stream_diagnostics: false,
         }
     }
 }
