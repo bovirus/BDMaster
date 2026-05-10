@@ -65,11 +65,7 @@ pub struct BDRom {
 pub fn scan(path_str: &str) -> Result<DiscInfo> {
     let path = Path::new(path_str);
     let bdrom = open_bdrom(path)?;
-    Ok(to_disc_info(bdrom))
-}
-
-pub fn open_for_enrichment(path_str: &str) -> Result<BDRom> {
-    open_bdrom(Path::new(path_str))
+    Ok(to_disc_info(&bdrom))
 }
 
 fn open_bdrom(path: &Path) -> Result<BDRom> {
@@ -572,7 +568,7 @@ fn extract_title_from_xml(xml: &str) -> Option<String> {
     None
 }
 
-fn to_disc_info(bd: BDRom) -> DiscInfo {
+fn to_disc_info(bd: &BDRom) -> DiscInfo {
     let path_str = bd.path.to_string_lossy().to_string();
     let disc_name = bd
         .path
@@ -671,7 +667,7 @@ fn to_disc_info(bd: BDRom) -> DiscInfo {
         path: path_str,
         disc_name,
         disc_title: bd.disc_title.clone().unwrap_or_default(),
-        volume_label: bd.volume_label,
+        volume_label: bd.volume_label.clone(),
         size: bd.size,
         is_bd_plus: bd.is_bd_plus,
         is_bd_java: bd.is_bd_java,
@@ -684,7 +680,7 @@ fn to_disc_info(bd: BDRom) -> DiscInfo {
         has_mvc_extension: has_mvc,
         has_hevc_streams: has_hevc_streams,
         has_uhd_disc_marker: bd.is_uhd,
-        meta_title: bd.disc_title,
+        meta_title: bd.disc_title.clone(),
         meta_disc_number: None,
         file_set_identifier: None,
         playlists,
@@ -902,152 +898,4 @@ pub fn build_chart_samples(path: &str, playlist_name: &str) -> Vec<ChartSample> 
         }
     }
     samples
-}
-
-pub fn enrich_with_stream_stats(disc: &mut DiscInfo, bd: &BDRom) {
-    enrich_inner(disc, bd, true);
-}
-
-pub fn enrich_inner(disc: &mut DiscInfo, bd: &BDRom, full_scan: bool) {
-    use codec::CodecScanState;
-    use std::collections::HashMap as HM;
-
-    // Per-stream-file aggregated stats (bytes per PID, duration, bitrate samples).
-    let mut per_file_duration: HashMap<String, f64> = HashMap::new();
-    let mut per_file_bytes: HashMap<String, HM<u16, u64>> = HashMap::new();
-
-    for pl in disc.playlists.iter_mut() {
-        let mut total_seconds: f64 = 0.0;
-        let mut per_pid_bytes: HM<u16, u64> = HM::new();
-        let mut total_measured_bytes: u64 = 0;
-        let mut clip_measured: HM<String, u64> = HM::new();
-
-        for clip in &pl.stream_clips {
-            if clip.angle_index != 0 {
-                continue;
-            }
-            let entry = match bd.stream_files.get(&clip.name) {
-                Some(e) => e,
-                None => continue,
-            };
-
-            // Run the streaming scan, dispatching each PES through the codec
-            // parsers for any tracked PID in this playlist.
-            let mut pid_state: HM<u16, CodecScanState> = HM::new();
-
-            // Map PID -> &mut TSStreamInfo. Build a flat table of pointers to
-            // playlist streams so the closure can access them by PID. We use
-            // a wrapper because the Rust borrow checker cannot prove the
-            // disjoint-borrow safety of a heterogeneous chain here.
-            let mut pid_streams: HM<u16, *mut TSStreamInfo> = HM::new();
-            for s in pl.video_streams.iter_mut() {
-                pid_streams.insert(s.pid, s as *mut TSStreamInfo);
-            }
-            for s in pl.audio_streams.iter_mut() {
-                pid_streams.insert(s.pid, s as *mut TSStreamInfo);
-            }
-            for s in pl.graphics_streams.iter_mut() {
-                pid_streams.insert(s.pid, s as *mut TSStreamInfo);
-            }
-            for s in pl.text_streams.iter_mut() {
-                pid_streams.insert(s.pid, s as *mut TSStreamInfo);
-            }
-
-            // Initial bit-rate hint per stream (active_bit_rate from prior pass).
-            let bitrate_hint: HM<u16, i64> = pid_streams
-                .iter()
-                .map(|(pid, p)| unsafe { (*pid, (**p).bit_rate as i64) })
-                .collect();
-
-            let reader = match open_stream_reader(bd, &entry.0) {
-                Ok(r) => r,
-                Err(err) => {
-                    log::warn!("scan {}: {}", clip.name, err);
-                    continue;
-                }
-            };
-            let res = m2ts::scan_m2ts_streaming_from_reader(reader, |pid, _stream_type, payload| {
-                if let Some(stream_ptr) = pid_streams.get(&pid) {
-                    let stream = unsafe { &mut **stream_ptr };
-                    if !stream.is_initialized {
-                        let state = pid_state.entry(pid).or_default();
-                        let bitrate = bitrate_hint.get(&pid).copied().unwrap_or(0);
-                        codec::scan_stream(
-                            stream,
-                            state,
-                            payload,
-                            bitrate,
-                            true,
-                            full_scan,
-                        );
-                    }
-                }
-                true
-            });
-
-            match res {
-                Ok(r) => {
-                    total_seconds += r.duration_seconds;
-                    total_measured_bytes += r.bytes;
-                    for (pid, stat) in &r.streams {
-                        *per_pid_bytes.entry(*pid).or_insert(0) += stat.total_bytes;
-                    }
-                    per_file_duration.insert(clip.name.clone(), r.duration_seconds);
-                    let mut bytes_map: HM<u16, u64> = HM::new();
-                    for (pid, stat) in r.streams {
-                        bytes_map.insert(pid, stat.total_bytes);
-                    }
-                    per_file_bytes.insert(clip.name.clone(), bytes_map);
-                    clip_measured.insert(clip.name.clone(), r.bytes);
-                }
-                Err(err) => {
-                    log::warn!("scan {}: {}", clip.name, err);
-                }
-            }
-        }
-        pl.measured_size = total_measured_bytes;
-        for c in pl.stream_clips.iter_mut() {
-            if let Some(b) = clip_measured.get(&c.name) {
-                c.measured_size = *b;
-            }
-        }
-
-        // Compute active bit-rate for each playlist stream and finalize
-        // descriptions.
-        if total_seconds > 0.0 {
-            for s in pl
-                .video_streams
-                .iter_mut()
-                .chain(pl.audio_streams.iter_mut())
-                .chain(pl.graphics_streams.iter_mut())
-                .chain(pl.text_streams.iter_mut())
-            {
-                if let Some(b) = per_pid_bytes.get(&s.pid) {
-                    s.active_bit_rate = (*b as f64 * 8.0 / total_seconds) as u64;
-                    s.measured_size = *b;
-                    if s.bit_rate == 0 || s.is_vbr {
-                        s.bit_rate = s.active_bit_rate;
-                    }
-                }
-                codec::finalize_description(s);
-            }
-        } else {
-            for s in pl
-                .video_streams
-                .iter_mut()
-                .chain(pl.audio_streams.iter_mut())
-                .chain(pl.graphics_streams.iter_mut())
-                .chain(pl.text_streams.iter_mut())
-            {
-                codec::finalize_description(s);
-            }
-        }
-    }
-
-    // Stream-file durations.
-    for sf in disc.stream_files.iter_mut() {
-        if let Some(d) = per_file_duration.get(&sf.name) {
-            sf.duration = (d * 1_000_000.0) as u64;
-        }
-    }
 }

@@ -78,6 +78,7 @@
     "copy": "コピー",
     "save": "保存",
     "report": "レポート",
+    "generatingReport": "{{playlist}} のレポートを生成中…",
     "noPlaylistSelected": "プレイリストが選択されていません。",
     "noDiscMarker": "フォルダーは Blu-ray ではないようです (BDMV/index.bdmv が見つかりません)。",
     "isUHD": "UHD",

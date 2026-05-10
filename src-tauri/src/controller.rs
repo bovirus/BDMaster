@@ -41,16 +41,19 @@ pub async fn generate_report(
     full: bool,
     selected_playlists: Option<Vec<String>>,
 ) -> Result<String> {
-    let mut info = bdrom::scan(&path)?;
+    let info = bdrom::scan(&path)?;
     if full {
-        let bd = bdrom::open_for_enrichment(&path)?;
-        bdrom::enrich_with_stream_stats(&mut info, &bd);
+        Ok(bdrom::report::generate_full(
+            &info,
+            selected_playlists.as_deref(),
+        ))
+    } else {
+        Ok(bdrom::report::generate(
+            &info,
+            false,
+            selected_playlists.as_deref(),
+        ))
     }
-    Ok(bdrom::report::generate(
-        &info,
-        full,
-        selected_playlists.as_deref(),
-    ))
 }
 
 pub async fn get_playlist_chart_data(

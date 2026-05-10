@@ -78,6 +78,7 @@
     "copy": "复制",
     "save": "保存",
     "report": "报告",
+    "generatingReport": "正在生成 {{playlist}} 的报告…",
     "noPlaylistSelected": "未选择播放列表。",
     "noDiscMarker": "该文件夹似乎不是蓝光光盘 (缺少 BDMV/index.bdmv)。",
     "isUHD": "UHD",

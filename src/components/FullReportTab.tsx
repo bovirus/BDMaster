@@ -10,6 +10,7 @@ import {
   Card,
   CardContent,
   CardHeader,
+  CircularProgress,
   Stack,
   Typography,
 } from "@mui/material";
@@ -122,17 +123,43 @@ export default function FullReportTab() {
           sx={{ py: 1, "& .MuiCardHeader-action": { alignSelf: "center", mt: 0, mr: 0 } }}
         />
         <CardContent sx={{ flex: 1, minHeight: 0, overflow: "auto", pt: 0, "&:last-child": { pb: 1 } }}>
-          <Box
-            component="pre"
-            sx={{
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-              fontSize: "0.75rem",
-              whiteSpace: "pre-wrap",
-              m: 0,
-            }}
-          >
-            {error ? error : text ?? "…"}
-          </Box>
+          {error ? (
+            <Box
+              component="pre"
+              sx={{
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+                fontSize: "0.75rem",
+                whiteSpace: "pre-wrap",
+                m: 0,
+                color: "error.main",
+              }}
+            >
+              {error}
+            </Box>
+          ) : text === null ? (
+            <Stack
+              direction="row"
+              spacing={1.5}
+              sx={{ alignItems: "center", justifyContent: "center", py: 4 }}
+            >
+              <CircularProgress size={20} />
+              <Typography variant="body2" color="text.secondary">
+                {t("disc.generatingReport", { playlist: playlistName })}
+              </Typography>
+            </Stack>
+          ) : (
+            <Box
+              component="pre"
+              sx={{
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+                fontSize: "0.75rem",
+                whiteSpace: "pre-wrap",
+                m: 0,
+              }}
+            >
+              {text}
+            </Box>
+          )}
         </CardContent>
       </Card>
     </Box>

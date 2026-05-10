@@ -78,6 +78,7 @@
     "copy": "Copy",
     "save": "Save",
     "report": "Report",
+    "generatingReport": "Generating report for {{playlist}}…",
     "noPlaylistSelected": "No playlist selected.",
     "noDiscMarker": "Folder does not appear to be a Blu-ray (no BDMV/index.bdmv).",
     "isUHD": "UHD",

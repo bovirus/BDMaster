@@ -78,6 +78,7 @@
     "copy": "Copiar",
     "save": "Guardar",
     "report": "Informe",
+    "generatingReport": "Generando informe para {{playlist}}…",
     "noPlaylistSelected": "Ninguna lista de reproducción seleccionada.",
     "noDiscMarker": "La carpeta no parece ser un Blu-ray (sin BDMV/index.bdmv).",
     "isUHD": "UHD",
