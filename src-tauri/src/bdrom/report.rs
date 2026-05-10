@@ -71,11 +71,12 @@ pub fn generate(disc: &DiscInfo, full: bool, selected_playlists: Option<&[String
         let _ = writeln!(out, "PLAYLIST: {}", pl.name);
         let _ = writeln!(out, "----------");
         let _ = writeln!(out, "  Length: {}", format_45k_length(pl.total_length));
+        let playlist_size = playlist_size(pl);
         let _ = writeln!(
             out,
             "  Size:   {} bytes ({})",
-            pl.file_size,
-            format_size(pl.file_size, &size_precision, &size_unit)
+            playlist_size,
+            format_size(playlist_size, &size_precision, &size_unit)
         );
         let _ = writeln!(out, "  Chapters: {}", pl.chapters.len());
 
@@ -104,7 +105,7 @@ pub fn generate(disc: &DiscInfo, full: bool, selected_playlists: Option<&[String
                     "    {} - length={} size={} bytes",
                     c.name,
                     format_45k_length(c.length),
-                    c.file_size
+                    clip_size(c)
                 );
             }
             if !pl.chapters.is_empty() {
@@ -190,7 +191,7 @@ fn write_playlist_full(
     extras: &[&str],
 ) {
     let total_length_seconds = pl.total_length as f64 / 45000.0;
-    let total_size = pl.file_size;
+    let total_size = playlist_size(pl);
     let total_bitrate_mbps = if total_length_seconds > 0.0 {
         total_size as f64 * 8.0 / total_length_seconds / 1_000_000.0
     } else {
@@ -422,7 +423,7 @@ fn write_playlist_full(
         }
         let length_s = clip.length as f64 / 45000.0;
         let time_in_s = clip.relative_time_in as f64 / 45000.0;
-        let size = clip.file_size;
+        let size = clip_size(clip);
         let bitrate_kbps = if length_s > 0.0 {
             (size as f64 * 8.0 / length_s / 1000.0).round() as u64
         } else {
@@ -527,6 +528,22 @@ fn effective_bitrate(s: &TSStreamInfo) -> u64 {
         s.bit_rate
     } else {
         s.active_bit_rate
+    }
+}
+
+fn playlist_size(pl: &PlaylistInfo) -> u64 {
+    if pl.measured_size > 0 {
+        pl.measured_size
+    } else {
+        pl.file_size
+    }
+}
+
+fn clip_size(clip: &crate::protocol::PlaylistStreamClipInfo) -> u64 {
+    if clip.measured_size > 0 {
+        clip.measured_size
+    } else {
+        clip.file_size
     }
 }
 

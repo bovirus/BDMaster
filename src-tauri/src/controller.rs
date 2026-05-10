@@ -53,8 +53,12 @@ pub async fn generate_report(
     path: String,
     full: bool,
     selected_playlists: Option<Vec<String>>,
+    state: &FullScanState,
 ) -> Result<String> {
-    let info = bdrom::scan(&path)?;
+    let info = match latest_scanned_disc_for_path(&path, state) {
+        Some(info) => info,
+        None => bdrom::scan(&path)?,
+    };
     if full {
         Ok(bdrom::report::generate_full(
             &info,
@@ -66,6 +70,15 @@ pub async fn generate_report(
             false,
             selected_playlists.as_deref(),
         ))
+    }
+}
+
+fn latest_scanned_disc_for_path(path: &str, state: &FullScanState) -> Option<DiscInfo> {
+    let progress = state.progress.lock().unwrap();
+    if progress.path == path {
+        progress.disc.clone()
+    } else {
+        None
     }
 }
 

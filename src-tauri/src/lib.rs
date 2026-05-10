@@ -78,8 +78,9 @@ async fn generate_report(
     path: String,
     full: bool,
     selected_playlists: Option<Vec<String>>,
+    state: tauri::State<'_, Arc<FullScanState>>,
 ) -> Result<String, String> {
-    controller::generate_report(path, full, selected_playlists)
+    controller::generate_report(path, full, selected_playlists, state.inner())
         .await
         .map_err(convert_error)
 }

@@ -604,7 +604,7 @@ export default function DiscDetail() {
                   sx={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}
                 >
                   {t("disc.elapsed")}: {formatHMS(elapsedSeconds)}
-                  {"  "}
+                  {", "}
                   {t("disc.remaining")}: {formatHMS(remainingSeconds)}
                 </Typography>
               </Stack>
