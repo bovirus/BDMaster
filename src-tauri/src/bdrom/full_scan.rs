@@ -347,28 +347,22 @@ fn scan_one_file(
         .map(|(pid, p)| unsafe { (*pid, (**p).bit_rate as i64) })
         .collect();
 
-    // Layered reader stack:
-    //   File / UdfFileReader  →  ProgressReader  →  BufReader (4 MB)  →  m2ts
+    let base_stream_bytes = capture_stream_measurement_base(disc, &plis);
+
+    // The m2ts scanner reads BDInfo-sized chunks internally, so progress
+    // reporting sits directly below it and fires once per chunk refill.
     //
-    // ProgressReader sits *below* the buffer so its per-call cost (atomic
-    // load + counter math + clock check) only fires on buffer refills (≈ once
-    // every 4 MB) instead of on every 192-byte packet read. For a 30 GB
-    // file that turns ~156 million wrapper calls into ~7,500 — saving on the
-    // order of 10 seconds of pure overhead per file.
-    //
-    // The 4 MB buffer is BDInfo's data-chunk size (5,242,880 bytes), rounded
-    // down to a power of two so the underlying allocator can serve it from a
-    // single arena.
-    const SCAN_BUF_SIZE: usize = 4 * 1024 * 1024;
+    // Formerly this function added an extra BufReader layer here; that was
+    // useful when m2ts read one 192-byte packet at a time, but is redundant
+    // after the scanner moved to chunked reads.
     let raw_reader = open_stream_reader_raw(bd, src)?;
     let progress_reader = ProgressReader::new(raw_reader, state.clone(), base_completed);
-    let buffered_reader = std::io::BufReader::with_capacity(SCAN_BUF_SIZE, progress_reader);
 
     let mut pid_state: HashMap<u16, CodecScanState> = HashMap::new();
     let mut synthetic_holders: HashMap<u16, Box<TSStreamInfo>> = HashMap::new();
 
-    let result = m2ts::scan_m2ts_streaming_from_reader(
-        buffered_reader,
+    let result = m2ts::scan_m2ts_streaming_from_reader_with_progress(
+        progress_reader,
         |pid, _stream_type, payload, pmt| {
             // Cancellation: short-circuit the entire scan immediately.
             if state.cancel.load(Ordering::SeqCst) {
@@ -427,6 +421,17 @@ fn scan_one_file(
                 }
             }
             m2ts::PesAction::SkipPid
+        },
+        |progress| {
+            publish_partial_file_snapshot(
+                disc,
+                &plis,
+                clip_name,
+                &progress,
+                &base_stream_bytes,
+                state,
+                base_completed,
+            );
         },
     )?;
 
@@ -518,7 +523,11 @@ fn scan_one_file(
                 .chain(pl.text_streams.iter_mut())
             {
                 if let Some(b) = per_pid_bytes.get(&s.pid) {
-                    s.measured_size += (*b as f64 * total_clip_ratio).round() as u64;
+                    let base = base_stream_bytes
+                        .get(&(pli, s.pid))
+                        .copied()
+                        .unwrap_or(s.measured_size);
+                    s.measured_size = base + (*b as f64 * total_clip_ratio).round() as u64;
                 }
                 // Copy codec-derived fields if the codec parser touched them
                 // during this file's full scan (PGS captions, refined HEVC
@@ -567,6 +576,109 @@ fn scan_one_file(
     }
 
     Ok(())
+}
+
+fn capture_stream_measurement_base(
+    disc: &DiscInfo,
+    plis: &[usize],
+) -> HashMap<(usize, u16), u64> {
+    let mut base = HashMap::new();
+    for &pli in plis {
+        let Some(pl) = disc.playlists.get(pli) else {
+            continue;
+        };
+        for s in pl
+            .video_streams
+            .iter()
+            .chain(pl.audio_streams.iter())
+            .chain(pl.graphics_streams.iter())
+            .chain(pl.text_streams.iter())
+        {
+            base.insert((pli, s.pid), s.measured_size);
+        }
+    }
+    base
+}
+
+fn publish_partial_file_snapshot(
+    disc: &mut DiscInfo,
+    plis: &[usize],
+    clip_name: &str,
+    progress: &m2ts::M2tsScanProgress,
+    base_stream_bytes: &HashMap<(usize, u16), u64>,
+    state: &Arc<FullScanState>,
+    base_completed: u64,
+) {
+    apply_partial_file_measurements(disc, plis, clip_name, progress, base_stream_bytes);
+    finalize_after_file(disc);
+
+    let mut p = state.progress.lock().unwrap();
+    p.finished_bytes = base_completed + progress.bytes;
+    p.disc = Some(disc.clone());
+    p.version += 1;
+}
+
+fn apply_partial_file_measurements(
+    disc: &mut DiscInfo,
+    plis: &[usize],
+    clip_name: &str,
+    progress: &m2ts::M2tsScanProgress,
+    base_stream_bytes: &HashMap<(usize, u16), u64>,
+) {
+    let file_duration_s = progress.duration_seconds;
+    for &pli in plis {
+        let Some(pl) = disc.playlists.get_mut(pli) else {
+            continue;
+        };
+
+        for clip in pl.stream_clips.iter_mut() {
+            if clip.angle_index != 0 || clip.name != clip_name {
+                continue;
+            }
+            let clip_duration_s = clip.length as f64 / 45000.0;
+            let ratio = if file_duration_s > 0.0 {
+                (clip_duration_s / file_duration_s).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+            clip.measured_size = (progress.bytes as f64 * ratio).round() as u64;
+        }
+
+        let total_clip_ratio: f64 = pl
+            .stream_clips
+            .iter()
+            .filter(|c| c.angle_index == 0 && c.name == clip_name)
+            .map(|c| {
+                let cl = c.length as f64 / 45000.0;
+                if file_duration_s > 0.0 {
+                    (cl / file_duration_s).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                }
+            })
+            .sum();
+
+        if total_clip_ratio <= 0.0 {
+            continue;
+        }
+
+        for s in pl
+            .video_streams
+            .iter_mut()
+            .chain(pl.audio_streams.iter_mut())
+            .chain(pl.graphics_streams.iter_mut())
+            .chain(pl.text_streams.iter_mut())
+        {
+            if let Some(stat) = progress.streams.get(&s.pid) {
+                let base = base_stream_bytes
+                    .get(&(pli, s.pid))
+                    .copied()
+                    .unwrap_or(s.measured_size);
+                s.measured_size =
+                    base + (stat.total_bytes as f64 * total_clip_ratio).round() as u64;
+            }
+        }
+    }
 }
 
 /// Refresh playlist-level aggregates after each file finishes: the playlist's
@@ -654,4 +766,3 @@ fn copy_codec_metadata(dst: &mut TSStreamInfo, src: &TSStreamInfo) {
         dst.active_bit_rate = src.active_bit_rate;
     }
 }
-

@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 /// What the scanner should do after a PES dispatch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,15 +43,37 @@ where
     R: Read,
     F: FnMut(u16, u8, &[u8], &HashMap<u16, u8>) -> PesAction,
 {
-    scan_inner(reader, |pid, st, payload, pmt| on_pes(pid, st, payload, pmt))
+    scan_inner(
+        reader,
+        |pid, st, payload, pmt| on_pes(pid, st, payload, pmt),
+        |_| {},
+    )
+}
+
+pub fn scan_m2ts_streaming_from_reader_with_progress<R, F, P>(
+    reader: R,
+    mut on_pes: F,
+    mut on_progress: P,
+) -> Result<M2tsScanResult>
+where
+    R: Read,
+    F: FnMut(u16, u8, &[u8], &HashMap<u16, u8>) -> PesAction,
+    P: FnMut(M2tsScanProgress),
+{
+    scan_inner(
+        reader,
+        |pid, st, payload, pmt| on_pes(pid, st, payload, pmt),
+        |progress| on_progress(progress),
+    )
 }
 
 pub fn scan_m2ts_from_reader<R: Read>(reader: R) -> Result<M2tsScanResult> {
-    scan_inner(reader, |_, _, _, _| PesAction::Continue)
+    scan_inner(reader, |_, _, _, _| PesAction::Continue, |_| {})
 }
 
 const TS_PACKET_SIZE: usize = 188;
 const M2TS_PACKET_SIZE: usize = 192;
+const MAX_PID: usize = 8192;
 const SYNC_BYTE: u8 = 0x47;
 
 #[derive(Debug, Clone)]
@@ -61,6 +84,13 @@ pub struct M2tsScanResult {
     pub bitrate_samples: Vec<(f64, u64)>,
     pub program_pmt_pids: Vec<u16>,
     pub pcr_pid: Option<u16>,
+}
+
+#[derive(Debug, Clone)]
+pub struct M2tsScanProgress {
+    pub bytes: u64,
+    pub duration_seconds: f64,
+    pub streams: HashMap<u16, StreamStats>,
 }
 
 #[derive(Debug, Clone)]
@@ -87,26 +117,31 @@ where
 {
     let file = File::open(path)?;
     let reader = BufReader::with_capacity(1 << 20, file);
-    scan_inner(reader, on_pes)
+    scan_inner(reader, on_pes, |_| {})
 }
 
-fn scan_inner<R, F>(reader: R, mut on_pes: F) -> Result<M2tsScanResult>
+fn scan_inner<R, F, P>(reader: R, mut on_pes: F, mut on_progress: P) -> Result<M2tsScanResult>
 where
     R: Read,
     F: FnMut(u16, u8, &[u8], &HashMap<u16, u8>) -> PesAction,
+    P: FnMut(M2tsScanProgress),
 {
     let mut reader = reader;
-    let mut packet = [0u8; M2TS_PACKET_SIZE];
     let mut pmt_pid_set = std::collections::HashSet::<u16>::new();
+    let mut pmt_pid_flags = [false; MAX_PID];
     let mut pmt_pids: Vec<u16> = Vec::new();
     let mut pid_to_stream_type: HashMap<u16, u8> = HashMap::new();
-    let mut stats: HashMap<u16, StreamStats> = HashMap::new();
+    let mut stream_type_by_pid = [0u8; MAX_PID];
+    let mut pid_seen = [false; MAX_PID];
+    let mut seen_pids: Vec<u16> = Vec::new();
+    let mut total_bytes_by_pid = [0u64; MAX_PID];
+    let mut packet_count_by_pid = [0u64; MAX_PID];
     let mut pending_pes: HashMap<u16, Vec<u8>> = HashMap::new();
     // PIDs whose PES we no longer need to reassemble. Once a stream's codec
     // has been initialized (and it's not PGS, which keeps accumulating
     // caption counts), the callback returns `SkipPid` and we skip the
     // expensive per-packet payload extend for that PID.
-    let mut skip_pids = std::collections::HashSet::<u16>::new();
+    let mut skip_pids = [false; MAX_PID];
     let mut total_bytes: u64 = 0;
     let mut pcr_pid: Option<u16> = None;
     let mut first_pcr_27mhz: Option<i128> = None;
@@ -119,161 +154,191 @@ where
     let mut bitrate_samples: Vec<(f64, u64)> = Vec::new();
     let mut window_start_seconds: f64 = 0.0;
     let mut window_bytes: u64 = 0;
+    let mut last_progress_at = Instant::now();
+
+    // BDInfo reads stream files in large chunks, then parses packets from
+    // memory. Doing the same here avoids one buffered-read call per 192-byte
+    // M2TS packet, which is a lot of avoidable overhead on 50 GB discs.
+    const READ_CHUNK_SIZE: usize = 5 * 1024 * 1024;
+    let mut buffer = vec![0u8; READ_CHUNK_SIZE + M2TS_PACKET_SIZE];
+    let mut carry_len = 0usize;
 
     'outer: loop {
-        let mut filled = 0;
-        while filled < M2TS_PACKET_SIZE {
-            match reader.read(&mut packet[filled..]) {
-                Ok(0) => break,
-                Ok(n) => filled += n,
-                Err(e) => return Err(e.into()),
-            }
-        }
-        if filled < M2TS_PACKET_SIZE {
+        let read_len = reader.read(&mut buffer[carry_len..])?;
+        if read_len == 0 {
             break;
         }
 
-        total_bytes += M2TS_PACKET_SIZE as u64;
+        let available = carry_len + read_len;
+        let mut offset = 0usize;
+        while offset + M2TS_PACKET_SIZE <= available {
+            let packet = &buffer[offset..offset + M2TS_PACKET_SIZE];
+            offset += M2TS_PACKET_SIZE;
 
-        if packet[4] != SYNC_BYTE {
-            continue;
-        }
+            total_bytes += M2TS_PACKET_SIZE as u64;
 
-        let atc = (((packet[0] as u32) & 0x3F) << 24)
-            | ((packet[1] as u32) << 16)
-            | ((packet[2] as u32) << 8)
-            | (packet[3] as u32);
-        let atc = atc as i128;
-        if first_atc_27mhz.is_none() {
-            first_atc_27mhz = Some(atc);
-        }
-        if let Some(prev) = prev_atc_27mhz {
-            if atc + atc_wraparound < prev {
-                atc_wraparound += 1 << 30;
+            if packet[4] != SYNC_BYTE {
+                continue;
             }
-        }
-        prev_atc_27mhz = Some(atc + atc_wraparound);
 
-        let ts = &packet[4..4 + TS_PACKET_SIZE];
-        let payload_unit_start = (ts[1] & 0x40) != 0;
-        let pid: u16 = (((ts[1] as u16) & 0x1F) << 8) | (ts[2] as u16);
-        let adaptation_field_control = (ts[3] >> 4) & 0x3;
-        let has_adaptation = (adaptation_field_control & 0x2) != 0;
-        let has_payload = (adaptation_field_control & 0x1) != 0;
-
-        let mut payload_offset = 4usize;
-        if has_adaptation {
-            let af_len = ts[4] as usize;
-            if af_len >= 1 {
-                let flags = ts[5];
-                let pcr_present = (flags & 0x10) != 0;
-                if pcr_present && af_len >= 7 {
-                    let base = ((ts[6] as u64) << 25)
-                        | ((ts[7] as u64) << 17)
-                        | ((ts[8] as u64) << 9)
-                        | ((ts[9] as u64) << 1)
-                        | ((ts[10] as u64) >> 7);
-                    let ext = ((ts[10] as u64 & 0x01) << 8) | (ts[11] as u64);
-                    let pcr27 = base as i128 * 300 + ext as i128;
-                    if first_pcr_27mhz.is_none() {
-                        first_pcr_27mhz = Some(pcr27);
-                        pcr_pid = Some(pid);
-                    }
-                    last_pcr_27mhz = Some(pcr27);
+            let atc = (((packet[0] as u32) & 0x3F) << 24)
+                | ((packet[1] as u32) << 16)
+                | ((packet[2] as u32) << 8)
+                | (packet[3] as u32);
+            let atc = atc as i128;
+            if first_atc_27mhz.is_none() {
+                first_atc_27mhz = Some(atc);
+            }
+            if let Some(prev) = prev_atc_27mhz {
+                if atc + atc_wraparound < prev {
+                    atc_wraparound += 1 << 30;
                 }
             }
-            payload_offset += 1 + af_len;
-        }
-        if !has_payload || payload_offset >= TS_PACKET_SIZE {
-            continue;
-        }
-        let payload = &ts[payload_offset..];
+            prev_atc_27mhz = Some(atc + atc_wraparound);
 
-        let st_byte = *pid_to_stream_type.get(&pid).unwrap_or(&0);
-        let entry = stats.entry(pid).or_insert(StreamStats {
-            pid,
-            stream_type: st_byte,
-            total_bytes: 0,
-            packet_count: 0,
-            pes_sample: Vec::new(),
-            pes_in_progress: Vec::new(),
-            pes_started: false,
-        });
-        entry.total_bytes += payload.len() as u64;
-        entry.packet_count += 1;
+            let ts = &packet[4..4 + TS_PACKET_SIZE];
+            let payload_unit_start = (ts[1] & 0x40) != 0;
+            let pid: u16 = (((ts[1] as u16) & 0x1F) << 8) | (ts[2] as u16);
+            let adaptation_field_control = (ts[3] >> 4) & 0x3;
+            let has_adaptation = (adaptation_field_control & 0x2) != 0;
+            let has_payload = (adaptation_field_control & 0x1) != 0;
 
-        if pid == 0 && payload_unit_start {
-            parse_pat(payload, &mut pmt_pids, &mut pmt_pid_set);
-        } else if pmt_pid_set.contains(&pid) && payload_unit_start {
-            parse_pmt(payload, &mut pid_to_stream_type);
-        } else if pid != 0 && !pmt_pid_set.contains(&pid) && !skip_pids.contains(&pid) {
-            // PES reassembly + dispatch
-            if payload_unit_start && payload.len() >= 9 && payload[0] == 0x00
-                && payload[1] == 0x00 && payload[2] == 0x01
-            {
-                // Flush previous PES for this PID, if any.
-                let mut start_new_pes = true;
-                if let Some(prev) = pending_pes.remove(&pid) {
-                    if !prev.is_empty() {
-                        let stream_type = *pid_to_stream_type.get(&pid).unwrap_or(&0);
-                        match on_pes(pid, stream_type, &prev, &pid_to_stream_type) {
-                            PesAction::Continue => {}
-                            PesAction::Stop => break 'outer,
-                            PesAction::SkipPid => {
-                                skip_pids.insert(pid);
-                                start_new_pes = false;
+            let mut payload_offset = 4usize;
+            if has_adaptation {
+                let af_len = ts[4] as usize;
+                if af_len >= 1 {
+                    let flags = ts[5];
+                    let pcr_present = (flags & 0x10) != 0;
+                    if pcr_present && af_len >= 7 {
+                        let base = ((ts[6] as u64) << 25)
+                            | ((ts[7] as u64) << 17)
+                            | ((ts[8] as u64) << 9)
+                            | ((ts[9] as u64) << 1)
+                            | ((ts[10] as u64) >> 7);
+                        let ext = ((ts[10] as u64 & 0x01) << 8) | (ts[11] as u64);
+                        let pcr27 = base as i128 * 300 + ext as i128;
+                        if first_pcr_27mhz.is_none() {
+                            first_pcr_27mhz = Some(pcr27);
+                            pcr_pid = Some(pid);
+                        }
+                        last_pcr_27mhz = Some(pcr27);
+                    }
+                }
+                payload_offset += 1 + af_len;
+            }
+            if !has_payload || payload_offset >= TS_PACKET_SIZE {
+                continue;
+            }
+            let payload = &ts[payload_offset..];
+
+            let pid_index = pid as usize;
+            if !pid_seen[pid_index] {
+                pid_seen[pid_index] = true;
+                seen_pids.push(pid);
+            }
+            total_bytes_by_pid[pid_index] += payload.len() as u64;
+            packet_count_by_pid[pid_index] += 1;
+
+            if pid == 0 && payload_unit_start {
+                parse_pat(payload, &mut pmt_pids, &mut pmt_pid_set, &mut pmt_pid_flags);
+            } else if pmt_pid_flags[pid_index] && payload_unit_start {
+                parse_pmt(payload, &mut pid_to_stream_type, &mut stream_type_by_pid);
+            } else if pid != 0 && !pmt_pid_flags[pid_index] && !skip_pids[pid_index] {
+                // PES reassembly + dispatch
+                if payload_unit_start && payload.len() >= 9 && payload[0] == 0x00
+                    && payload[1] == 0x00 && payload[2] == 0x01
+                {
+                    // Flush previous PES for this PID, if any.
+                    let mut start_new_pes = true;
+                    if let Some(prev) = pending_pes.remove(&pid) {
+                        if !prev.is_empty() {
+                            let stream_type = *pid_to_stream_type.get(&pid).unwrap_or(&0);
+                            match on_pes(pid, stream_type, &prev, &pid_to_stream_type) {
+                                PesAction::Continue => {}
+                                PesAction::Stop => break 'outer,
+                                PesAction::SkipPid => {
+                                    skip_pids[pid_index] = true;
+                                    start_new_pes = false;
+                                }
                             }
                         }
                     }
-                }
-                if start_new_pes {
-                    let header_data_length = payload[8] as usize;
-                    let pes_header_size = 9usize + header_data_length;
-                    if payload.len() > pes_header_size {
-                        pending_pes
-                            .entry(pid)
-                            .or_insert_with(Vec::new)
-                            .extend_from_slice(&payload[pes_header_size..]);
+                    if start_new_pes {
+                        let header_data_length = payload[8] as usize;
+                        let pes_header_size = 9usize + header_data_length;
+                        if payload.len() > pes_header_size {
+                            pending_pes
+                                .entry(pid)
+                                .or_insert_with(Vec::new)
+                                .extend_from_slice(&payload[pes_header_size..]);
+                        }
                     }
+                } else if let Some(buf) = pending_pes.get_mut(&pid) {
+                    buf.extend_from_slice(payload);
                 }
-            } else if let Some(buf) = pending_pes.get_mut(&pid) {
-                buf.extend_from_slice(payload);
+            }
+
+            if let Some(start) = first_atc_27mhz {
+                let cur_seconds = ((atc + atc_wraparound) - start) as f64 / 27_000_000.0;
+                window_bytes += M2TS_PACKET_SIZE as u64;
+                while cur_seconds - window_start_seconds >= SAMPLE_INTERVAL_SECONDS {
+                    let bps = (window_bytes as f64 * 8.0 / SAMPLE_INTERVAL_SECONDS) as u64;
+                    bitrate_samples.push((window_start_seconds, bps));
+                    window_start_seconds += SAMPLE_INTERVAL_SECONDS;
+                    window_bytes = 0;
+                }
             }
         }
 
-        if let Some(start) = first_atc_27mhz {
-            let cur_seconds = ((atc + atc_wraparound) - start) as f64 / 27_000_000.0;
-            window_bytes += M2TS_PACKET_SIZE as u64;
-            while cur_seconds - window_start_seconds >= SAMPLE_INTERVAL_SECONDS {
-                let bps = (window_bytes as f64 * 8.0 / SAMPLE_INTERVAL_SECONDS) as u64;
-                bitrate_samples.push((window_start_seconds, bps));
-                window_start_seconds += SAMPLE_INTERVAL_SECONDS;
-                window_bytes = 0;
-            }
+        carry_len = available - offset;
+        if carry_len > 0 {
+            buffer.copy_within(offset..available, 0);
+        }
+
+        if last_progress_at.elapsed() >= Duration::from_secs(1) {
+            on_progress(build_progress_snapshot(
+                total_bytes,
+                &seen_pids,
+                &stream_type_by_pid,
+                &total_bytes_by_pid,
+                &packet_count_by_pid,
+                first_pcr_27mhz,
+                last_pcr_27mhz,
+                first_atc_27mhz,
+                prev_atc_27mhz,
+            ));
+            last_progress_at = Instant::now();
         }
     }
 
     // Flush any remaining accumulated PES so codec parsers get a final shot.
     for (pid, buf) in pending_pes.into_iter() {
-        if !buf.is_empty() && !skip_pids.contains(&pid) {
+        if !buf.is_empty() && !skip_pids[pid as usize] {
             let stream_type = *pid_to_stream_type.get(&pid).unwrap_or(&0);
             let _ = on_pes(pid, stream_type, &buf, &pid_to_stream_type);
         }
     }
 
-    for stat in stats.values_mut() {
-        if stat.stream_type == 0 {
-            stat.stream_type = *pid_to_stream_type.get(&stat.pid).unwrap_or(&0);
-        }
+    let mut stats: HashMap<u16, StreamStats> = HashMap::with_capacity(seen_pids.len());
+    for pid in seen_pids {
+        let pid_index = pid as usize;
+        stats.insert(pid, StreamStats {
+            pid,
+            stream_type: stream_type_by_pid[pid_index],
+            total_bytes: total_bytes_by_pid[pid_index],
+            packet_count: packet_count_by_pid[pid_index],
+            pes_sample: Vec::new(),
+            pes_in_progress: Vec::new(),
+            pes_started: false,
+        });
     }
 
-    let duration_seconds = match (first_pcr_27mhz, last_pcr_27mhz) {
-        (Some(a), Some(b)) if b > a => (b - a) as f64 / 27_000_000.0,
-        _ => match (first_atc_27mhz, prev_atc_27mhz) {
-            (Some(a), Some(b)) if b > a => (b - a) as f64 / 27_000_000.0,
-            _ => 0.0,
-        },
-    };
+    let duration_seconds = current_duration_seconds(
+        first_pcr_27mhz,
+        last_pcr_27mhz,
+        first_atc_27mhz,
+        prev_atc_27mhz,
+    );
 
     Ok(M2tsScanResult {
         bytes: total_bytes,
@@ -293,7 +358,9 @@ pub fn scan_m2ts(path: &Path) -> Result<M2tsScanResult> {
     let mut packet = [0u8; M2TS_PACKET_SIZE];
     let mut pmt_pids: Vec<u16> = Vec::new();
     let mut pmt_pid_set = std::collections::HashSet::<u16>::new();
+    let mut pmt_pid_flags = [false; MAX_PID];
     let mut pid_to_stream_type: HashMap<u16, u8> = HashMap::new();
+    let mut stream_type_by_pid = [0u8; MAX_PID];
     let mut stats: HashMap<u16, StreamStats> = HashMap::new();
     let mut total_bytes: u64 = 0;
 
@@ -428,9 +495,9 @@ pub fn scan_m2ts(path: &Path) -> Result<M2tsScanResult> {
 
         // PAT / PMT parsing.
         if pid == 0 && payload_unit_start {
-            parse_pat(payload, &mut pmt_pids, &mut pmt_pid_set);
+            parse_pat(payload, &mut pmt_pids, &mut pmt_pid_set, &mut pmt_pid_flags);
         } else if pmt_pid_set.contains(&pid) && payload_unit_start {
-            parse_pmt(payload, &mut pid_to_stream_type);
+            parse_pmt(payload, &mut pid_to_stream_type, &mut stream_type_by_pid);
         }
 
         // Bitrate samples — bucket bytes per second.
@@ -479,7 +546,12 @@ pub fn scan_m2ts(path: &Path) -> Result<M2tsScanResult> {
     })
 }
 
-fn parse_pat(payload: &[u8], pmt_pids: &mut Vec<u16>, pmt_pid_set: &mut std::collections::HashSet<u16>) {
+fn parse_pat(
+    payload: &[u8],
+    pmt_pids: &mut Vec<u16>,
+    pmt_pid_set: &mut std::collections::HashSet<u16>,
+    pmt_pid_flags: &mut [bool; MAX_PID],
+) {
     if payload.is_empty() {
         return;
     }
@@ -507,13 +579,69 @@ fn parse_pat(payload: &[u8], pmt_pids: &mut Vec<u16>, pmt_pid_set: &mut std::col
         i += 4;
         if program_number != 0 {
             if pmt_pid_set.insert(pid) {
+                pmt_pid_flags[pid as usize] = true;
                 pmt_pids.push(pid);
             }
         }
     }
 }
 
-fn parse_pmt(payload: &[u8], pid_to_stream_type: &mut HashMap<u16, u8>) {
+fn build_progress_snapshot(
+    bytes: u64,
+    seen_pids: &[u16],
+    stream_type_by_pid: &[u8; MAX_PID],
+    total_bytes_by_pid: &[u64; MAX_PID],
+    packet_count_by_pid: &[u64; MAX_PID],
+    first_pcr_27mhz: Option<i128>,
+    last_pcr_27mhz: Option<i128>,
+    first_atc_27mhz: Option<i128>,
+    prev_atc_27mhz: Option<i128>,
+) -> M2tsScanProgress {
+    let mut streams: HashMap<u16, StreamStats> = HashMap::with_capacity(seen_pids.len());
+    for &pid in seen_pids {
+        let pid_index = pid as usize;
+        streams.insert(pid, StreamStats {
+            pid,
+            stream_type: stream_type_by_pid[pid_index],
+            total_bytes: total_bytes_by_pid[pid_index],
+            packet_count: packet_count_by_pid[pid_index],
+            pes_sample: Vec::new(),
+            pes_in_progress: Vec::new(),
+            pes_started: false,
+        });
+    }
+    M2tsScanProgress {
+        bytes,
+        duration_seconds: current_duration_seconds(
+            first_pcr_27mhz,
+            last_pcr_27mhz,
+            first_atc_27mhz,
+            prev_atc_27mhz,
+        ),
+        streams,
+    }
+}
+
+fn current_duration_seconds(
+    first_pcr_27mhz: Option<i128>,
+    last_pcr_27mhz: Option<i128>,
+    first_atc_27mhz: Option<i128>,
+    prev_atc_27mhz: Option<i128>,
+) -> f64 {
+    match (first_pcr_27mhz, last_pcr_27mhz) {
+        (Some(a), Some(b)) if b > a => (b - a) as f64 / 27_000_000.0,
+        _ => match (first_atc_27mhz, prev_atc_27mhz) {
+            (Some(a), Some(b)) if b > a => (b - a) as f64 / 27_000_000.0,
+            _ => 0.0,
+        },
+    }
+}
+
+fn parse_pmt(
+    payload: &[u8],
+    pid_to_stream_type: &mut HashMap<u16, u8>,
+    stream_type_by_pid: &mut [u8; MAX_PID],
+) {
     if payload.is_empty() {
         return;
     }
@@ -542,6 +670,7 @@ fn parse_pmt(payload: &[u8], pid_to_stream_type: &mut HashMap<u16, u8>) {
         let es_info_length =
             ((payload[i + 3] as usize & 0x0F) << 8) | payload[i + 4] as usize;
         pid_to_stream_type.insert(elem_pid, stream_type);
+        stream_type_by_pid[elem_pid as usize] = stream_type;
         i += 5 + es_info_length;
     }
 }
