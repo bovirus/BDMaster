@@ -18,7 +18,9 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::protocol::{DiscInfo, FullScanState, ScanProgressInfo, TSStreamInfo};
+use crate::protocol::{
+    ChartSample, ChapterMetricsInfo, DiscInfo, FullScanState, ScanProgressInfo, TSStreamInfo,
+};
 
 use super::codec::{self, CodecScanState};
 use super::m2ts;
@@ -196,6 +198,8 @@ fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
     // previous scan in the same session.
     for pl in disc.playlists.iter_mut() {
         pl.measured_size = 0;
+        pl.bitrate_samples.clear();
+        pl.chapter_metrics.clear();
         for clip in pl.stream_clips.iter_mut() {
             clip.measured_size = 0;
         }
@@ -575,6 +579,8 @@ fn scan_one_file(
         }
     }
 
+    append_bitrate_samples_and_refresh_chapters(disc, &plis, clip_name, &result.bitrate_samples);
+
     Ok(())
 }
 
@@ -679,6 +685,129 @@ fn apply_partial_file_measurements(
             }
         }
     }
+}
+
+fn append_bitrate_samples_and_refresh_chapters(
+    disc: &mut DiscInfo,
+    plis: &[usize],
+    clip_name: &str,
+    file_samples: &[(f64, u64)],
+) {
+    for &pli in plis {
+        let Some(pl) = disc.playlists.get_mut(pli) else {
+            continue;
+        };
+
+        for clip in pl.stream_clips.iter().filter(|c| c.angle_index == 0 && c.name == clip_name) {
+            let clip_in_s = clip.time_in as f64 / 45000.0;
+            let clip_out_s = clip.time_out as f64 / 45000.0;
+            let playlist_offset_s = clip.relative_time_in as f64 / 45000.0;
+
+            for &(file_time_s, bit_rate) in file_samples {
+                if file_time_s < clip_in_s {
+                    continue;
+                }
+                if file_time_s > clip_out_s {
+                    break;
+                }
+                pl.bitrate_samples.push(ChartSample {
+                    time: playlist_offset_s + (file_time_s - clip_in_s),
+                    bit_rate,
+                });
+            }
+        }
+
+        pl.bitrate_samples
+            .sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap_or(std::cmp::Ordering::Equal));
+        refresh_chapter_metrics(pl);
+    }
+}
+
+fn refresh_chapter_metrics(pl: &mut crate::protocol::PlaylistInfo) {
+    pl.chapter_metrics.clear();
+    if pl.chapters.is_empty() {
+        return;
+    }
+
+    let video_ratio = measured_video_ratio(pl);
+    let total_length_s = pl.total_length as f64 / 45000.0;
+
+    for i in 0..pl.chapters.len() {
+        let start = pl.chapters[i];
+        let end = if i + 1 < pl.chapters.len() {
+            pl.chapters[i + 1]
+        } else {
+            total_length_s
+        };
+        let samples: Vec<ChartSample> = pl
+            .bitrate_samples
+            .iter()
+            .filter(|s| s.time >= start && s.time < end)
+            .cloned()
+            .collect();
+
+        if samples.is_empty() {
+            pl.chapter_metrics.push(ChapterMetricsInfo::default());
+            continue;
+        }
+
+        let avg = samples.iter().map(|s| s.bit_rate as f64).sum::<f64>() / samples.len() as f64;
+        let (max_1_sec_rate, max_1_sec_time) = peak_window(&samples, start, end, 1.0);
+        let (max_5_sec_rate, max_5_sec_time) = peak_window(&samples, start, end, 5.0);
+        let (max_10_sec_rate, max_10_sec_time) = peak_window(&samples, start, end, 10.0);
+
+        pl.chapter_metrics.push(ChapterMetricsInfo {
+            avg_video_rate: scale_rate(avg, video_ratio),
+            max_1_sec_rate: scale_rate(max_1_sec_rate, video_ratio),
+            max_1_sec_time,
+            max_5_sec_rate: scale_rate(max_5_sec_rate, video_ratio),
+            max_5_sec_time,
+            max_10_sec_rate: scale_rate(max_10_sec_rate, video_ratio),
+            max_10_sec_time,
+            avg_frame_size: 0,
+            max_frame_size: 0,
+            max_frame_time: 0.0,
+        });
+    }
+}
+
+fn measured_video_ratio(pl: &crate::protocol::PlaylistInfo) -> f64 {
+    let video_bytes: u64 = pl.video_streams.iter().map(|s| s.measured_size).sum();
+    let playlist_bytes: u64 = pl
+        .stream_clips
+        .iter()
+        .filter(|c| c.angle_index == 0)
+        .map(|c| c.measured_size)
+        .sum();
+    if video_bytes > 0 && playlist_bytes > 0 {
+        return (video_bytes as f64 / playlist_bytes as f64).clamp(0.0, 1.0);
+    }
+    1.0
+}
+
+fn peak_window(samples: &[ChartSample], start: f64, end: f64, window_s: f64) -> (f64, f64) {
+    let mut best_rate = 0.0;
+    let mut best_time = start;
+    for sample in samples {
+        let window_end = (sample.time + window_s).min(end);
+        let window: Vec<&ChartSample> = samples
+            .iter()
+            .filter(|s| s.time >= sample.time && s.time < window_end)
+            .collect();
+        if window.is_empty() {
+            continue;
+        }
+        let rate = window.iter().map(|s| s.bit_rate as f64).sum::<f64>() / window.len() as f64;
+        if rate > best_rate {
+            best_rate = rate;
+            best_time = sample.time;
+        }
+    }
+    (best_rate, best_time)
+}
+
+fn scale_rate(rate: f64, ratio: f64) -> u64 {
+    (rate * ratio).max(0.0).round() as u64
 }
 
 /// Refresh playlist-level aggregates after each file finishes: the playlist's

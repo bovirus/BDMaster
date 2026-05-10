@@ -244,12 +244,27 @@ export interface PlaylistInfo {
   hasLoops: boolean;
   isCustom: boolean;
   chapters: number[];
+  chapterMetrics: ChapterMetricsInfo[];
+  bitrateSamples: ChartSample[];
   streamClips: PlaylistStreamClipInfo[];
   videoStreams: TSStreamInfo[];
   audioStreams: TSStreamInfo[];
   graphicsStreams: TSStreamInfo[];
   textStreams: TSStreamInfo[];
   totalAngles: number;
+}
+
+export interface ChapterMetricsInfo {
+  avgVideoRate: number;
+  max1SecRate: number;
+  max1SecTime: number;
+  max5SecRate: number;
+  max5SecTime: number;
+  max10SecRate: number;
+  max10SecTime: number;
+  avgFrameSize: number;
+  maxFrameSize: number;
+  maxFrameTime: number;
 }
 
 export interface PlaylistStreamClipInfo {
@@ -263,6 +278,11 @@ export interface PlaylistStreamClipInfo {
   measuredSize: number;
   interleavedFileSize: number;
   angleIndex: number;
+}
+
+export interface ChartSample {
+  time: number;
+  bitRate: number;
 }
 
 export interface StreamFileInfo {

@@ -87,6 +87,10 @@ pub struct PlaylistInfo {
     #[serde(rename = "isCustom")]
     pub is_custom: bool,
     pub chapters: Vec<f64>,
+    #[serde(rename = "chapterMetrics")]
+    pub chapter_metrics: Vec<ChapterMetricsInfo>,
+    #[serde(rename = "bitrateSamples")]
+    pub bitrate_samples: Vec<ChartSample>,
     #[serde(rename = "streamClips")]
     pub stream_clips: Vec<PlaylistStreamClipInfo>,
     #[serde(rename = "videoStreams")]
@@ -99,6 +103,30 @@ pub struct PlaylistInfo {
     pub text_streams: Vec<TSStreamInfo>,
     #[serde(rename = "totalAngles")]
     pub total_angles: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ChapterMetricsInfo {
+    #[serde(rename = "avgVideoRate")]
+    pub avg_video_rate: u64,
+    #[serde(rename = "max1SecRate")]
+    pub max_1_sec_rate: u64,
+    #[serde(rename = "max1SecTime")]
+    pub max_1_sec_time: f64,
+    #[serde(rename = "max5SecRate")]
+    pub max_5_sec_rate: u64,
+    #[serde(rename = "max5SecTime")]
+    pub max_5_sec_time: f64,
+    #[serde(rename = "max10SecRate")]
+    pub max_10_sec_rate: u64,
+    #[serde(rename = "max10SecTime")]
+    pub max_10_sec_time: f64,
+    #[serde(rename = "avgFrameSize")]
+    pub avg_frame_size: u64,
+    #[serde(rename = "maxFrameSize")]
+    pub max_frame_size: u64,
+    #[serde(rename = "maxFrameTime")]
+    pub max_frame_time: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

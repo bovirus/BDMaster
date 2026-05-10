@@ -19,7 +19,7 @@ import {
 } from "@mui/material";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../lib/store";
-import { formatLengthSeconds } from "../lib/format";
+import { formatBitRate, formatLengthSeconds } from "../lib/format";
 
 // Placeholder used for chapter columns that depend on per-frame stream
 // diagnostics — those values aren't available without an explicit M2TS scan,
@@ -88,18 +88,20 @@ export default function ChaptersTab({ playlistName }: { playlistName: string | n
                       ? playlist.chapters[i + 1]
                       : totalLengthSeconds;
                   const length = Math.max(0, endSec - startSec);
+                  const metrics = playlist.chapterMetrics?.[i] ?? null;
+                  const hasMetrics = !!metrics && metrics.avgVideoRate > 0;
                   return (
                     <TableRow key={i}>
                       <TableCell align="right">{i + 1}</TableCell>
                       <TableCell>{formatLengthSeconds(startSec)}</TableCell>
                       <TableCell>{formatLengthSeconds(length)}</TableCell>
-                      <TableCell align="right">{NOT_AVAILABLE}</TableCell>
-                      <TableCell align="right">{NOT_AVAILABLE}</TableCell>
-                      <TableCell>{NOT_AVAILABLE}</TableCell>
-                      <TableCell align="right">{NOT_AVAILABLE}</TableCell>
-                      <TableCell>{NOT_AVAILABLE}</TableCell>
-                      <TableCell align="right">{NOT_AVAILABLE}</TableCell>
-                      <TableCell>{NOT_AVAILABLE}</TableCell>
+                      <TableCell align="right">{hasMetrics ? formatBitRate(metrics.avgVideoRate) : NOT_AVAILABLE}</TableCell>
+                      <TableCell align="right">{hasMetrics ? formatBitRate(metrics.max1SecRate) : NOT_AVAILABLE}</TableCell>
+                      <TableCell>{hasMetrics ? formatLengthSeconds(metrics.max1SecTime) : NOT_AVAILABLE}</TableCell>
+                      <TableCell align="right">{hasMetrics ? formatBitRate(metrics.max5SecRate) : NOT_AVAILABLE}</TableCell>
+                      <TableCell>{hasMetrics ? formatLengthSeconds(metrics.max5SecTime) : NOT_AVAILABLE}</TableCell>
+                      <TableCell align="right">{hasMetrics ? formatBitRate(metrics.max10SecRate) : NOT_AVAILABLE}</TableCell>
+                      <TableCell>{hasMetrics ? formatLengthSeconds(metrics.max10SecTime) : NOT_AVAILABLE}</TableCell>
                       <TableCell align="right">{NOT_AVAILABLE}</TableCell>
                       <TableCell align="right">{NOT_AVAILABLE}</TableCell>
                       <TableCell>{NOT_AVAILABLE}</TableCell>

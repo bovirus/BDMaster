@@ -503,24 +503,36 @@ fn write_chapters_table(out: &mut String, pl: &PlaylistInfo) {
             total_length_s
         };
         let chapter_length = (chapter_end - chapter_start).max(0.0);
+        let metrics = pl.chapter_metrics.get(ci);
+        let avg_video_rate = metrics.map(|m| m.avg_video_rate).unwrap_or(0);
+        let max_1_sec_rate = metrics.map(|m| m.max_1_sec_rate).unwrap_or(0);
+        let max_1_sec_time = metrics.map(|m| m.max_1_sec_time).unwrap_or(0.0);
+        let max_5_sec_rate = metrics.map(|m| m.max_5_sec_rate).unwrap_or(0);
+        let max_5_sec_time = metrics.map(|m| m.max_5_sec_time).unwrap_or(0.0);
+        let max_10_sec_rate = metrics.map(|m| m.max_10_sec_rate).unwrap_or(0);
+        let max_10_sec_time = metrics.map(|m| m.max_10_sec_time).unwrap_or(0.0);
         let _ = writeln!(
             out,
             "{:<8}{:<16}{:<16}{:<16}{:<16}{:<16}{:<16}{:<16}{:<16}{:<16}{:<16}{:<16}{}",
             ci + 1,
             format_seconds_full(chapter_start),
             format_seconds_full(chapter_length),
-            "     0 kbps",
-            "     0 kbps",
-            "0:00:00.000",
-            "     0 kbps",
-            "0:00:00.000",
-            "     0 kbps",
-            "0:00:00.000",
+            format_kbps(avg_video_rate),
+            format_kbps(max_1_sec_rate),
+            format_seconds_full(max_1_sec_time),
+            format_kbps(max_5_sec_rate),
+            format_seconds_full(max_5_sec_time),
+            format_kbps(max_10_sec_rate),
+            format_seconds_full(max_10_sec_time),
             "      0 bytes",
             "      0 bytes",
             "0:00:00.000",
         );
     }
+}
+
+fn format_kbps(rate: u64) -> String {
+    format!("{:>6} kbps", format_thousands((rate as f64 / 1000.0).round() as u64))
 }
 
 fn effective_bitrate(s: &TSStreamInfo) -> u64 {

@@ -762,6 +762,8 @@ fn build_playlist_info(pl: &PlaylistFile, bd: &BDRom, group_index: u32) -> Playl
         has_loops: false,
         is_custom: false,
         chapters: pl.chapters.clone(),
+        chapter_metrics: Vec::new(),
+        bitrate_samples: Vec::new(),
         stream_clips: clips,
         video_streams,
         audio_streams,
