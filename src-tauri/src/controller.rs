@@ -49,46 +49,6 @@ pub fn get_scan_progress(state: &FullScanState) -> ScanProgressInfo {
     bdrom::full_scan::snapshot(state)
 }
 
-pub async fn generate_report(
-    path: String,
-    full: bool,
-    selected_playlists: Option<Vec<String>>,
-    state: &FullScanState,
-) -> Result<String> {
-    let info = match latest_scanned_disc_for_path(&path, state) {
-        Some(info) => info,
-        None => bdrom::scan(&path)?,
-    };
-    if full {
-        Ok(bdrom::report::generate_full(
-            &info,
-            selected_playlists.as_deref(),
-        ))
-    } else {
-        Ok(bdrom::report::generate(
-            &info,
-            false,
-            selected_playlists.as_deref(),
-        ))
-    }
-}
-
-fn latest_scanned_disc_for_path(path: &str, state: &FullScanState) -> Option<DiscInfo> {
-    let progress = state.progress.lock().unwrap();
-    if progress.path == path {
-        progress.disc.clone()
-    } else {
-        None
-    }
-}
-
-pub async fn get_playlist_chart_data(
-    path: String,
-    playlist_name: String,
-) -> Result<Vec<ChartSample>> {
-    Ok(bdrom::build_chart_samples(&path, &playlist_name))
-}
-
 pub async fn write_text_file(file: String, text: String) -> Result<()> {
     let path = Path::new(file.as_str());
     let mut f = File::create(path)?;

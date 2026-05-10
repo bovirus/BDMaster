@@ -46,24 +46,6 @@ export async function getScanProgress(): Promise<Protocol.ScanProgress> {
   return await invoke<Protocol.ScanProgress>("get_scan_progress");
 }
 
-export async function generateReport(
-  path: string,
-  full: boolean,
-  selectedPlaylists: string[] | null
-): Promise<string> {
-  return await invoke<string>("generate_report", { path, full, selectedPlaylists });
-}
-
-export async function getPlaylistChartData(
-  path: string,
-  playlistName: string
-): Promise<{ time: number; bitRate: number }[]> {
-  return await invoke<{ time: number; bitRate: number }[]>("get_playlist_chart_data", {
-    path,
-    playlistName,
-  });
-}
-
 export async function writeTextFile(file: string, text: string): Promise<void> {
   return await invoke<void>("write_text_file", { file, text });
 }

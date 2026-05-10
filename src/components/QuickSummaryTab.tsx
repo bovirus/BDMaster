@@ -3,7 +3,7 @@
  *   All rights reserved.
  */
 
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import {
   Box,
   Button,
@@ -19,35 +19,20 @@ import { useTranslation } from "react-i18next";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import * as Protocol from "../lib/protocol";
 import { useAppStore } from "../lib/store";
-import { generateReport, writeTextFile } from "../lib/service";
+import { writeTextFile } from "../lib/service";
 import { openSaveReportDialog } from "../lib/dialog";
+import { generateQuickSummaryReport } from "../lib/report";
 
 export default function QuickSummaryTab({ playlistName }: { playlistName: string | null }) {
   const { t } = useTranslation();
   const disc = useAppStore((s) => s.disc);
+  const config = useAppStore((s) => s.config);
   const setNotification = useAppStore((s) => s.setDialogNotification);
-  const [text, setText] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!disc || !playlistName) {
-      setText(null);
-      return;
-    }
-    setText(null);
-    setError(null);
-    generateReport(disc.path, false, [playlistName])
-      .then((result) => {
-        if (!cancelled) setText(result);
-      })
-      .catch((e) => {
-        if (!cancelled) setError(`${e}`);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [disc, playlistName]);
+  const text = useMemo(() => {
+    if (!disc || !playlistName) return null;
+    return generateQuickSummaryReport(disc, [playlistName], config?.formatting);
+  }, [disc, playlistName, config?.formatting]);
 
   const handleCopy = async () => {
     if (!text) return;
@@ -120,7 +105,9 @@ export default function QuickSummaryTab({ playlistName }: { playlistName: string
           }
           sx={{ py: 1, "& .MuiCardHeader-action": { alignSelf: "center", mt: 0, mr: 0 } }}
         />
-        <CardContent sx={{ flex: 1, minHeight: 0, overflow: "auto", pt: 0, "&:last-child": { pb: 1 } }}>
+        <CardContent
+          sx={{ flex: 1, minHeight: 0, overflow: "auto", pt: 0, "&:last-child": { pb: 1 } }}
+        >
           <Box
             component="pre"
             sx={{
@@ -130,7 +117,7 @@ export default function QuickSummaryTab({ playlistName }: { playlistName: string
               m: 0,
             }}
           >
-            {error ? error : text ?? "…"}
+            {text ?? "-"}
           </Box>
         </CardContent>
       </Card>

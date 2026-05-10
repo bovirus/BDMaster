@@ -3,7 +3,7 @@
  *   All rights reserved.
  */
 
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import {
   Box,
   Card,
@@ -13,38 +13,16 @@ import {
 } from "@mui/material";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../lib/store";
-import { getPlaylistChartData } from "../lib/service";
 import { formatBitRate, formatLengthSeconds } from "../lib/format";
-
-interface ChartPoint {
-  time: number;
-  bitRate: number;
-}
+import type { ChartSample } from "../lib/protocol";
 
 export default function BitRateTab({ playlistName }: { playlistName: string | null }) {
   const { t } = useTranslation();
   const disc = useAppStore((s) => s.disc);
-  const [data, setData] = useState<ChartPoint[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!disc || !playlistName) {
-      setData(null);
-      return;
-    }
-    setData(null);
-    setError(null);
-    getPlaylistChartData(disc.path, playlistName)
-      .then((result) => {
-        if (!cancelled) setData(result);
-      })
-      .catch((e) => {
-        if (!cancelled) setError(`${e}`);
-      });
-    return () => {
-      cancelled = true;
-    };
+  const playlist = useMemo(() => {
+    if (!disc || !playlistName) return null;
+    return disc.playlists.find((p) => p.name === playlistName) ?? null;
   }, [disc, playlistName]);
 
   if (!playlistName) {
@@ -69,16 +47,12 @@ export default function BitRateTab({ playlistName }: { playlistName: string | nu
           sx={{ py: 1 }}
         />
         <CardContent sx={{ flex: 1, minHeight: 0, overflow: "auto", pt: 0, "&:last-child": { pb: 1 } }}>
-          {error ? (
-            <Typography variant="body2" color="error">
-              {error}
-            </Typography>
-          ) : data === null ? (
-            <Typography variant="body2" color="text.secondary">
-              …
-            </Typography>
+          {playlist ? (
+            <BitRateChart data={playlist.bitrateSamples ?? []} />
           ) : (
-            <BitRateChart data={data} />
+            <Typography variant="body2" color="text.secondary">
+              {t("disc.noPlaylistSelected")}
+            </Typography>
           )}
         </CardContent>
       </Card>
@@ -86,7 +60,7 @@ export default function BitRateTab({ playlistName }: { playlistName: string | nu
   );
 }
 
-function BitRateChart({ data }: { data: ChartPoint[] }) {
+function BitRateChart({ data }: { data: ChartSample[] }) {
   if (data.length === 0) {
     return <Typography variant="body2">No bitrate data.</Typography>;
   }

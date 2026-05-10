@@ -13,7 +13,6 @@ pub mod full_scan;
 pub mod lang;
 pub mod m2ts;
 pub mod mpls;
-pub mod report;
 pub mod types;
 pub mod udf;
 
@@ -23,8 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::protocol::{
-    ChartSample, DiscInfo, PlaylistInfo, PlaylistStreamClipInfo, StreamClipFileInfo,
-    StreamFileInfo, TSStreamInfo,
+    DiscInfo, PlaylistInfo, PlaylistStreamClipInfo, StreamClipFileInfo, StreamFileInfo, TSStreamInfo,
 };
 
 use self::clpi::StreamClipFile;
@@ -1138,65 +1136,6 @@ pub(crate) fn open_stream_reader_raw(
             }
         }
     }
-}
-
-pub fn build_chart_samples(path: &str, playlist_name: &str) -> Vec<ChartSample> {
-    let use_ssif = crate::config::get_config().scan.enable_ssif_support;
-    let bd = match open_bdrom(Path::new(path), use_ssif) {
-        Ok(bd) => bd,
-        Err(err) => {
-            log::warn!("chart: failed to open disc {}: {}", path, err);
-            return Vec::new();
-        }
-    };
-    let pl = match bd.playlists.get(&playlist_name.to_uppercase()) {
-        Some(p) => p,
-        None => return Vec::new(),
-    };
-    let mut samples: Vec<ChartSample> = Vec::new();
-    let mut offset_seconds: f64 = 0.0;
-    for clip in &pl.stream_clips {
-        if clip.angle_index != 0 {
-            continue;
-        }
-        let entry = match effective_stream_source(&bd, &clip.name) {
-            Some(e) => e,
-            None => continue,
-        };
-        let reader = match open_stream_reader(&bd, &entry.0) {
-            Ok(r) => r,
-            Err(err) => {
-                log::warn!("chart: failed to open {}: {}", clip.name, err);
-                continue;
-            }
-        };
-        match m2ts::scan_m2ts_from_reader(reader) {
-            Ok(res) => {
-                let clip_in_s = clip.time_in as f64 / 45000.0;
-                let clip_out_s = clip.time_out as f64 / 45000.0;
-                for (t, bps) in res.bitrate_samples {
-                    if t < clip_in_s {
-                        continue;
-                    }
-                    if t > clip_out_s {
-                        break;
-                    }
-                    samples.push(ChartSample {
-                        time: offset_seconds + (t - clip_in_s),
-                        bit_rate: bps,
-                    });
-                }
-                let length_s = clip_out_s - clip_in_s;
-                if length_s.is_finite() && length_s > 0.0 {
-                    offset_seconds += length_s;
-                }
-            }
-            Err(err) => {
-                log::warn!("chart: failed to scan {}: {}", clip.name, err);
-            }
-        }
-    }
-    samples
 }
 
 /// Run a one-shot codec init pass over every unique angle-0 clip on the disc.

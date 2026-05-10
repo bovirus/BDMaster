@@ -3,14 +3,13 @@
  *   All rights reserved.
  */
 
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import {
   Box,
   Button,
   Card,
   CardContent,
   CardHeader,
-  CircularProgress,
   Stack,
   Typography,
 } from "@mui/material";
@@ -20,35 +19,20 @@ import { useTranslation } from "react-i18next";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import * as Protocol from "../lib/protocol";
 import { useAppStore } from "../lib/store";
-import { generateReport, writeTextFile } from "../lib/service";
+import { writeTextFile } from "../lib/service";
 import { openSaveReportDialog } from "../lib/dialog";
+import { generateFullReport } from "../lib/report";
 
 export default function FullReportTab({ playlistName }: { playlistName: string | null }) {
   const { t } = useTranslation();
   const disc = useAppStore((s) => s.disc);
+  const about = useAppStore((s) => s.about);
   const setNotification = useAppStore((s) => s.setDialogNotification);
-  const [text, setText] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!disc || !playlistName) {
-      setText(null);
-      return;
-    }
-    setText(null);
-    setError(null);
-    generateReport(disc.path, true, [playlistName])
-      .then((result) => {
-        if (!cancelled) setText(result);
-      })
-      .catch((e) => {
-        if (!cancelled) setError(`${e}`);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [disc, playlistName]);
+  const text = useMemo(() => {
+    if (!disc || !playlistName) return null;
+    return generateFullReport(disc, [playlistName], about?.appVersion);
+  }, [disc, playlistName, about?.appVersion]);
 
   const handleCopy = async () => {
     if (!text) return;
@@ -121,44 +105,20 @@ export default function FullReportTab({ playlistName }: { playlistName: string |
           }
           sx={{ py: 1, "& .MuiCardHeader-action": { alignSelf: "center", mt: 0, mr: 0 } }}
         />
-        <CardContent sx={{ flex: 1, minHeight: 0, overflow: "auto", pt: 0, "&:last-child": { pb: 1 } }}>
-          {error ? (
-            <Box
-              component="pre"
-              sx={{
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-                fontSize: "0.75rem",
-                whiteSpace: "pre-wrap",
-                m: 0,
-                color: "error.main",
-              }}
-            >
-              {error}
-            </Box>
-          ) : text === null ? (
-            <Stack
-              direction="row"
-              spacing={1.5}
-              sx={{ alignItems: "center", justifyContent: "center", py: 4 }}
-            >
-              <CircularProgress size={20} />
-              <Typography variant="body2" color="text.secondary">
-                {t("disc.generatingReport", { playlist: playlistName })}
-              </Typography>
-            </Stack>
-          ) : (
-            <Box
-              component="pre"
-              sx={{
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-                fontSize: "0.75rem",
-                whiteSpace: "pre-wrap",
-                m: 0,
-              }}
-            >
-              {text}
-            </Box>
-          )}
+        <CardContent
+          sx={{ flex: 1, minHeight: 0, overflow: "auto", pt: 0, "&:last-child": { pb: 1 } }}
+        >
+          <Box
+            component="pre"
+            sx={{
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+              fontSize: "0.75rem",
+              whiteSpace: "pre-wrap",
+              m: 0,
+            }}
+          >
+            {text ?? "-"}
+          </Box>
         </CardContent>
       </Card>
     </Box>

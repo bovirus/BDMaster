@@ -76,28 +76,6 @@ fn get_scan_progress(state: tauri::State<'_, Arc<FullScanState>>) -> ScanProgres
 }
 
 #[tauri::command]
-async fn generate_report(
-    path: String,
-    full: bool,
-    selected_playlists: Option<Vec<String>>,
-    state: tauri::State<'_, Arc<FullScanState>>,
-) -> Result<String, String> {
-    controller::generate_report(path, full, selected_playlists, state.inner())
-        .await
-        .map_err(convert_error)
-}
-
-#[tauri::command]
-async fn get_playlist_chart_data(
-    path: String,
-    playlist_name: String,
-) -> Result<Vec<protocol::ChartSample>, String> {
-    controller::get_playlist_chart_data(path, playlist_name)
-        .await
-        .map_err(convert_error)
-}
-
-#[tauri::command]
 async fn write_text_file(file: String, text: String) -> Result<(), String> {
     controller::write_text_file(file, text)
         .await
@@ -302,8 +280,6 @@ pub fn run() {
             start_full_scan,
             cancel_full_scan,
             get_scan_progress,
-            generate_report,
-            get_playlist_chart_data,
             write_text_file,
             is_mkvtoolnix_found,
             open_playlist_in_mkvtoolnix_gui,
