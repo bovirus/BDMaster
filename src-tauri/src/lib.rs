@@ -10,9 +10,11 @@ use tauri::Manager;
 static WINDOW_READY: AtomicBool = AtomicBool::new(false);
 
 mod bdrom;
+mod bettermediainfo;
 mod config;
 mod constants;
 mod controller;
+mod mkvtoolnix;
 mod protocol;
 
 use protocol::{FullScanState, ScanProgressInfo, UpdateCheckResult, UpdateCheckState};
@@ -100,6 +102,44 @@ async fn write_text_file(file: String, text: String) -> Result<(), String> {
     controller::write_text_file(file, text)
         .await
         .map_err(convert_error)
+}
+
+#[tauri::command]
+async fn is_mkvtoolnix_found(
+    path: String,
+    check_running: bool,
+) -> Result<protocol::MkvToolNixStatus, String> {
+    mkvtoolnix::is_mkvtoolnix_found(path, check_running)
+        .await
+        .map_err(convert_error)
+}
+
+#[tauri::command]
+async fn open_playlist_in_mkvtoolnix_gui(
+    disc_path: String,
+    playlist_name: String,
+) -> Result<(), String> {
+    let resolved = bdrom::resolve_playlist_path(&disc_path, &playlist_name).map_err(convert_error)?;
+    mkvtoolnix::spawn_mkvtoolnix_gui(&resolved.to_string_lossy()).map_err(convert_error)
+}
+
+#[tauri::command]
+async fn is_bettermediainfo_found(
+    path: String,
+    check_running: bool,
+) -> Result<protocol::BetterMediaInfoStatus, String> {
+    bettermediainfo::is_bettermediainfo_found(path, check_running)
+        .await
+        .map_err(convert_error)
+}
+
+#[tauri::command]
+async fn open_playlist_in_bettermediainfo(
+    disc_path: String,
+    playlist_name: String,
+) -> Result<(), String> {
+    let resolved = bdrom::resolve_playlist_path(&disc_path, &playlist_name).map_err(convert_error)?;
+    bettermediainfo::spawn_bettermediainfo(&resolved.to_string_lossy()).map_err(convert_error)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -265,6 +305,10 @@ pub fn run() {
             generate_report,
             get_playlist_chart_data,
             write_text_file,
+            is_mkvtoolnix_found,
+            open_playlist_in_mkvtoolnix_gui,
+            is_bettermediainfo_found,
+            open_playlist_in_bettermediainfo,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

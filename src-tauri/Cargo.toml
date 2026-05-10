@@ -27,3 +27,4 @@ env_logger = "0.11"
 encoding_rs = "0.8"
 byteorder = "1.5"
 ureq = { version = "2", features = ["json"] }
+sysinfo = { version = "0.32", default-features = false, features = ["system"] }

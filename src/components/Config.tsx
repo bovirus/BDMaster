@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Box,
+  Button,
   FormControl,
   FormControlLabel,
   MenuItem,
@@ -26,9 +27,14 @@ import {
   Tune as ScanIcon,
   Numbers as FormatIcon,
 } from "@mui/icons-material";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import * as Protocol from "../lib/protocol";
-import { setConfig as saveConfig } from "../lib/service";
+import {
+  isBetterMediaInfoFound,
+  isMkvtoolnixFound,
+  setConfig as saveConfig,
+} from "../lib/service";
 import { useAppStore } from "../lib/store";
 import { changeLanguage } from "../i18n";
 
@@ -70,7 +76,11 @@ export default function Config() {
   const setNotification = useAppStore((s) => s.setDialogNotification);
 
   const [draft, setDraft] = useState<Protocol.Config | null>(config);
+  const [mkvtoolnixFound, setMkvtoolnixFound] = useState(false);
+  const [betterMediaInfoFound, setBetterMediaInfoFound] = useState(false);
   const isInitializedRef = useRef(false);
+  const mkvToolNixCheckDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const betterMediaInfoCheckDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     if (config && !isInitializedRef.current) {
@@ -123,6 +133,75 @@ export default function Config() {
     return () => clearTimeout(handle);
   }, [draft, setConfigState, setNotification, t]);
 
+  // Validate the configured MKVToolNix path. The backend may auto-detect on
+  // macOS and return a corrected path; mirror that into the draft when it
+  // happens so the user sees the resolved location.
+  useEffect(() => {
+    if (!isInitializedRef.current || !draft) return;
+    const path = draft.mkv?.mkvToolNixPath ?? "";
+    if (mkvToolNixCheckDebounceRef.current) {
+      clearTimeout(mkvToolNixCheckDebounceRef.current);
+    }
+    let isCancelled = false;
+    mkvToolNixCheckDebounceRef.current = setTimeout(async () => {
+      try {
+        const status = await isMkvtoolnixFound(path.trim());
+        if (!isCancelled) {
+          setMkvtoolnixFound(status.found);
+          if (
+            status.found &&
+            status.mkvToolNixPath &&
+            status.mkvToolNixPath !== path
+          ) {
+            setDraft((d) =>
+              d ? { ...d, mkv: { mkvToolNixPath: status.mkvToolNixPath } } : d
+            );
+          }
+        }
+      } catch {
+        if (!isCancelled) setMkvtoolnixFound(false);
+      }
+    }, 250);
+    return () => {
+      isCancelled = true;
+      if (mkvToolNixCheckDebounceRef.current) {
+        clearTimeout(mkvToolNixCheckDebounceRef.current);
+      }
+    };
+  }, [draft?.mkv?.mkvToolNixPath]);
+
+  // Validate the configured BetterMediaInfo path. Mirrors the same debounce +
+  // auto-correct pattern used for MKVToolNix above.
+  useEffect(() => {
+    if (!isInitializedRef.current || !draft) return;
+    const path = draft.betterMediaInfo?.path ?? "";
+    if (betterMediaInfoCheckDebounceRef.current) {
+      clearTimeout(betterMediaInfoCheckDebounceRef.current);
+    }
+    let isCancelled = false;
+    betterMediaInfoCheckDebounceRef.current = setTimeout(async () => {
+      try {
+        const status = await isBetterMediaInfoFound(path.trim());
+        if (!isCancelled) {
+          setBetterMediaInfoFound(status.found);
+          if (status.found && status.path && status.path !== path) {
+            setDraft((d) =>
+              d ? { ...d, betterMediaInfo: { path: status.path } } : d
+            );
+          }
+        }
+      } catch {
+        if (!isCancelled) setBetterMediaInfoFound(false);
+      }
+    }, 250);
+    return () => {
+      isCancelled = true;
+      if (betterMediaInfoCheckDebounceRef.current) {
+        clearTimeout(betterMediaInfoCheckDebounceRef.current);
+      }
+    };
+  }, [draft?.betterMediaInfo?.path]);
+
   if (!draft) {
     return <Box sx={{ p: 2 }}>Loading…</Box>;
   }
@@ -137,6 +216,71 @@ export default function Config() {
 
   const updateFormatting = (patch: Partial<Protocol.ConfigFormatting>) => {
     setDraft({ ...draft, formatting: { ...draft.formatting, ...patch } });
+  };
+  const updateMkv = (patch: Partial<Protocol.ConfigMkv>) => {
+    setDraft({ ...draft, mkv: { ...draft.mkv, ...patch } });
+  };
+
+  const handleBrowseMkvToolNixPath = async () => {
+    const directory = await openDialog({
+      directory: true,
+      defaultPath: draft.mkv?.mkvToolNixPath?.trim() || undefined,
+    });
+    if (typeof directory === "string" && directory.length > 0) {
+      updateMkv({ mkvToolNixPath: directory });
+    }
+  };
+
+  const handleDetectMkvToolNix = async () => {
+    try {
+      const status = await isMkvtoolnixFound(
+        draft.mkv?.mkvToolNixPath?.trim() ?? "",
+        true
+      );
+      setMkvtoolnixFound(status.found);
+      if (
+        status.found &&
+        status.mkvToolNixPath &&
+        status.mkvToolNixPath !== draft.mkv?.mkvToolNixPath
+      ) {
+        updateMkv({ mkvToolNixPath: status.mkvToolNixPath });
+      }
+    } catch {
+      setMkvtoolnixFound(false);
+    }
+  };
+
+  const updateBetterMediaInfo = (patch: Partial<Protocol.ConfigBetterMediaInfo>) => {
+    setDraft({ ...draft, betterMediaInfo: { ...draft.betterMediaInfo, ...patch } });
+  };
+
+  const handleBrowseBetterMediaInfoPath = async () => {
+    const directory = await openDialog({
+      directory: true,
+      defaultPath: draft.betterMediaInfo?.path?.trim() || undefined,
+    });
+    if (typeof directory === "string" && directory.length > 0) {
+      updateBetterMediaInfo({ path: directory });
+    }
+  };
+
+  const handleDetectBetterMediaInfo = async () => {
+    try {
+      const status = await isBetterMediaInfoFound(
+        draft.betterMediaInfo?.path?.trim() ?? "",
+        true
+      );
+      setBetterMediaInfoFound(status.found);
+      if (
+        status.found &&
+        status.path &&
+        status.path !== draft.betterMediaInfo?.path
+      ) {
+        updateBetterMediaInfo({ path: status.path });
+      }
+    } catch {
+      setBetterMediaInfoFound(false);
+    }
   };
   const updateFormattingBitRate = (patch: Partial<Protocol.ConfigBitRate>) => {
     updateFormatting({ bitRate: { ...draft.formatting.bitRate, ...patch } });
@@ -388,6 +532,116 @@ export default function Config() {
             </Box>
           </Box>
         </Stack>
+      </Paper>
+
+      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+        <SectionHeader
+          icon={
+            <Box
+              component="img"
+              src="images/mkvmerge.png"
+              alt="MKVToolNix"
+              sx={{ width: 20, height: 20, objectFit: "contain" }}
+            />
+          }
+          title={t("settings.mkv")}
+        />
+        <Box sx={{ py: 1 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            {t("settings.mkvToolNixPath")}
+          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <TextField
+              value={draft.mkv?.mkvToolNixPath ?? ""}
+              onChange={(e) => updateMkv({ mkvToolNixPath: e.target.value })}
+              size="small"
+              fullWidth
+            />
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleBrowseMkvToolNixPath}
+              sx={{ minWidth: 90, height: 36, textTransform: "none" }}
+            >
+              {t("settings.browse")}
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleDetectMkvToolNix}
+              sx={{ minWidth: 90, height: 36, textTransform: "none" }}
+            >
+              {t("settings.detect")}
+            </Button>
+          </Box>
+          <Typography
+            variant="caption"
+            sx={{
+              mt: 0.75,
+              display: "block",
+              color: mkvtoolnixFound ? "success.main" : "error.main",
+            }}
+          >
+            {mkvtoolnixFound
+              ? t("settings.mkvtoolnixFound")
+              : t("settings.mkvtoolnixNotFound")}
+          </Typography>
+        </Box>
+      </Paper>
+
+      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+        <SectionHeader
+          icon={
+            <Box
+              component="img"
+              src="images/bettermediainfo.png"
+              alt="BetterMediaInfo"
+              sx={{ width: 20, height: 20, objectFit: "contain" }}
+            />
+          }
+          title={t("settings.betterMediaInfo")}
+        />
+        <Box sx={{ py: 1 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            {t("settings.betterMediaInfoPath")}
+          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <TextField
+              value={draft.betterMediaInfo?.path ?? ""}
+              onChange={(e) => updateBetterMediaInfo({ path: e.target.value })}
+              size="small"
+              fullWidth
+            />
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleBrowseBetterMediaInfoPath}
+              sx={{ minWidth: 90, height: 36, textTransform: "none" }}
+            >
+              {t("settings.browse")}
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleDetectBetterMediaInfo}
+              sx={{ minWidth: 90, height: 36, textTransform: "none" }}
+            >
+              {t("settings.detect")}
+            </Button>
+          </Box>
+          <Typography
+            variant="caption"
+            sx={{
+              mt: 0.75,
+              display: "block",
+              color: betterMediaInfoFound ? "success.main" : "error.main",
+            }}
+          >
+            {betterMediaInfoFound
+              ? t("settings.betterMediaInfoFound")
+              : t("settings.betterMediaInfoNotFound")}
+          </Typography>
+        </Box>
       </Paper>
 
     </Box>

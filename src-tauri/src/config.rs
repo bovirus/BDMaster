@@ -35,6 +35,10 @@ pub struct Config {
     #[serde(default)]
     pub update: ConfigUpdate,
     #[serde(default)]
+    pub mkv: ConfigMkv,
+    #[serde(rename = "betterMediaInfo", default)]
+    pub better_media_info: ConfigBetterMediaInfo,
+    #[serde(default)]
     pub window: ConfigWindow,
 }
 
@@ -139,7 +143,61 @@ impl Default for Config {
             disc_info_split: 0.5,
             info_panel_split: 0.4,
             update: Default::default(),
+            mkv: Default::default(),
+            better_media_info: Default::default(),
             window: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ConfigMkv {
+    #[serde(rename = "mkvToolNixPath", default = "ConfigMkv::default_mkv_toolnix_path")]
+    pub mkv_toolnix_path: String,
+}
+
+impl ConfigMkv {
+    fn default_mkv_toolnix_path() -> String {
+        if cfg!(target_os = "windows") {
+            r"C:\Program Files\MKVToolNix".to_owned()
+        } else if cfg!(target_os = "macos") {
+            "/Applications/MKVToolNix.app/Contents/MacOS".to_owned()
+        } else {
+            "/usr/bin".to_owned()
+        }
+    }
+}
+
+impl Default for ConfigMkv {
+    fn default() -> Self {
+        Self {
+            mkv_toolnix_path: Self::default_mkv_toolnix_path(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ConfigBetterMediaInfo {
+    #[serde(default = "ConfigBetterMediaInfo::default_path")]
+    pub path: String,
+}
+
+impl ConfigBetterMediaInfo {
+    fn default_path() -> String {
+        if cfg!(target_os = "windows") {
+            r"C:\Program Files\BetterMediaInfo".to_owned()
+        } else if cfg!(target_os = "macos") {
+            "/Applications/BetterMediaInfo.app/Contents/MacOS".to_owned()
+        } else {
+            "/usr/bin".to_owned()
+        }
+    }
+}
+
+impl Default for ConfigBetterMediaInfo {
+    fn default() -> Self {
+        Self {
+            path: Self::default_path(),
         }
     }
 }

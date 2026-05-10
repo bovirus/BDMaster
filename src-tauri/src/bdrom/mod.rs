@@ -459,6 +459,47 @@ fn read_disc_title_iso(img: &mut UdfImage) -> Option<String> {
     extract_title_from_xml(&text)
 }
 
+/// Resolve the on-disk path of a playlist (.mpls) file given a disc path
+/// (which may point at the disc root, BDMV, or any subdirectory). Only
+/// supported for native disc folders — ISO disc images don't expose the
+/// playlist as a real file path.
+pub fn resolve_playlist_path(disc_path: &str, playlist_name: &str) -> Result<PathBuf> {
+    let path = Path::new(disc_path);
+    if !path.exists() {
+        return Err(anyhow!("Path does not exist: {}", path.display()));
+    }
+    if path.is_file() {
+        return Err(anyhow!(
+            "Disc images (.iso) don't expose playlists as files: {}",
+            path.display()
+        ));
+    }
+    let bdmv = locate_bdmv(path)?;
+    let playlist_dir = find_subdir(&bdmv, "PLAYLIST")
+        .ok_or_else(|| anyhow!("PLAYLIST directory not found under {}", bdmv.display()))?;
+    // Match the playlist file case-insensitively to tolerate uppercase/lowercase
+    // discrepancies between the MPLS name we hand back to the frontend
+    // (uppercased in `to_disc_info`) and the file as it lives on disk.
+    if let Ok(entries) = std::fs::read_dir(&playlist_dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_file() {
+                if p.file_name()
+                    .map(|n| n.to_string_lossy().eq_ignore_ascii_case(playlist_name))
+                    .unwrap_or(false)
+                {
+                    return Ok(p);
+                }
+            }
+        }
+    }
+    Err(anyhow!(
+        "Playlist {} not found under {}",
+        playlist_name,
+        playlist_dir.display()
+    ))
+}
+
 fn locate_bdmv(path: &Path) -> Result<PathBuf> {
     // Walk up the path looking for a BDMV ancestor.
     let mut p: Option<&Path> = Some(path);

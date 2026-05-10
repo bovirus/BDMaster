@@ -8,6 +8,7 @@ import {
   Box,
   Button,
   Chip,
+  Divider,
   IconButton,
   LinearProgress,
   Paper,
@@ -39,6 +40,10 @@ import {
   startFullScan,
   cancelFullScan,
   getScanProgress,
+  isBetterMediaInfoFound,
+  isMkvtoolnixFound,
+  openPlaylistInBetterMediaInfo,
+  openPlaylistInMkvToolNixGui,
 } from "../lib/service";
 import { formatLength45k, formatBitRate, formatSize } from "../lib/format";
 
@@ -195,6 +200,48 @@ export default function DiscDetail() {
   const setDialogNotification = useAppStore((s) => s.setDialogNotification);
   const [sortKey, setSortKey] = useState<PlaylistSortKey>("fileSize");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [mkvtoolnixAvailable, setMkvtoolnixAvailable] = useState(false);
+  const [betterMediaInfoAvailable, setBetterMediaInfoAvailable] = useState(false);
+
+  // Probe whether mkvtoolnix-gui is reachable at the configured path. Used to
+  // decide whether the per-playlist "Open in MKVToolNix GUI" action shows up
+  // in the Actions column. Re-runs whenever the user edits the path in
+  // Settings. Disc-source check (ISO vs folder) gates the column further down.
+  useEffect(() => {
+    let cancelled = false;
+    const path = config?.mkv?.mkvToolNixPath ?? "";
+    isMkvtoolnixFound(path.trim())
+      .then((status) => {
+        if (!cancelled) setMkvtoolnixAvailable(status.found);
+      })
+      .catch(() => {
+        if (!cancelled) setMkvtoolnixAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config?.mkv?.mkvToolNixPath]);
+
+  // Same probe for BetterMediaInfo. Both feed into the Actions column gating.
+  useEffect(() => {
+    let cancelled = false;
+    const path = config?.betterMediaInfo?.path ?? "";
+    isBetterMediaInfoFound(path.trim())
+      .then((status) => {
+        if (!cancelled) setBetterMediaInfoAvailable(status.found);
+      })
+      .catch(() => {
+        if (!cancelled) setBetterMediaInfoAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config?.betterMediaInfo?.path]);
+
+  const isIsoDisc = (disc?.path ?? "").toLowerCase().endsWith(".iso");
+  const showMkvToolNixButton = mkvtoolnixAvailable && !isIsoDisc;
+  const showBetterMediaInfoButton = betterMediaInfoAvailable && !isIsoDisc;
+  const showExternalToolDivider = showMkvToolNixButton || showBetterMediaInfoButton;
 
   const isScanning = !!fullScanProgress?.isRunning;
   const scanComplete = !!disc && fullScanCompletedFor === disc.path;
@@ -441,6 +488,36 @@ export default function DiscDetail() {
   const handleViewQuickSummary = (name: string) => openTab(Protocol.TabType.QuickSummary, name);
   const handleViewFullReport = (name: string) => openTab(Protocol.TabType.FullReport, name);
   const handleViewBitRate = (name: string) => openTab(Protocol.TabType.BitRate, name);
+  const handleOpenInMkvToolNixGui = async (name: string) => {
+    if (!disc) return;
+    try {
+      await openPlaylistInMkvToolNixGui(disc.path, name);
+    } catch (err) {
+      const raw = err == null ? "" : String(err);
+      const isNotConfigured = raw.includes("MKVTOOLNIX_GUI_NOT_AVAILABLE");
+      setDialogNotification({
+        title: isNotConfigured
+          ? t("disc.mkvToolNixGuiNotConfigured")
+          : t("disc.openInMkvToolNixGuiFailed", { message: raw }),
+        type: Protocol.DialogNotificationType.Error,
+      });
+    }
+  };
+  const handleOpenInBetterMediaInfo = async (name: string) => {
+    if (!disc) return;
+    try {
+      await openPlaylistInBetterMediaInfo(disc.path, name);
+    } catch (err) {
+      const raw = err == null ? "" : String(err);
+      const isNotConfigured = raw.includes("BETTERMEDIAINFO_NOT_AVAILABLE");
+      setDialogNotification({
+        title: isNotConfigured
+          ? t("disc.betterMediaInfoNotConfigured")
+          : t("disc.openInBetterMediaInfoFailed", { message: raw }),
+        type: Protocol.DialogNotificationType.Error,
+      });
+    }
+  };
 
   const sortedPlaylists = useMemo(() => {
     if (!disc) return [];
@@ -773,20 +850,64 @@ export default function DiscDetail() {
                         : "—"}
                     </TableCell>
                     <TableCell align="center" padding="none">
-                      <Stack direction="row" spacing={0.5} sx={{ justifyContent: "center" }}>
-                        {p.chapters.length > 0 && (
-                          <Tooltip title={t("disc.viewChapters")}>
+                      <Stack direction="row" spacing={0.5} sx={{ justifyContent: "center", alignItems: "center" }}>
+                        {showMkvToolNixButton && (
+                          <Tooltip title={t("disc.openInMkvToolNixGui")}>
                             <IconButton
                               size="small"
                               sx={{ p: 0 }}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleViewChapters(p.name);
+                                handleOpenInMkvToolNixGui(p.name);
                               }}
                             >
-                              <BookmarkIcon fontSize="small" />
+                              <Box
+                                component="img"
+                                src="images/mkvmerge.png"
+                                alt="MKVToolNix"
+                                sx={{ width: 18, height: 18, objectFit: "contain" }}
+                              />
                             </IconButton>
                           </Tooltip>
+                        )}
+                        {showBetterMediaInfoButton && (
+                          <Tooltip title={t("disc.openInBetterMediaInfo")}>
+                            <IconButton
+                              size="small"
+                              sx={{ p: 0 }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenInBetterMediaInfo(p.name);
+                              }}
+                            >
+                              <Box
+                                component="img"
+                                src="images/bettermediainfo.png"
+                                alt="BetterMediaInfo"
+                                sx={{ width: 18, height: 18, objectFit: "contain" }}
+                              />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                        {showExternalToolDivider && (
+                          <Divider orientation="vertical" flexItem sx={{ mx: 0.25 }} />
+                        )}
+                        {p.chapters.length > 0 && (
+                          <>
+                            <Tooltip title={t("disc.viewChapters")}>
+                              <IconButton
+                                size="small"
+                                sx={{ p: 0 }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleViewChapters(p.name);
+                                }}
+                              >
+                                <BookmarkIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Divider orientation="vertical" flexItem sx={{ mx: 0.25 }} />
+                          </>
                         )}
                         <Tooltip title={t("disc.generateQuickSummary")}>
                           <IconButton

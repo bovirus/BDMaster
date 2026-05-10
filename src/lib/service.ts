@@ -67,3 +67,43 @@ export async function getPlaylistChartData(
 export async function writeTextFile(file: string, text: string): Promise<void> {
   return await invoke<void>("write_text_file", { file, text });
 }
+
+export async function isMkvtoolnixFound(
+  path: string,
+  checkRunning: boolean = false
+): Promise<Protocol.MkvToolNixStatus> {
+  return await invoke<Protocol.MkvToolNixStatus>("is_mkvtoolnix_found", {
+    path,
+    checkRunning,
+  });
+}
+
+export async function openPlaylistInMkvToolNixGui(
+  discPath: string,
+  playlistName: string
+): Promise<void> {
+  return await invoke<void>("open_playlist_in_mkvtoolnix_gui", {
+    discPath,
+    playlistName,
+  });
+}
+
+export async function isBetterMediaInfoFound(
+  path: string,
+  checkRunning: boolean = false
+): Promise<Protocol.BetterMediaInfoStatus> {
+  return await invoke<Protocol.BetterMediaInfoStatus>("is_bettermediainfo_found", {
+    path,
+    checkRunning,
+  });
+}
+
+export async function openPlaylistInBetterMediaInfo(
+  discPath: string,
+  playlistName: string
+): Promise<void> {
+  return await invoke<void>("open_playlist_in_bettermediainfo", {
+    discPath,
+    playlistName,
+  });
+}

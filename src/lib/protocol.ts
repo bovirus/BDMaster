@@ -66,6 +66,24 @@ export interface ConfigUpdate {
   ignoreVersion: string;
 }
 
+export interface ConfigMkv {
+  mkvToolNixPath: string;
+}
+
+export interface MkvToolNixStatus {
+  found: boolean;
+  mkvToolNixPath: string;
+}
+
+export interface ConfigBetterMediaInfo {
+  path: string;
+}
+
+export interface BetterMediaInfoStatus {
+  found: boolean;
+  path: string;
+}
+
 export interface ConfigWindowPosition {
   x: number;
   y: number;
@@ -106,6 +124,8 @@ export interface Config {
   discInfoSplit: number;
   infoPanelSplit: number;
   update: ConfigUpdate;
+  mkv: ConfigMkv;
+  betterMediaInfo: ConfigBetterMediaInfo;
   window: ConfigWindow;
 }
 

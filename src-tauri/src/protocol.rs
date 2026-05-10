@@ -13,6 +13,19 @@ pub struct About {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MkvToolNixStatus {
+    pub found: bool,
+    #[serde(rename = "mkvToolNixPath")]
+    pub mkv_toolnix_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BetterMediaInfoStatus {
+    pub found: bool,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateCheckResult {
     #[serde(rename = "hasUpdate")]
     pub has_update: bool,
