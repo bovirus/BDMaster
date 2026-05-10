@@ -21,3 +21,10 @@ export async function openSaveReportDialog(kind: "text" | "html" = "text") {
       : { name: i18n.t("fileFilter.text"), extensions: ["txt"] };
   return await save({ filters: [filter] });
 }
+
+export async function openSaveChartDialog(defaultPath?: string) {
+  return await save({
+    defaultPath,
+    filters: [{ name: "PNG", extensions: ["png"] }],
+  });
+}

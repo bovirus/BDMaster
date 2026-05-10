@@ -3,7 +3,7 @@
  *   All rights reserved.
  */
 
-import { useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import ReactECharts from "echarts-for-react";
 import type { EChartsOption } from "echarts";
 import {
@@ -19,6 +19,9 @@ import {
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../lib/store";
 import { formatBitRate, formatLengthSeconds } from "../lib/format";
+import { openSaveChartDialog } from "../lib/dialog";
+import { writeBinaryFile } from "../lib/service";
+import * as Protocol from "../lib/protocol";
 import type { ChartSample } from "../lib/protocol";
 
 type ChartPoint = [number, number];
@@ -63,7 +66,7 @@ export default function BitRateTab({ playlistName }: { playlistName: string | nu
         />
         <CardContent sx={{ flex: 1, minHeight: 0, overflow: "hidden", pt: 0, "&:last-child": { pb: 1 } }}>
           {playlist ? (
-            <BitRateChart data={playlist.bitrateSamples ?? []} />
+            <BitRateChart playlistName={playlistName} data={playlist.bitrateSamples ?? []} />
           ) : (
             <Typography variant="body2" color="text.secondary">
               {t("disc.noPlaylistSelected")}
@@ -75,8 +78,11 @@ export default function BitRateTab({ playlistName }: { playlistName: string | nu
   );
 }
 
-function BitRateChart({ data }: { data: ChartSample[] }) {
+function BitRateChart({ playlistName, data }: { playlistName: string; data: ChartSample[] }) {
+  const { t } = useTranslation();
   const theme = useTheme();
+  const chartRef = useRef<ReactECharts | null>(null);
+  const setNotification = useAppStore((s) => s.setDialogNotification);
 
   const sortedData = useMemo(
     () =>
@@ -105,6 +111,32 @@ function BitRateChart({ data }: { data: ChartSample[] }) {
     const duration = Math.max(...sortedData.map((d) => d.time), 0);
     return { peak, average, duration };
   }, [sortedData]);
+
+  const handleSaveChart = useCallback(async () => {
+    const chart = chartRef.current?.getEchartsInstance();
+    if (!chart) return;
+    try {
+      const filePath = await openSaveChartDialog(`${stripExtension(playlistName)}-bitrate.png`);
+      if (!filePath) return;
+
+      const dataUrl = chart.getDataURL({
+        type: "png",
+        pixelRatio: 2,
+        backgroundColor: theme.palette.background.paper,
+        excludeComponents: ["toolbox"],
+      });
+      await writeBinaryFile(filePath as string, dataUrlToBytes(dataUrl));
+      setNotification({
+        title: t("disc.savedTo", { path: filePath }),
+        type: Protocol.DialogNotificationType.Info,
+      });
+    } catch (error) {
+      setNotification({
+        title: `${error}`,
+        type: Protocol.DialogNotificationType.Error,
+      });
+    }
+  }, [playlistName, setNotification, t, theme.palette.background.paper]);
 
   const option = useMemo<EChartsOption>(() => {
     const textColor = theme.palette.text.primary;
@@ -142,7 +174,12 @@ function BitRateChart({ data }: { data: ChartSample[] }) {
         top: 0,
         feature: {
           restore: {},
-          saveAsImage: { title: "Save" },
+          mySavePng: {
+            show: true,
+            title: t("disc.save"),
+            icon: "path://M5 3h12l4 4v14H3V3h2zm0 2v14h14V8h-5V5H5zm3 0v6h7V5H8zm0 10h8v2H8v-2z",
+            onclick: handleSaveChart,
+          },
         },
         iconStyle: { borderColor: mutedColor },
       },
@@ -214,7 +251,7 @@ function BitRateChart({ data }: { data: ChartSample[] }) {
         chartSeries("10 sec", seriesData.ten),
       ],
     };
-  }, [seriesData, stats.duration, theme]);
+  }, [handleSaveChart, seriesData, stats.duration, t, theme]);
 
   if (data.length === 0) {
     return <Typography variant="body2">No bitrate data.</Typography>;
@@ -234,6 +271,7 @@ function BitRateChart({ data }: { data: ChartSample[] }) {
       </Stack>
       <Box sx={{ flex: 1, minHeight: 0 }}>
         <ReactECharts
+          ref={chartRef}
           option={option}
           notMerge
           lazyUpdate
@@ -291,6 +329,22 @@ function normalizeTooltipParams(params: unknown): TooltipParam[] {
   return items.filter((item): item is TooltipParam => {
     return typeof item === "object" && item !== null && "value" in item;
   });
+}
+
+function dataUrlToBytes(dataUrl: string): number[] {
+  const comma = dataUrl.indexOf(",");
+  const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+  const binary = window.atob(base64);
+  const bytes = new Array<number>(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function stripExtension(fileName: string): string {
+  const trimmed = fileName.trim() || "bitrate";
+  return trimmed.replace(/\.[^.\\/]+$/, "").replace(/[<>:"/\\|?*]+/g, "_");
 }
 
 function trimChartNumber(value: number): string {

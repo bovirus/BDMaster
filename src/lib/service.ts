@@ -50,6 +50,10 @@ export async function writeTextFile(file: string, text: string): Promise<void> {
   return await invoke<void>("write_text_file", { file, text });
 }
 
+export async function writeBinaryFile(file: string, bytes: number[]): Promise<void> {
+  return await invoke<void>("write_binary_file", { file, bytes });
+}
+
 export async function isMkvtoolnixFound(
   path: string,
   checkRunning: boolean = false

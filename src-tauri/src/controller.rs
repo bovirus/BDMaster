@@ -56,6 +56,13 @@ pub async fn write_text_file(file: String, text: String) -> Result<()> {
     Ok(())
 }
 
+pub async fn write_binary_file(file: String, bytes: Vec<u8>) -> Result<()> {
+    let path = Path::new(file.as_str());
+    let mut f = File::create(path)?;
+    f.write_all(&bytes)?;
+    Ok(())
+}
+
 pub fn check_for_updates() -> Result<UpdateCheckResult> {
     let app_version = get_app_version();
     log::info!("Checking for updates. Current version: {}", app_version);
