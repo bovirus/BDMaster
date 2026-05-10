@@ -1112,7 +1112,7 @@ function StreamClipTable({
       let cmp: number;
       switch (sortKey) {
         case "name":
-          cmp = a.clip.name.localeCompare(b.clip.name);
+          cmp = a.clip.displayName.localeCompare(b.clip.displayName);
           break;
         case "index":
           cmp = a.index - b.index;
@@ -1186,7 +1186,7 @@ function StreamClipTable({
         <TableBody>
           {sorted.map(({ clip, index }) => (
             <TableRow key={`${clip.name}-${index}`} hover>
-              <TableCell>{clip.name}</TableCell>
+              <TableCell>{clip.displayName}</TableCell>
               <TableCell align="right">{index}</TableCell>
               <TableCell>{formatLength45k(clip.length)}</TableCell>
               <TableCell align="right">

@@ -19,13 +19,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::protocol::{
-    ChartSample, ChapterMetricsInfo, DiscInfo, FullScanState, ScanProgressInfo, TSStreamInfo,
+    ChapterMetricsInfo, ChartSample, DiscInfo, FullScanState, ScanProgressInfo, TSStreamInfo,
 };
 
 use super::codec::{self, CodecScanState};
 use super::m2ts;
 use super::types::TSStreamType;
-use super::{open_bdrom, open_stream_reader_raw, BDRom, StreamSource};
+use super::{
+    effective_stream_source, is_ssif_mvc_stream, open_bdrom, open_stream_reader_raw,
+    recompute_mvc_extension, refresh_ssif_derived_metadata, BDRom, StreamSource,
+};
 
 /// Read wrapper that reports cumulative bytes consumed at most once per
 /// `min_interval` AND short-circuits to EOF the moment the scan's cancel
@@ -157,9 +160,11 @@ fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
     //    internally — a measurable cost on slow drives. We now share a
     //    single BDRom across the codec-init partial pass and the
     //    subsequent full pass.
-    let bdrom = open_bdrom(Path::new(&path))?;
+    let use_ssif = crate::config::get_config().scan.enable_ssif_support;
+    let bdrom = open_bdrom(Path::new(&path), use_ssif)?;
     let mut disc = super::to_disc_info(&bdrom);
     super::codec_init(&mut disc, &bdrom);
+    refresh_ssif_derived_metadata(&mut disc, &bdrom);
 
     // 2. Collect every (clip-name → playlist-indices) pair for angle 0. This
     //    is the same union BDInfo builds in PlaylistMap.
@@ -182,9 +187,11 @@ fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
     clip_names.sort();
 
     // 3. Compute total scan bytes upfront so the progress bar's max is fixed.
+    //    `effective_stream_source` returns SSIF sizes when SSIF mode is on,
+    //    so the progress bar reflects the actual bytes we'll read.
     let total_bytes: u64 = clip_names
         .iter()
-        .filter_map(|name| bdrom.stream_files.get(name).map(|(_, s)| *s))
+        .filter_map(|name| effective_stream_source(&bdrom, name).map(|(_, s)| *s))
         .sum();
 
     {
@@ -224,7 +231,7 @@ fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
             break;
         }
 
-        let entry = match bdrom.stream_files.get(clip_name) {
+        let entry = match effective_stream_source(&bdrom, clip_name) {
             Some(e) => e,
             None => continue,
         };
@@ -236,7 +243,14 @@ fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
             p.version += 1;
         }
 
-        match scan_one_file(&bdrom, &entry.0, &mut disc, clip_name, &state, completed_bytes) {
+        match scan_one_file(
+            &bdrom,
+            &entry.0,
+            &mut disc,
+            clip_name,
+            &state,
+            completed_bytes,
+        ) {
             Ok(()) => {}
             Err(err) => {
                 // A cancel triggers a clean Ok(0) EOF return from the
@@ -372,27 +386,26 @@ fn scan_one_file(
             if state.cancel.load(Ordering::SeqCst) {
                 return m2ts::PesAction::Stop;
             }
-            let target_ptr: Option<*mut TSStreamInfo> =
-                if let Some(&ptr) = pid_streams.get(&pid) {
-                    Some(ptr)
-                } else if let Some(&stream_type) = pmt.get(&pid) {
-                    let mut stub = TSStreamInfo::new(pid, stream_type);
-                    let st = TSStreamType::from_u8(stream_type);
-                    stub.stream_type_text = st.type_text().to_string();
-                    stub.codec_name = st.codec_name().to_string();
-                    stub.codec_short_name = st.codec_short_name().to_string();
-                    stub.is_video_stream = st.is_video();
-                    stub.is_audio_stream = st.is_audio();
-                    stub.is_graphics_stream = st.is_graphics();
-                    stub.is_text_stream = st.is_text();
-                    let mut boxed = Box::new(stub);
-                    let ptr = &mut *boxed as *mut TSStreamInfo;
-                    synthetic_holders.insert(pid, boxed);
-                    pid_streams.insert(pid, ptr);
-                    Some(ptr)
-                } else {
-                    None
-                };
+            let target_ptr: Option<*mut TSStreamInfo> = if let Some(&ptr) = pid_streams.get(&pid) {
+                Some(ptr)
+            } else if let Some(&stream_type) = pmt.get(&pid) {
+                let mut stub = TSStreamInfo::new(pid, stream_type);
+                let st = TSStreamType::from_u8(stream_type);
+                stub.stream_type_text = st.type_text().to_string();
+                stub.codec_name = st.codec_name().to_string();
+                stub.codec_short_name = st.codec_short_name().to_string();
+                stub.is_video_stream = st.is_video();
+                stub.is_audio_stream = st.is_audio();
+                stub.is_graphics_stream = st.is_graphics();
+                stub.is_text_stream = st.is_text();
+                let mut boxed = Box::new(stub);
+                let ptr = &mut *boxed as *mut TSStreamInfo;
+                synthetic_holders.insert(pid, boxed);
+                pid_streams.insert(pid, ptr);
+                Some(ptr)
+            } else {
+                None
+            };
 
             let Some(ptr) = target_ptr else {
                 // PID isn't in any playlist's MPLS and isn't even in the
@@ -556,6 +569,18 @@ fn scan_one_file(
             if declared_pids.contains(pid) {
                 continue;
             }
+            if is_ssif_mvc_stream(bd, clip_name, *pid, meta) {
+                let mut mvc = meta.clone();
+                mvc.is_hidden = false;
+                if let Some(b) = per_pid_bytes.get(pid) {
+                    mvc.measured_size = (*b as f64 * total_clip_ratio).round() as u64;
+                }
+                if mvc.is_video_stream {
+                    pl.video_streams.push(mvc);
+                    declared_pids.insert(*pid);
+                }
+                continue;
+            }
             let mut hidden = meta.clone();
             hidden.is_hidden = true;
             // Hidden tracks accumulate their own measured size based on the
@@ -579,15 +604,13 @@ fn scan_one_file(
         }
     }
 
+    refresh_ssif_derived_metadata(disc, bd);
     append_bitrate_samples_and_refresh_chapters(disc, &plis, clip_name, &result.bitrate_samples);
 
     Ok(())
 }
 
-fn capture_stream_measurement_base(
-    disc: &DiscInfo,
-    plis: &[usize],
-) -> HashMap<(usize, u16), u64> {
+fn capture_stream_measurement_base(disc: &DiscInfo, plis: &[usize]) -> HashMap<(usize, u16), u64> {
     let mut base = HashMap::new();
     for &pli in plis {
         let Some(pl) = disc.playlists.get(pli) else {
@@ -685,6 +708,7 @@ fn apply_partial_file_measurements(
             }
         }
     }
+    recompute_mvc_extension(disc);
 }
 
 fn append_bitrate_samples_and_refresh_chapters(
@@ -698,7 +722,11 @@ fn append_bitrate_samples_and_refresh_chapters(
             continue;
         };
 
-        for clip in pl.stream_clips.iter().filter(|c| c.angle_index == 0 && c.name == clip_name) {
+        for clip in pl
+            .stream_clips
+            .iter()
+            .filter(|c| c.angle_index == 0 && c.name == clip_name)
+        {
             let clip_in_s = clip.time_in as f64 / 45000.0;
             let clip_out_s = clip.time_out as f64 / 45000.0;
             let playlist_offset_s = clip.relative_time_in as f64 / 45000.0;
@@ -717,8 +745,11 @@ fn append_bitrate_samples_and_refresh_chapters(
             }
         }
 
-        pl.bitrate_samples
-            .sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap_or(std::cmp::Ordering::Equal));
+        pl.bitrate_samples.sort_by(|a, b| {
+            a.time
+                .partial_cmp(&b.time)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         refresh_chapter_metrics(pl);
     }
 }
@@ -855,6 +886,7 @@ fn finalize_after_file(disc: &mut DiscInfo) {
             codec::finalize_description(s);
         }
     }
+    recompute_mvc_extension(disc);
 }
 
 fn copy_codec_metadata(dst: &mut TSStreamInfo, src: &TSStreamInfo) {

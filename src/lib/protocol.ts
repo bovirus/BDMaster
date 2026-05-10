@@ -283,6 +283,7 @@ export interface ChapterMetricsInfo {
 
 export interface PlaylistStreamClipInfo {
   name: string;
+  displayName: string;
   timeIn: number;
   timeOut: number;
   relativeTimeIn: number;
@@ -301,7 +302,9 @@ export interface ChartSample {
 
 export interface StreamFileInfo {
   name: string;
+  displayName: string;
   size: number;
+  interleavedFileSize: number;
   duration: number;
   interleaved: boolean;
 }

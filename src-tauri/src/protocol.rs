@@ -145,6 +145,8 @@ pub struct ChapterMetricsInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaylistStreamClipInfo {
     pub name: String,
+    #[serde(rename = "displayName")]
+    pub display_name: String,
     #[serde(rename = "timeIn")]
     pub time_in: u64,
     #[serde(rename = "timeOut")]
@@ -167,7 +169,11 @@ pub struct PlaylistStreamClipInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamFileInfo {
     pub name: String,
+    #[serde(rename = "displayName")]
+    pub display_name: String,
     pub size: u64,
+    #[serde(rename = "interleavedFileSize")]
+    pub interleaved_file_size: u64,
     pub duration: u64,
     pub interleaved: bool,
 }

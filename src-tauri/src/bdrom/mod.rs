@@ -33,6 +33,8 @@ use self::mpls::{parse_mpls_bytes, PlaylistFile, PlaylistStream};
 use self::types::*;
 use self::udf::{UdfFile, UdfFileReader, UdfImage};
 
+pub(crate) const SSIF_MVC_PID: u16 = 0x1012;
+
 #[derive(Clone)]
 pub enum StreamSource {
     Native(PathBuf),
@@ -61,11 +63,22 @@ pub struct BDRom {
     pub playlists: HashMap<String, PlaylistFile>,
     pub stream_files: HashMap<String, (StreamSource, u64)>,
     pub stream_clip_files: HashMap<String, StreamClipFile>,
+    /// SSIF (interleaved stereoscopic) counterparts keyed by the matching
+    /// `.M2TS` clip name (uppercase). Populated from `BDMV/STREAM/SSIF/*.ssif`
+    /// whenever the directory exists, regardless of the `use_ssif` flag —
+    /// callers that don't want SSIF simply ignore the map.
+    pub interleaved_files: HashMap<String, (StreamSource, u64)>,
+    /// When true, `effective_stream_source` returns the SSIF reader / size for
+    /// any clip with an interleaved counterpart, so codec init and the full
+    /// scan see the AVC + MVC payload instead of the AVC-only `.m2ts`. Set
+    /// from `config.scan.enable_ssif_support` at open time.
+    pub use_ssif: bool,
 }
 
 pub fn scan(path_str: &str) -> Result<DiscInfo> {
     let path = Path::new(path_str);
-    let bdrom = open_bdrom(path)?;
+    let use_ssif = crate::config::get_config().scan.enable_ssif_support;
+    let bdrom = open_bdrom(path, use_ssif)?;
     let mut disc = to_disc_info(&bdrom);
     // Codec initialization pass — mirrors BDInfo's `streamFile.Scan(playlists,
     // isFullScan: false)`. For every unique M2TS clip we open the stream once
@@ -77,10 +90,11 @@ pub fn scan(path_str: &str) -> Result<DiscInfo> {
     // codec parsers can't pin down, we estimate bit_rate from the running
     // total of payload bytes / elapsed seconds collected during the scan.
     codec_init(&mut disc, &bdrom);
+    refresh_ssif_derived_metadata(&mut disc, &bdrom);
     Ok(disc)
 }
 
-pub(crate) fn open_bdrom(path: &Path) -> Result<BDRom> {
+pub(crate) fn open_bdrom(path: &Path, use_ssif: bool) -> Result<BDRom> {
     if !path.exists() {
         return Err(anyhow!("Path does not exist: {}", path.display()));
     }
@@ -90,7 +104,7 @@ pub(crate) fn open_bdrom(path: &Path) -> Result<BDRom> {
             .map(|e| e.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
         if ext == "iso" {
-            return open_bdrom_iso(path);
+            return open_bdrom_iso(path, use_ssif);
         }
         // Non-ISO file: inspect the disc rooted at the file's parent folder
         // so dragging a file from inside a Blu-ray (e.g. BDMV/STREAM/00001.m2ts)
@@ -99,12 +113,30 @@ pub(crate) fn open_bdrom(path: &Path) -> Result<BDRom> {
         let parent = path
             .parent()
             .ok_or_else(|| anyhow!("File has no parent folder: {}", path.display()))?;
-        return open_bdrom_native(parent);
+        return open_bdrom_native(parent, use_ssif);
     }
-    open_bdrom_native(path)
+    open_bdrom_native(path, use_ssif)
 }
 
-fn open_bdrom_native(path: &Path) -> Result<BDRom> {
+/// Pick the stream source (and size) for a given clip, honoring the
+/// `use_ssif` flag on the BDRom. When SSIF is enabled and the clip has an
+/// interleaved counterpart (`<stem>.SSIF` next to `<stem>.M2TS`), the SSIF
+/// is returned — codec parsers and the full-scan worker then see the AVC +
+/// MVC payload instead of the AVC-only base file. Falls back to the M2TS in
+/// every other case.
+pub(crate) fn effective_stream_source<'a>(
+    bd: &'a BDRom,
+    clip_name: &str,
+) -> Option<&'a (StreamSource, u64)> {
+    if bd.use_ssif {
+        if let Some(ssif) = bd.interleaved_files.get(clip_name) {
+            return Some(ssif);
+        }
+    }
+    bd.stream_files.get(clip_name)
+}
+
+fn open_bdrom_native(path: &Path, use_ssif: bool) -> Result<BDRom> {
     let directory_bdmv = locate_bdmv(path)?;
     let directory_root = directory_bdmv
         .parent()
@@ -162,7 +194,9 @@ fn open_bdrom_native(path: &Path) -> Result<BDRom> {
 
     let is_dbox = directory_root.join("FilmIndex.xml").exists();
 
-    let disc_title = directory_meta.as_ref().and_then(|m| read_disc_title_native(m));
+    let disc_title = directory_meta
+        .as_ref()
+        .and_then(|m| read_disc_title_native(m));
 
     let mut playlists: HashMap<String, PlaylistFile> = HashMap::new();
     if let Some(plist_dir) = &directory_playlist {
@@ -218,11 +252,33 @@ fn open_bdrom_native(path: &Path) -> Result<BDRom> {
         }
     }
 
-    let is_50_hz = playlists.values().any(|pl| {
-        pl.playlist_streams
-            .iter()
-            .any(|s| s.frame_rate.is_50_hz())
-    });
+    // SSIF interleaved counterparts (Blu-ray 3D). Pair each `<stem>.SSIF`
+    // with the matching `<stem>.M2TS` clip name so codec / scan paths can
+    // look up the SSIF reader by clip name when SSIF mode is on.
+    let mut interleaved_files: HashMap<String, (StreamSource, u64)> = HashMap::new();
+    if let Some(ssif_dir) = &directory_ssif {
+        if let Ok(entries) = std::fs::read_dir(ssif_dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                let Some(ext) = p.extension().and_then(|s| s.to_str()) else {
+                    continue;
+                };
+                if !ext.eq_ignore_ascii_case("ssif") {
+                    continue;
+                }
+                let Some(stem) = p.file_stem().map(|n| n.to_string_lossy().to_uppercase()) else {
+                    continue;
+                };
+                let m2ts_name = format!("{}.M2TS", stem);
+                let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+                interleaved_files.insert(m2ts_name, (StreamSource::Native(p), size));
+            }
+        }
+    }
+
+    let is_50_hz = playlists
+        .values()
+        .any(|pl| pl.playlist_streams.iter().any(|s| s.frame_rate.is_50_hz()));
 
     Ok(BDRom {
         path: path.to_path_buf(),
@@ -240,10 +296,12 @@ fn open_bdrom_native(path: &Path) -> Result<BDRom> {
         playlists,
         stream_files,
         stream_clip_files,
+        interleaved_files,
+        use_ssif,
     })
 }
 
-fn open_bdrom_iso(path: &Path) -> Result<BDRom> {
+fn open_bdrom_iso(path: &Path, use_ssif: bool) -> Result<BDRom> {
     let image = Arc::new(Mutex::new(UdfImage::open(path)?));
 
     // Resolve the BDMV directory (case-insensitive).
@@ -306,9 +364,8 @@ fn open_bdrom_iso(path: &Path) -> Result<BDRom> {
         .map(|d| {
             img.list_dir(&d)
                 .map(|es| {
-                    es.iter().any(|e| {
-                        !e.is_parent && e.name.to_ascii_lowercase().ends_with(".mnv")
-                    })
+                    es.iter()
+                        .any(|e| !e.is_parent && e.name.to_ascii_lowercase().ends_with(".mnv"))
                 })
                 .unwrap_or(false)
         })
@@ -339,9 +396,7 @@ fn open_bdrom_iso(path: &Path) -> Result<BDRom> {
                 if !entry.name.to_ascii_lowercase().ends_with(".mpls") {
                     continue;
                 }
-                if let Ok(fe) =
-                    crate::bdrom::udf::read_file_entry_at(&mut img, &entry.icb)
-                {
+                if let Ok(fe) = crate::bdrom::udf::read_file_entry_at(&mut img, &entry.icb) {
                     if let Ok(bytes) = img.read_file(&fe) {
                         let name = entry.name.to_uppercase();
                         match parse_mpls_bytes(name.clone(), &bytes) {
@@ -367,9 +422,7 @@ fn open_bdrom_iso(path: &Path) -> Result<BDRom> {
                 if !entry.name.to_ascii_lowercase().ends_with(".clpi") {
                     continue;
                 }
-                if let Ok(fe) =
-                    crate::bdrom::udf::read_file_entry_at(&mut img, &entry.icb)
-                {
+                if let Ok(fe) = crate::bdrom::udf::read_file_entry_at(&mut img, &entry.icb) {
                     let name = entry.name.to_uppercase();
                     stream_clip_files.insert(
                         name.clone(),
@@ -394,9 +447,7 @@ fn open_bdrom_iso(path: &Path) -> Result<BDRom> {
                 if !entry.name.to_ascii_lowercase().ends_with(".m2ts") {
                     continue;
                 }
-                if let Ok(fe) =
-                    crate::bdrom::udf::read_file_entry_at(&mut img, &entry.icb)
-                {
+                if let Ok(fe) = crate::bdrom::udf::read_file_entry_at(&mut img, &entry.icb) {
                     let name = entry.name.to_uppercase();
                     let size = fe.size;
                     stream_files.insert(name, (StreamSource::Iso(fe), size));
@@ -405,13 +456,35 @@ fn open_bdrom_iso(path: &Path) -> Result<BDRom> {
         }
     }
 
+    // SSIF interleaved counterparts. Same pairing as native: clip name
+    // `<stem>.M2TS` → file `<stem>.SSIF` under `BDMV/STREAM/SSIF/`.
+    let mut interleaved_files: HashMap<String, (StreamSource, u64)> = HashMap::new();
+    if let Ok(ssif_dir) = img.resolve("BDMV/STREAM/SSIF") {
+        if let Ok(entries) = img.list_dir(&ssif_dir) {
+            for entry in entries {
+                if entry.is_parent || entry.is_deleted || entry.is_directory {
+                    continue;
+                }
+                let name_lc = entry.name.to_ascii_lowercase();
+                if !name_lc.ends_with(".ssif") {
+                    continue;
+                }
+                if let Ok(fe) = crate::bdrom::udf::read_file_entry_at(&mut img, &entry.icb) {
+                    let upper = entry.name.to_uppercase();
+                    let stem = &upper[..upper.len() - ".SSIF".len()];
+                    let m2ts_name = format!("{}.M2TS", stem);
+                    let size = fe.size;
+                    interleaved_files.insert(m2ts_name, (StreamSource::Iso(fe), size));
+                }
+            }
+        }
+    }
+
     drop(img);
 
-    let is_50_hz = playlists.values().any(|pl| {
-        pl.playlist_streams
-            .iter()
-            .any(|s| s.frame_rate.is_50_hz())
-    });
+    let is_50_hz = playlists
+        .values()
+        .any(|pl| pl.playlist_streams.iter().any(|s| s.frame_rate.is_50_hz()));
 
     Ok(BDRom {
         path: path.to_path_buf(),
@@ -429,6 +502,8 @@ fn open_bdrom_iso(path: &Path) -> Result<BDRom> {
         playlists,
         stream_files,
         stream_clip_files,
+        interleaved_files,
+        use_ssif,
     })
 }
 
@@ -541,11 +616,7 @@ fn find_subdir(parent: &Path, name: &str) -> Option<PathBuf> {
 
 fn dir_has_files(dir: &Path) -> bool {
     std::fs::read_dir(dir)
-        .map(|it| {
-            it.flatten().any(|e| {
-                e.path().is_file()
-            })
-        })
+        .map(|it| it.flatten().any(|e| e.path().is_file()))
         .unwrap_or(false)
 }
 
@@ -691,15 +762,23 @@ pub(crate) fn to_disc_info(bd: &BDRom) -> DiscInfo {
         })
         .collect();
 
-    // Stream files (sorted)
+    // Stream files (sorted). `interleaved=true` marks clips with an SSIF
+    // counterpart so the UI can flag them regardless of whether SSIF mode is
+    // currently active.
     let mut stream_files: Vec<StreamFileInfo> = bd
         .stream_files
         .iter()
-        .map(|(name, (_, size))| StreamFileInfo {
-            name: name.clone(),
-            size: *size,
-            duration: 0,
-            interleaved: false,
+        .map(|(name, (_, size))| {
+            let interleaved_file_size =
+                bd.interleaved_files.get(name).map(|(_, s)| *s).unwrap_or(0);
+            StreamFileInfo {
+                name: name.clone(),
+                display_name: stream_display_name(bd, name),
+                size: *size,
+                interleaved_file_size,
+                duration: 0,
+                interleaved: interleaved_file_size > 0,
+            }
         })
         .collect();
     stream_files.sort_by(|a, b| a.name.cmp(&b.name));
@@ -715,10 +794,11 @@ pub(crate) fn to_disc_info(bd: &BDRom) -> DiscInfo {
     stream_clip_files.sort_by(|a, b| a.name.cmp(&b.name));
 
     let is_4k = bd.is_uhd
-        || bd
-            .playlists
-            .values()
-            .any(|pl| pl.playlist_streams.iter().any(|s| s.video_format == TSVideoFormat::Video2160p));
+        || bd.playlists.values().any(|pl| {
+            pl.playlist_streams
+                .iter()
+                .any(|s| s.video_format == TSVideoFormat::Video2160p)
+        });
 
     DiscInfo {
         path: path_str,
@@ -755,14 +835,26 @@ fn build_playlist_info(pl: &PlaylistFile, bd: &BDRom, group_index: u32) -> Playl
     let mut relative_time_in: i64 = 0;
     for c in &pl.stream_clips {
         let length = (c.time_out - c.time_in).max(0);
-        let file_size = bd
-            .stream_files
+        let m2ts_size = bd.stream_files.get(&c.name).map(|(_, s)| *s).unwrap_or(0);
+        let interleaved_file_size = bd
+            .interleaved_files
             .get(&c.name)
             .map(|(_, s)| *s)
             .unwrap_or(0);
+        // When SSIF mode is on and the clip has an interleaved counterpart,
+        // the "scanned size" is the SSIF — that's what `effective_stream_source`
+        // hands back, that's what gets measured during the full scan, and
+        // that's what the BDInfo "Size" column shows. Fall back to the M2TS
+        // size in every other case.
+        let file_size = if bd.use_ssif && interleaved_file_size > 0 {
+            interleaved_file_size
+        } else {
+            m2ts_size
+        };
         total_file_size += file_size;
         let info = PlaylistStreamClipInfo {
             name: c.name.clone(),
+            display_name: stream_display_name(bd, &c.name),
             time_in: c.time_in as u64,
             time_out: c.time_out as u64,
             relative_time_in: relative_time_in.max(0) as u64,
@@ -770,7 +862,7 @@ fn build_playlist_info(pl: &PlaylistFile, bd: &BDRom, group_index: u32) -> Playl
             length: length as u64,
             file_size,
             measured_size: 0,
-            interleaved_file_size: 0,
+            interleaved_file_size,
             angle_index: c.angle_index,
         };
         if c.angle_index == 0 {
@@ -835,7 +927,11 @@ fn playlist_stream_to_info(s: &PlaylistStream) -> TSStreamInfo {
         info.is_interlaced = s.video_format.is_interlaced();
         info.framerate = s.frame_rate.label().to_string();
         info.aspect_ratio = s.aspect_ratio.label().to_string();
-        info.video_format = format!("{}{}", info.height, if info.is_interlaced { "i" } else { "p" });
+        info.video_format = format!(
+            "{}{}",
+            info.height,
+            if info.is_interlaced { "i" } else { "p" }
+        );
         // Approx widths from common heights:
         info.width = match info.height {
             480 => 720,
@@ -878,6 +974,62 @@ fn playlist_stream_to_info(s: &PlaylistStream) -> TSStreamInfo {
     }
 
     info
+}
+
+fn stream_display_name(bd: &BDRom, clip_name: &str) -> String {
+    if bd.use_ssif && bd.interleaved_files.contains_key(clip_name) {
+        let stem = clip_name
+            .rsplit_once('.')
+            .map(|(stem, _)| stem)
+            .unwrap_or(clip_name);
+        format!("{}.SSIF", stem)
+    } else {
+        clip_name.to_string()
+    }
+}
+
+pub(crate) fn is_ssif_mvc_stream(
+    bd: &BDRom,
+    clip_name: &str,
+    pid: u16,
+    stream: &TSStreamInfo,
+) -> bool {
+    bd.use_ssif
+        && pid == SSIF_MVC_PID
+        && bd.interleaved_files.contains_key(clip_name)
+        && TSStreamType::from_u8(stream.stream_type) == TSStreamType::MVCVideo
+}
+
+pub(crate) fn refresh_ssif_derived_metadata(disc: &mut DiscInfo, bd: &BDRom) {
+    if bd.is_3d {
+        for pl in disc.playlists.iter_mut() {
+            let Some(src) = bd.playlists.get(&pl.name) else {
+                continue;
+            };
+            if pl.video_streams.len() <= 1 {
+                continue;
+            }
+
+            for stream in pl.video_streams.iter_mut() {
+                match TSStreamType::from_u8(stream.stream_type) {
+                    TSStreamType::AVCVideo => stream.base_view = Some(src.mvc_base_view_r),
+                    TSStreamType::MVCVideo => stream.base_view = Some(!src.mvc_base_view_r),
+                    _ => {}
+                }
+                codec::finalize_description(stream);
+            }
+        }
+    }
+
+    recompute_mvc_extension(disc);
+}
+
+pub(crate) fn recompute_mvc_extension(disc: &mut DiscInfo) {
+    disc.has_mvc_extension = disc.playlists.iter().any(|pl| {
+        pl.video_streams
+            .iter()
+            .any(|s| TSStreamType::from_u8(s.stream_type) == TSStreamType::MVCVideo)
+    });
 }
 
 /// Open a streaming reader for an M2TS stream entry, regardless of whether
@@ -935,7 +1087,8 @@ pub(crate) fn open_stream_reader_raw(
 }
 
 pub fn build_chart_samples(path: &str, playlist_name: &str) -> Vec<ChartSample> {
-    let bd = match open_bdrom(Path::new(path)) {
+    let use_ssif = crate::config::get_config().scan.enable_ssif_support;
+    let bd = match open_bdrom(Path::new(path), use_ssif) {
         Ok(bd) => bd,
         Err(err) => {
             log::warn!("chart: failed to open disc {}: {}", path, err);
@@ -952,7 +1105,7 @@ pub fn build_chart_samples(path: &str, playlist_name: &str) -> Vec<ChartSample> 
         if clip.angle_index != 0 {
             continue;
         }
-        let entry = match bd.stream_files.get(&clip.name) {
+        let entry = match effective_stream_source(&bd, &clip.name) {
             Some(e) => e,
             None => continue,
         };
@@ -1024,9 +1177,7 @@ pub(crate) fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
             if clip.angle_index != 0 {
                 continue;
             }
-            let entry = clip_referencing_plis
-                .entry(clip.name.clone())
-                .or_default();
+            let entry = clip_referencing_plis.entry(clip.name.clone()).or_default();
             if !entry.contains(&pli) {
                 entry.push(pli);
             }
@@ -1036,7 +1187,7 @@ pub(crate) fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
     // Phase A.2: scan each unique clip until codecs are initialized.
     let mut clip_cache: HashMap<String, ClipInitCache> = HashMap::new();
     for (clip_name, plis) in &clip_referencing_plis {
-        let entry = match bd.stream_files.get(clip_name) {
+        let entry = match effective_stream_source(bd, clip_name) {
             Some(e) => e,
             None => continue,
         };
@@ -1098,9 +1249,8 @@ pub(crate) fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
         // doesn't declare the PID.
         let mut synthetic_holders: HashMap<u16, Box<TSStreamInfo>> = HashMap::new();
 
-        let res = m2ts::scan_m2ts_streaming_from_reader(
-            reader,
-            |pid, _stream_type, payload, pmt| {
+        let res =
+            m2ts::scan_m2ts_streaming_from_reader(reader, |pid, _stream_type, payload, pmt| {
                 let target_ptr: Option<*mut TSStreamInfo> =
                     if let Some(&ptr) = pid_streams.get(&pid) {
                         Some(ptr)
@@ -1152,8 +1302,7 @@ pub(crate) fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
                 } else {
                     m2ts::PesAction::Stop
                 }
-            },
-        );
+            });
 
         match res {
             Ok(r) => {
@@ -1252,6 +1401,15 @@ pub(crate) fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
                 if declared_pids.contains(pid) {
                     continue;
                 }
+                if is_ssif_mvc_stream(bd, &clip.name, *pid, meta) {
+                    let mut mvc = meta.clone();
+                    mvc.is_hidden = false;
+                    if mvc.is_video_stream {
+                        pl.video_streams.push(mvc);
+                        declared_pids.insert(*pid);
+                    }
+                    continue;
+                }
                 let mut hidden = meta.clone();
                 hidden.is_hidden = true;
                 pl.has_hidden_tracks = true;
@@ -1336,11 +1494,8 @@ pub(crate) fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
                     .sum();
                 let video_residual = total_bps - non_video_bps;
                 if video_residual > 0.0 {
-                    let total_video_partial: f64 = pl
-                        .video_streams
-                        .iter()
-                        .map(|s| s.bit_rate as f64)
-                        .sum();
+                    let total_video_partial: f64 =
+                        pl.video_streams.iter().map(|s| s.bit_rate as f64).sum();
                     if total_video_partial > 0.0 {
                         // Multiple video streams (e.g. MVC + AVC for 3D):
                         // split the residual proportionally to their

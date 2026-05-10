@@ -63,7 +63,11 @@ pub fn generate(disc: &DiscInfo, full: bool, selected_playlists: Option<&[String
     let _ = writeln!(out);
 
     let target: Vec<&PlaylistInfo> = match selected_set {
-        Some(set) => disc.playlists.iter().filter(|p| set.contains(&p.name)).collect(),
+        Some(set) => disc
+            .playlists
+            .iter()
+            .filter(|p| set.contains(&p.name))
+            .collect(),
         None => disc.playlists.iter().collect(),
     };
 
@@ -103,7 +107,7 @@ pub fn generate(disc: &DiscInfo, full: bool, selected_playlists: Option<&[String
                 let _ = writeln!(
                     out,
                     "    {} - length={} size={} bytes",
-                    c.name,
+                    c.display_name,
                     format_45k_length(c.length),
                     clip_size(c)
                 );
@@ -159,7 +163,11 @@ pub fn generate_full(disc: &DiscInfo, selected_playlists: Option<&[String]>) -> 
     let _ = writeln!(out);
 
     let target: Vec<&PlaylistInfo> = match &selected_set {
-        Some(set) => disc.playlists.iter().filter(|p| set.contains(&p.name)).collect(),
+        Some(set) => disc
+            .playlists
+            .iter()
+            .filter(|p| set.contains(&p.name))
+            .collect(),
         None => disc.playlists.iter().collect(),
     };
 
@@ -175,7 +183,12 @@ fn write_disc_info_block(out: &mut String, disc: &DiscInfo, protection: &str, ex
         let _ = writeln!(out, "{:<16}{}", "Disc Title:", disc.disc_title);
     }
     let _ = writeln!(out, "{:<16}{}", "Disc Label:", disc.volume_label);
-    let _ = writeln!(out, "{:<16}{} bytes", "Disc Size:", format_thousands(disc.size));
+    let _ = writeln!(
+        out,
+        "{:<16}{} bytes",
+        "Disc Size:",
+        format_thousands(disc.size)
+    );
     let _ = writeln!(out, "{:<16}{}", "Protection:", protection);
     if !extras.is_empty() {
         let _ = writeln!(out, "{:<16}{}", "Extras:", extras.join(", "));
@@ -411,11 +424,7 @@ fn write_playlist_full(
     let _ = writeln!(
         out,
         "{:<16}{:<16}{:<16}{:<16}{}",
-        "---------------",
-        "-------------",
-        "-------------",
-        "-------------",
-        "-------------"
+        "---------------", "-------------", "-------------", "-------------", "-------------"
     );
     for clip in &pl.stream_clips {
         if clip.angle_index > 1 {
@@ -430,9 +439,9 @@ fn write_playlist_full(
             0
         };
         let display_name = if clip.angle_index > 0 {
-            format!("{} ({})", clip.name, clip.angle_index)
+            format!("{} ({})", clip.display_name, clip.angle_index)
         } else {
-            clip.name.clone()
+            clip.display_name.clone()
         };
         let _ = writeln!(
             out,
@@ -532,7 +541,10 @@ fn write_chapters_table(out: &mut String, pl: &PlaylistInfo) {
 }
 
 fn format_kbps(rate: u64) -> String {
-    format!("{:>6} kbps", format_thousands((rate as f64 / 1000.0).round() as u64))
+    format!(
+        "{:>6} kbps",
+        format_thousands((rate as f64 / 1000.0).round() as u64)
+    )
 }
 
 fn effective_bitrate(s: &TSStreamInfo) -> u64 {
@@ -709,11 +721,7 @@ fn format_size(bytes: u64, precision: &FormatPrecision, unit: &FormatUnit) -> St
     let tiers: &[(f64, &str)] = match unit {
         FormatUnit::K => &[(1024.0, "K")],
         FormatUnit::KM => &[(1024.0, "K"), (1_048_576.0, "M")],
-        FormatUnit::KMG => &[
-            (1024.0, "K"),
-            (1_048_576.0, "M"),
-            (1_073_741_824.0, "G"),
-        ],
+        FormatUnit::KMG => &[(1024.0, "K"), (1_048_576.0, "M"), (1_073_741_824.0, "G")],
         FormatUnit::KMGT => &[
             (1024.0, "K"),
             (1_048_576.0, "M"),
