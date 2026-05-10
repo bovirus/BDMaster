@@ -23,7 +23,7 @@ use crate::protocol::{DiscInfo, FullScanState, ScanProgressInfo, TSStreamInfo};
 use super::codec::{self, CodecScanState};
 use super::m2ts;
 use super::types::TSStreamType;
-use super::{open_bdrom, open_stream_reader, BDRom, StreamSource};
+use super::{open_bdrom, open_stream_reader_raw, BDRom, StreamSource};
 
 /// Read wrapper that reports cumulative bytes consumed at most once per
 /// `min_interval` AND short-circuits to EOF the moment the scan's cancel
@@ -83,6 +83,11 @@ pub fn start(path: String, state: Arc<FullScanState>) {
     // Reset the cancel flag from any previous scan run.
     state.cancel.store(false, Ordering::SeqCst);
 
+    let started_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
     {
         let mut p = state.progress.lock().unwrap();
         *p = ScanProgressInfo {
@@ -94,6 +99,7 @@ pub fn start(path: String, state: Arc<FullScanState>) {
             is_cancelled: false,
             error: None,
             current_file: None,
+            started_at_ms,
             disc: None,
             version: 1,
         };
@@ -143,13 +149,15 @@ pub fn snapshot(state: &FullScanState) -> ScanProgressInfo {
 }
 
 fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
-    // 1. Re-open the disc and rebuild the same disc info the UI is currently
-    //    displaying. Using a fresh `scan` ensures codec_init has run and the
-    //    in-progress disc snapshot we write back to the frontend matches the
-    //    initial display state field-for-field — only measured_size,
-    //    bit_rate, captions, etc. will change as we scan.
+    // 1. Open the disc once and build the same disc info the UI is
+    //    currently displaying. The previous implementation called
+    //    `super::scan` here, which re-opened the BDRom a second time
+    //    internally — a measurable cost on slow drives. We now share a
+    //    single BDRom across the codec-init partial pass and the
+    //    subsequent full pass.
     let bdrom = open_bdrom(Path::new(&path))?;
-    let mut disc = super::scan(&path)?;
+    let mut disc = super::to_disc_info(&bdrom);
+    super::codec_init(&mut disc, &bdrom);
 
     // 2. Collect every (clip-name → playlist-indices) pair for angle 0. This
     //    is the same union BDInfo builds in PlaylistMap.
@@ -339,20 +347,32 @@ fn scan_one_file(
         .map(|(pid, p)| unsafe { (*pid, (**p).bit_rate as i64) })
         .collect();
 
-    let reader = open_stream_reader(bd, src)?;
-    let progress_reader = ProgressReader::new(reader, state.clone(), base_completed);
+    // Layered reader stack:
+    //   File / UdfFileReader  →  ProgressReader  →  BufReader (4 MB)  →  m2ts
+    //
+    // ProgressReader sits *below* the buffer so its per-call cost (atomic
+    // load + counter math + clock check) only fires on buffer refills (≈ once
+    // every 4 MB) instead of on every 192-byte packet read. For a 30 GB
+    // file that turns ~156 million wrapper calls into ~7,500 — saving on the
+    // order of 10 seconds of pure overhead per file.
+    //
+    // The 4 MB buffer is BDInfo's data-chunk size (5,242,880 bytes), rounded
+    // down to a power of two so the underlying allocator can serve it from a
+    // single arena.
+    const SCAN_BUF_SIZE: usize = 4 * 1024 * 1024;
+    let raw_reader = open_stream_reader_raw(bd, src)?;
+    let progress_reader = ProgressReader::new(raw_reader, state.clone(), base_completed);
+    let buffered_reader = std::io::BufReader::with_capacity(SCAN_BUF_SIZE, progress_reader);
 
     let mut pid_state: HashMap<u16, CodecScanState> = HashMap::new();
     let mut synthetic_holders: HashMap<u16, Box<TSStreamInfo>> = HashMap::new();
 
     let result = m2ts::scan_m2ts_streaming_from_reader(
-        progress_reader,
+        buffered_reader,
         |pid, _stream_type, payload, pmt| {
-            // Skip codec dispatch on cancel. The reader is already short-
-            // circuiting; this just avoids a final round of mutations once
-            // the user has asked to stop.
+            // Cancellation: short-circuit the entire scan immediately.
             if state.cancel.load(Ordering::SeqCst) {
-                return false;
+                return m2ts::PesAction::Stop;
             }
             let target_ptr: Option<*mut TSStreamInfo> =
                 if let Some(&ptr) = pid_streams.get(&pid) {
@@ -376,20 +396,37 @@ fn scan_one_file(
                     None
                 };
 
-            if let Some(ptr) = target_ptr {
-                let stream = unsafe { &mut *ptr };
-                let st = TSStreamType::from_u8(stream.stream_type);
-                // Always re-dispatch PGS so caption counts continue to grow
-                // through the full file. For other codecs, stop once
-                // initialized — re-running the parser doesn't add new info.
-                if st == TSStreamType::PresentationGraphics || !stream.is_initialized {
-                    let cs = pid_state.entry(pid).or_default();
-                    let bitrate = bitrate_hint.get(&pid).copied().unwrap_or(0);
-                    codec::scan_stream(stream, cs, payload, bitrate, true, true);
+            let Some(ptr) = target_ptr else {
+                // PID isn't in any playlist's MPLS and isn't even in the
+                // PMT — pure noise. Skip its PES forever to avoid the
+                // per-packet reassembly cost.
+                return m2ts::PesAction::SkipPid;
+            };
+
+            let stream = unsafe { &mut *ptr };
+            let st = TSStreamType::from_u8(stream.stream_type);
+            // PGS streams are special: their codec parser keeps counting
+            // captions across the whole file, so we never skip them.
+            if st == TSStreamType::PresentationGraphics {
+                let cs = pid_state.entry(pid).or_default();
+                let bitrate = bitrate_hint.get(&pid).copied().unwrap_or(0);
+                codec::scan_stream(stream, cs, payload, bitrate, true, true);
+                return m2ts::PesAction::Continue;
+            }
+            // For non-PGS streams: dispatch the codec parser only while the
+            // stream is still uninitialized. Once it reports initialized,
+            // tell the m2ts scanner to stop reassembling its PES — byte
+            // counting continues unaffected. This is the dominant per-byte
+            // CPU saving on a full disc scan.
+            if !stream.is_initialized {
+                let cs = pid_state.entry(pid).or_default();
+                let bitrate = bitrate_hint.get(&pid).copied().unwrap_or(0);
+                codec::scan_stream(stream, cs, payload, bitrate, true, true);
+                if !stream.is_initialized {
+                    return m2ts::PesAction::Continue;
                 }
             }
-
-            true
+            m2ts::PesAction::SkipPid
         },
     )?;
 

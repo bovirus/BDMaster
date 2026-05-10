@@ -580,7 +580,7 @@ fn extract_title_from_xml(xml: &str) -> Option<String> {
     None
 }
 
-fn to_disc_info(bd: &BDRom) -> DiscInfo {
+pub(crate) fn to_disc_info(bd: &BDRom) -> DiscInfo {
     let path_str = bd.path.to_string_lossy().to_string();
     let disc_name = bd
         .path
@@ -862,6 +862,31 @@ pub(crate) fn open_stream_reader(
     }
 }
 
+/// Like `open_stream_reader` but returns the raw, *unbuffered* reader. The
+/// full-scan worker uses this so it can interpose its own ProgressReader
+/// below a single large BufReader — that way per-packet reads in the m2ts
+/// loop hit the buffer (a memcpy) instead of the progress wrapper (atomic
+/// load + addition + clock check), removing tens of seconds of overhead on
+/// disc-sized inputs.
+pub(crate) fn open_stream_reader_raw(
+    bd: &BDRom,
+    src: &StreamSource,
+) -> Result<Box<dyn std::io::Read + Send>> {
+    match src {
+        StreamSource::Native(p) => {
+            let f = std::fs::File::open(p)?;
+            Ok(Box::new(f))
+        }
+        StreamSource::Iso(fe) => {
+            if let DiscSource::Iso(image) = &bd.source {
+                Ok(Box::new(UdfFileReader::new(image.clone(), fe)?))
+            } else {
+                Err(anyhow!("ISO stream source without ISO disc source"))
+            }
+        }
+    }
+}
+
 pub fn build_chart_samples(path: &str, playlist_name: &str) -> Vec<ChartSample> {
     let bd = match open_bdrom(Path::new(path)) {
         Ok(bd) => bd,
@@ -927,7 +952,7 @@ pub fn build_chart_samples(path: &str, playlist_name: &str) -> Vec<ChartSample> 
 /// `ScanStream` finish condition over `Streams.Values`). Codec-derived
 /// fields populated during the scan are then snapshotted and copied to
 /// every other playlist that references the same clip.
-fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
+pub(crate) fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
     use codec::CodecScanState;
 
     /// Codec-init result captured per unique clip. `codec_metadata` is the
@@ -1067,7 +1092,7 @@ fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
                 // captured before we exit). PIDs in PMT that haven't yet
                 // delivered a PES are still pending; keep scanning.
                 if pmt.is_empty() {
-                    return true;
+                    return m2ts::PesAction::Continue;
                 }
                 let any_uninit = pmt.keys().any(|p| {
                     pid_streams
@@ -1075,7 +1100,11 @@ fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
                         .map(|ptr| unsafe { !(**ptr).is_initialized })
                         .unwrap_or(true)
                 });
-                any_uninit
+                if any_uninit {
+                    m2ts::PesAction::Continue
+                } else {
+                    m2ts::PesAction::Stop
+                }
             },
         );
 

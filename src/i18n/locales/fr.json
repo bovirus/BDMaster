@@ -105,7 +105,9 @@
     "cancelScan": "Annuler l'analyse",
     "scanCompleted": "Analyse terminée",
     "scanning": "Analyse de {{file}}…",
-    "scanFailed": "Échec de l'analyse : {{message}}"
+    "scanFailed": "Échec de l'analyse : {{message}}",
+    "elapsed": "Écoulé",
+    "remaining": "Restant"
   },
   "settings": {
     "title": "Paramètres",

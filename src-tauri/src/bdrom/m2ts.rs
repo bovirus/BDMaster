@@ -16,23 +16,37 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
 
+/// What the scanner should do after a PES dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PesAction {
+    /// Keep going.
+    Continue,
+    /// Abort the entire scan immediately.
+    Stop,
+    /// Continue scanning, but stop reassembling PES for this PID. The
+    /// scanner still counts bytes per PID so measured-size accounting is
+    /// preserved — only the per-packet `extend_from_slice` work is skipped.
+    /// This is the big win for the full scan: once a non-PGS stream is
+    /// initialized we don't need any more of its PES, but we do still need
+    /// to know how many bytes it consumed.
+    SkipPid,
+}
+
 /// Run the streaming scan against an opaque reader. The native and UDF code
 /// paths both funnel into this entry point.
 ///
-/// The callback signature is `fn(pid, stream_type, pes_payload, pmt) -> bool`
+/// The callback signature is `fn(pid, stream_type, pes_payload, pmt) -> PesAction`
 /// where `pmt` is the live PID → stream-type table populated from PAT/PMT.
-/// Returning `false` terminates the scan early — that's how the codec-init
-/// pass aborts as soon as every PMT-listed PID has reported initialized.
 pub fn scan_m2ts_streaming_from_reader<R, F>(reader: R, mut on_pes: F) -> Result<M2tsScanResult>
 where
     R: Read,
-    F: FnMut(u16, u8, &[u8], &HashMap<u16, u8>) -> bool,
+    F: FnMut(u16, u8, &[u8], &HashMap<u16, u8>) -> PesAction,
 {
     scan_inner(reader, |pid, st, payload, pmt| on_pes(pid, st, payload, pmt))
 }
 
 pub fn scan_m2ts_from_reader<R: Read>(reader: R) -> Result<M2tsScanResult> {
-    scan_inner(reader, |_, _, _, _| true)
+    scan_inner(reader, |_, _, _, _| PesAction::Continue)
 }
 
 const TS_PACKET_SIZE: usize = 188;
@@ -69,7 +83,7 @@ const SAMPLE_INTERVAL_SECONDS: f64 = 1.0;
 /// `File`.
 pub fn scan_m2ts_streaming<F>(path: &Path, on_pes: F) -> Result<M2tsScanResult>
 where
-    F: FnMut(u16, u8, &[u8], &HashMap<u16, u8>) -> bool,
+    F: FnMut(u16, u8, &[u8], &HashMap<u16, u8>) -> PesAction,
 {
     let file = File::open(path)?;
     let reader = BufReader::with_capacity(1 << 20, file);
@@ -79,7 +93,7 @@ where
 fn scan_inner<R, F>(reader: R, mut on_pes: F) -> Result<M2tsScanResult>
 where
     R: Read,
-    F: FnMut(u16, u8, &[u8], &HashMap<u16, u8>) -> bool,
+    F: FnMut(u16, u8, &[u8], &HashMap<u16, u8>) -> PesAction,
 {
     let mut reader = reader;
     let mut packet = [0u8; M2TS_PACKET_SIZE];
@@ -88,6 +102,11 @@ where
     let mut pid_to_stream_type: HashMap<u16, u8> = HashMap::new();
     let mut stats: HashMap<u16, StreamStats> = HashMap::new();
     let mut pending_pes: HashMap<u16, Vec<u8>> = HashMap::new();
+    // PIDs whose PES we no longer need to reassemble. Once a stream's codec
+    // has been initialized (and it's not PGS, which keeps accumulating
+    // caption counts), the callback returns `SkipPid` and we skip the
+    // expensive per-packet payload extend for that PID.
+    let mut skip_pids = std::collections::HashSet::<u16>::new();
     let mut total_bytes: u64 = 0;
     let mut pcr_pid: Option<u16> = None;
     let mut first_pcr_27mhz: Option<i128> = None;
@@ -187,27 +206,35 @@ where
             parse_pat(payload, &mut pmt_pids, &mut pmt_pid_set);
         } else if pmt_pid_set.contains(&pid) && payload_unit_start {
             parse_pmt(payload, &mut pid_to_stream_type);
-        } else if pid != 0 && !pmt_pid_set.contains(&pid) {
+        } else if pid != 0 && !pmt_pid_set.contains(&pid) && !skip_pids.contains(&pid) {
             // PES reassembly + dispatch
             if payload_unit_start && payload.len() >= 9 && payload[0] == 0x00
                 && payload[1] == 0x00 && payload[2] == 0x01
             {
                 // Flush previous PES for this PID, if any.
+                let mut start_new_pes = true;
                 if let Some(prev) = pending_pes.remove(&pid) {
                     if !prev.is_empty() {
                         let stream_type = *pid_to_stream_type.get(&pid).unwrap_or(&0);
-                        if !on_pes(pid, stream_type, &prev, &pid_to_stream_type) {
-                            break 'outer;
+                        match on_pes(pid, stream_type, &prev, &pid_to_stream_type) {
+                            PesAction::Continue => {}
+                            PesAction::Stop => break 'outer,
+                            PesAction::SkipPid => {
+                                skip_pids.insert(pid);
+                                start_new_pes = false;
+                            }
                         }
                     }
                 }
-                let header_data_length = payload[8] as usize;
-                let pes_header_size = 9usize + header_data_length;
-                if payload.len() > pes_header_size {
-                    pending_pes
-                        .entry(pid)
-                        .or_insert_with(Vec::new)
-                        .extend_from_slice(&payload[pes_header_size..]);
+                if start_new_pes {
+                    let header_data_length = payload[8] as usize;
+                    let pes_header_size = 9usize + header_data_length;
+                    if payload.len() > pes_header_size {
+                        pending_pes
+                            .entry(pid)
+                            .or_insert_with(Vec::new)
+                            .extend_from_slice(&payload[pes_header_size..]);
+                    }
                 }
             } else if let Some(buf) = pending_pes.get_mut(&pid) {
                 buf.extend_from_slice(payload);
@@ -228,9 +255,9 @@ where
 
     // Flush any remaining accumulated PES so codec parsers get a final shot.
     for (pid, buf) in pending_pes.into_iter() {
-        if !buf.is_empty() {
+        if !buf.is_empty() && !skip_pids.contains(&pid) {
             let stream_type = *pid_to_stream_type.get(&pid).unwrap_or(&0);
-            on_pes(pid, stream_type, &buf, &pid_to_stream_type);
+            let _ = on_pes(pid, stream_type, &buf, &pid_to_stream_type);
         }
     }
 

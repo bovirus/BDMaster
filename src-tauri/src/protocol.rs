@@ -293,6 +293,11 @@ pub struct ScanProgressInfo {
     pub error: Option<String>,
     #[serde(rename = "currentFile")]
     pub current_file: Option<String>,
+    /// Unix epoch milliseconds at which the worker started. The frontend
+    /// derives Elapsed and Remaining time from this so the values remain
+    /// correct even across a frontend reload while the scan is running.
+    #[serde(rename = "startedAtMs")]
+    pub started_at_ms: u64,
     pub disc: Option<DiscInfo>,
     pub version: u64,
 }

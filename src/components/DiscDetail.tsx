@@ -56,6 +56,16 @@ type PlaylistSortKey =
 type StreamSortKey = "name" | "index" | "length" | "fileSize" | "measuredSize";
 type SortDir = "asc" | "desc";
 
+function formatHMS(totalSeconds: number): string {
+  if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "00:00:00";
+  const total = Math.max(0, Math.floor(totalSeconds));
+  const s = total % 60;
+  const m = Math.floor(total / 60) % 60;
+  const h = Math.floor(total / 3600);
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+
 /**
  * Stable sort helper: pairs each item with its original index so equal keys
  * preserve their input order across asc/desc flips.
@@ -526,41 +536,81 @@ export default function DiscDetail() {
             )}
           </Box>
         </Stack>
-        {/* Progress bar lives in the card body (per the spec). 50px tall,
-            primary colour, only visible while a scan is running. */}
-        {isScanning && fullScanProgress && (
-          <Box sx={{ mt: 1.5 }}>
-            <LinearProgress
-              variant={
-                fullScanProgress.totalBytes > 0 ? "determinate" : "indeterminate"
-              }
-              value={
-                fullScanProgress.totalBytes > 0
-                  ? Math.min(
-                      100,
-                      Math.max(
-                        0,
-                        (fullScanProgress.finishedBytes /
-                          fullScanProgress.totalBytes) *
-                          100
-                      )
-                    )
-                  : undefined
-              }
-              color="primary"
-              sx={{ height: 50, borderRadius: 1 }}
-            />
-            {fullScanProgress.currentFile && (
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ mt: 0.5, display: "block" }}
+        {/* Progress bar lives in the card body (per the spec). 20px tall,
+            primary colour, only visible while a scan is running. The status
+            line below shows the file currently being scanned on the left and
+            elapsed / remaining time on the right. Time values are derived
+            from the backend-provided startedAtMs so they stay accurate even
+            after a frontend reload mid-scan. */}
+        {isScanning && fullScanProgress && (() => {
+          const fraction =
+            fullScanProgress.totalBytes > 0
+              ? Math.min(
+                  1,
+                  Math.max(
+                    0,
+                    fullScanProgress.finishedBytes / fullScanProgress.totalBytes
+                  )
+                )
+              : 0;
+          const elapsedMs =
+            fullScanProgress.startedAtMs > 0
+              ? Math.max(0, Date.now() - fullScanProgress.startedAtMs)
+              : 0;
+          const elapsedSeconds = elapsedMs / 1000;
+          // Linear extrapolation against bytes processed. Becomes meaningful
+          // once a few percent of the disc has been read; before then we
+          // show "00:00:00" rather than a wildly inflated estimate.
+          const remainingSeconds =
+            fraction > 0.01 && elapsedSeconds > 0
+              ? (elapsedSeconds * (1 - fraction)) / fraction
+              : 0;
+          return (
+            <Box sx={{ mt: 1.5 }}>
+              <LinearProgress
+                variant={
+                  fullScanProgress.totalBytes > 0 ? "determinate" : "indeterminate"
+                }
+                value={fullScanProgress.totalBytes > 0 ? fraction * 100 : undefined}
+                color="primary"
+                sx={{ height: 20, borderRadius: 1 }}
+              />
+              <Stack
+                direction="row"
+                spacing={2}
+                sx={{
+                  mt: 0.5,
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
               >
-                {t("disc.scanning", { file: fullScanProgress.currentFile })}
-              </Typography>
-            )}
-          </Box>
-        )}
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{
+                    minWidth: 0,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {fullScanProgress.currentFile
+                    ? t("disc.scanning", { file: fullScanProgress.currentFile })
+                    : ""}
+                </Typography>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}
+                >
+                  {t("disc.elapsed")}: {formatHMS(elapsedSeconds)}
+                  {"  "}
+                  {t("disc.remaining")}: {formatHMS(remainingSeconds)}
+                </Typography>
+              </Stack>
+            </Box>
+          );
+        })()}
       </Paper>
 
       {/* Body: playlist (top) — splitter — stream | splitter | track + buttons */}
@@ -1111,7 +1161,15 @@ function TrackTable({
                 <TableCell align="right">
                   {formatBitRate(bitRate, bitRatePrecision, bitRateUnit)}
                 </TableCell>
-                <TableCell>{s.description}</TableCell>
+                <TableCell>
+                  {s.description.length > 40 ? (
+                    <Tooltip title={s.description}>
+                      <span>{s.description.substring(0, 37) + "..."}</span>
+                    </Tooltip>
+                  ) : (
+                    s.description
+                  )}
+                </TableCell>
                 <TableCell align="right">
                   {estimatedBytes > 0
                     ? formatSize(estimatedBytes, sizePrecision, sizeUnit)

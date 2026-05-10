@@ -321,6 +321,7 @@ export interface ScanProgress {
   isCancelled: boolean;
   error: string | null;
   currentFile: string | null;
+  startedAtMs: number;
   disc: DiscInfo | null;
   version: number;
 }

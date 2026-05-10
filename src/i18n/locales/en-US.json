@@ -105,7 +105,9 @@
     "cancelScan": "Cancel Scan",
     "scanCompleted": "Scan Completed",
     "scanning": "Scanning {{file}}…",
-    "scanFailed": "Scan failed: {{message}}"
+    "scanFailed": "Scan failed: {{message}}",
+    "elapsed": "Elapsed",
+    "remaining": "Remaining"
   },
   "settings": {
     "title": "Settings",

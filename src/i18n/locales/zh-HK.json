@@ -105,7 +105,9 @@
     "cancelScan": "取消掃描",
     "scanCompleted": "掃描完成",
     "scanning": "正在掃描 {{file}}…",
-    "scanFailed": "掃描失敗：{{message}}"
+    "scanFailed": "掃描失敗：{{message}}",
+    "elapsed": "已用時",
+    "remaining": "剩餘"
   },
   "settings": {
     "title": "設定",

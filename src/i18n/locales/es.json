@@ -105,7 +105,9 @@
     "cancelScan": "Cancelar escaneo",
     "scanCompleted": "Escaneo completado",
     "scanning": "Escaneando {{file}}…",
-    "scanFailed": "Error al escanear: {{message}}"
+    "scanFailed": "Error al escanear: {{message}}",
+    "elapsed": "Transcurrido",
+    "remaining": "Restante"
   },
   "settings": {
     "title": "Configuración",
