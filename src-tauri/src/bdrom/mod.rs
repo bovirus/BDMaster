@@ -92,10 +92,14 @@ pub(crate) fn open_bdrom(path: &Path) -> Result<BDRom> {
         if ext == "iso" {
             return open_bdrom_iso(path);
         }
-        return Err(anyhow!(
-            "Unsupported file type: {} (only .iso disc images are supported)",
-            path.display()
-        ));
+        // Non-ISO file: inspect the disc rooted at the file's parent folder
+        // so dragging a file from inside a Blu-ray (e.g. BDMV/STREAM/00001.m2ts)
+        // — or passing one on the CLI — is treated the same as dropping the
+        // surrounding folder. `locate_bdmv` walks up from there to find BDMV.
+        let parent = path
+            .parent()
+            .ok_or_else(|| anyhow!("File has no parent folder: {}", path.display()))?;
+        return open_bdrom_native(parent);
     }
     open_bdrom_native(path)
 }

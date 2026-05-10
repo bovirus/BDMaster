@@ -27,7 +27,7 @@ import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import * as Protocol from "../lib/protocol";
 import { useAppStore, type OpenTab } from "../lib/store";
 import { scanDiscPaths } from "../lib/fs";
-import { getUpdateResult, skipVersion } from "../lib/service";
+import { getLaunchArgs, getUpdateResult, skipVersion } from "../lib/service";
 import DiscInfoTab from "./DiscInfoTab";
 import Config from "./Config";
 import About from "./About";
@@ -125,6 +125,15 @@ export default function MainContent() {
     return () => {
       if (cancelFileDrop) cancelFileDrop();
     };
+  }, []);
+
+  // CLI launch args (e.g. `BDMaster.exe D:\Movie\BDMV` or a file inside it).
+  // The backend resolves files to their parent folder so any path under the
+  // disc tree works.
+  useEffect(() => {
+    getLaunchArgs().then((args) => {
+      if (args.length > 0) scanDiscPaths(args);
+    });
   }, []);
 
   const renderTabLabel = (tab: OpenTab) => {
