@@ -74,6 +74,16 @@ export async function openPlaylistInMkvToolNixGui(
   });
 }
 
+export async function openStreamFileInMkvToolNixGui(
+  discPath: string,
+  streamName: string
+): Promise<void> {
+  return await invoke<void>("open_stream_file_in_mkvtoolnix_gui", {
+    discPath,
+    streamName,
+  });
+}
+
 export async function isBetterMediaInfoFound(
   path: string,
   checkRunning: boolean = false
@@ -91,5 +101,15 @@ export async function openPlaylistInBetterMediaInfo(
   return await invoke<void>("open_playlist_in_bettermediainfo", {
     discPath,
     playlistName,
+  });
+}
+
+export async function openStreamFileInBetterMediaInfo(
+  discPath: string,
+  streamName: string
+): Promise<void> {
+  return await invoke<void>("open_stream_file_in_bettermediainfo", {
+    discPath,
+    streamName,
   });
 }

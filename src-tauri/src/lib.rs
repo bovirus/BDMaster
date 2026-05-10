@@ -109,6 +109,16 @@ async fn open_playlist_in_mkvtoolnix_gui(
 }
 
 #[tauri::command]
+async fn open_stream_file_in_mkvtoolnix_gui(
+    disc_path: String,
+    stream_name: String,
+) -> Result<(), String> {
+    let resolved =
+        bdrom::resolve_stream_file_path(&disc_path, &stream_name).map_err(convert_error)?;
+    mkvtoolnix::spawn_mkvtoolnix_gui(&resolved.to_string_lossy()).map_err(convert_error)
+}
+
+#[tauri::command]
 async fn is_bettermediainfo_found(
     path: String,
     check_running: bool,
@@ -124,6 +134,16 @@ async fn open_playlist_in_bettermediainfo(
     playlist_name: String,
 ) -> Result<(), String> {
     let resolved = bdrom::resolve_playlist_path(&disc_path, &playlist_name).map_err(convert_error)?;
+    bettermediainfo::spawn_bettermediainfo(&resolved.to_string_lossy()).map_err(convert_error)
+}
+
+#[tauri::command]
+async fn open_stream_file_in_bettermediainfo(
+    disc_path: String,
+    stream_name: String,
+) -> Result<(), String> {
+    let resolved =
+        bdrom::resolve_stream_file_path(&disc_path, &stream_name).map_err(convert_error)?;
     bettermediainfo::spawn_bettermediainfo(&resolved.to_string_lossy()).map_err(convert_error)
 }
 
@@ -291,8 +311,10 @@ pub fn run() {
             write_binary_file,
             is_mkvtoolnix_found,
             open_playlist_in_mkvtoolnix_gui,
+            open_stream_file_in_mkvtoolnix_gui,
             is_bettermediainfo_found,
             open_playlist_in_bettermediainfo,
+            open_stream_file_in_bettermediainfo,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

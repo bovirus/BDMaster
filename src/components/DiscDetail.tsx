@@ -41,6 +41,8 @@ import {
   isMkvtoolnixFound,
   openPlaylistInBetterMediaInfo,
   openPlaylistInMkvToolNixGui,
+  openStreamFileInBetterMediaInfo,
+  openStreamFileInMkvToolNixGui,
 } from "../lib/service";
 import { formatLength45k, formatBitRate, formatSize } from "../lib/format";
 
@@ -499,6 +501,36 @@ export default function DiscDetail() {
     if (!disc) return;
     try {
       await openPlaylistInBetterMediaInfo(disc.path, name);
+    } catch (err) {
+      const raw = err == null ? "" : String(err);
+      const isNotConfigured = raw.includes("BETTERMEDIAINFO_NOT_AVAILABLE");
+      setDialogNotification({
+        title: isNotConfigured
+          ? t("disc.betterMediaInfoNotConfigured")
+          : t("disc.openInBetterMediaInfoFailed", { message: raw }),
+        type: Protocol.DialogNotificationType.Error,
+      });
+    }
+  };
+  const handleOpenStreamInMkvToolNixGui = async (name: string) => {
+    if (!disc) return;
+    try {
+      await openStreamFileInMkvToolNixGui(disc.path, name);
+    } catch (err) {
+      const raw = err == null ? "" : String(err);
+      const isNotConfigured = raw.includes("MKVTOOLNIX_GUI_NOT_AVAILABLE");
+      setDialogNotification({
+        title: isNotConfigured
+          ? t("disc.mkvToolNixGuiNotConfigured")
+          : t("disc.openInMkvToolNixGuiFailed", { message: raw }),
+        type: Protocol.DialogNotificationType.Error,
+      });
+    }
+  };
+  const handleOpenStreamInBetterMediaInfo = async (name: string) => {
+    if (!disc) return;
+    try {
+      await openStreamFileInBetterMediaInfo(disc.path, name);
     } catch (err) {
       const raw = err == null ? "" : String(err);
       const isNotConfigured = raw.includes("BETTERMEDIAINFO_NOT_AVAILABLE");
@@ -975,6 +1007,10 @@ export default function DiscDetail() {
                   onSort={handleStreamSort}
                   sizePrecision={sizePrecision}
                   sizeUnit={sizeUnit}
+                  showMkvToolNixButton={showMkvToolNixButton}
+                  showBetterMediaInfoButton={showBetterMediaInfoButton}
+                  onOpenInMkvToolNixGui={handleOpenStreamInMkvToolNixGui}
+                  onOpenInBetterMediaInfo={handleOpenStreamInBetterMediaInfo}
                 />
               </Paper>
 
@@ -1044,6 +1080,10 @@ function StreamClipTable({
   onSort,
   sizePrecision,
   sizeUnit,
+  showMkvToolNixButton,
+  showBetterMediaInfoButton,
+  onOpenInMkvToolNixGui,
+  onOpenInBetterMediaInfo,
 }: {
   clips: Protocol.PlaylistStreamClipInfo[];
   sortKey: StreamSortKey;
@@ -1051,7 +1091,13 @@ function StreamClipTable({
   onSort: (k: StreamSortKey) => void;
   sizePrecision: Protocol.FormatPrecision;
   sizeUnit: Protocol.FormatUnit;
+  showMkvToolNixButton: boolean;
+  showBetterMediaInfoButton: boolean;
+  onOpenInMkvToolNixGui: (name: string) => void;
+  onOpenInBetterMediaInfo: (name: string) => void;
 }) {
+  const { t } = useTranslation();
+  const showActionsColumn = showMkvToolNixButton || showBetterMediaInfoButton;
   // Filter to angle 0 only (mirroring the playlist grouping in BDInfo).
   const angle0 = useMemo(
     () => clips.filter((c) => c.angleIndex === 0),
@@ -1133,6 +1179,11 @@ function StreamClipTable({
             >
               Measured Size
             </SortableHeaderCell>
+            {showActionsColumn && (
+              <TableCell align="center" sx={{ fontWeight: "bold" }}>
+                {t("disc.actions")}
+              </TableCell>
+            )}
           </TableRow>
         </TableHead>
         <TableBody>
@@ -1149,6 +1200,48 @@ function StreamClipTable({
                   ? formatSize(clip.measuredSize, sizePrecision, sizeUnit)
                   : "—"}
               </TableCell>
+              {showActionsColumn && (
+                <TableCell align="center" padding="none">
+                  <Stack
+                    direction="row"
+                    spacing={0.5}
+                    sx={{ justifyContent: "center", alignItems: "center" }}
+                  >
+                    {showMkvToolNixButton && (
+                      <Tooltip title={t("disc.openInMkvToolNixGui")}>
+                        <IconButton
+                          size="small"
+                          sx={{ p: 0 }}
+                          onClick={() => onOpenInMkvToolNixGui(clip.name)}
+                        >
+                          <Box
+                            component="img"
+                            src="images/mkvmerge.png"
+                            alt="MKVToolNix"
+                            sx={{ width: 18, height: 18, objectFit: "contain" }}
+                          />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                    {showBetterMediaInfoButton && (
+                      <Tooltip title={t("disc.openInBetterMediaInfo")}>
+                        <IconButton
+                          size="small"
+                          sx={{ p: 0 }}
+                          onClick={() => onOpenInBetterMediaInfo(clip.name)}
+                        >
+                          <Box
+                            component="img"
+                            src="images/bettermediainfo.png"
+                            alt="BetterMediaInfo"
+                            sx={{ width: 18, height: 18, objectFit: "contain" }}
+                          />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                  </Stack>
+                </TableCell>
+              )}
             </TableRow>
           ))}
         </TableBody>

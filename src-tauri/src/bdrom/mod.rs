@@ -574,6 +574,34 @@ pub fn resolve_playlist_path(disc_path: &str, playlist_name: &str) -> Result<Pat
     ))
 }
 
+/// Resolve the on-disk path of a stream clip file for native disc folders.
+/// ISO disc images don't expose stream clips as standalone filesystem paths.
+pub fn resolve_stream_file_path(disc_path: &str, stream_name: &str) -> Result<PathBuf> {
+    let path = Path::new(disc_path);
+    if !path.exists() {
+        return Err(anyhow!("Path does not exist: {}", path.display()));
+    }
+    if path.is_file() {
+        return Err(anyhow!(
+            "Disc images (.iso) don't expose stream clips as files: {}",
+            path.display()
+        ));
+    }
+
+    let use_ssif = crate::config::get_config().scan.enable_ssif_support;
+    let bdrom = open_bdrom(path, use_ssif)?;
+    let Some((source, _)) = effective_stream_source(&bdrom, stream_name) else {
+        return Err(anyhow!("Stream file {} not found.", stream_name));
+    };
+    match source {
+        StreamSource::Native(p) => Ok(p.clone()),
+        StreamSource::Iso(_) => Err(anyhow!(
+            "Disc images (.iso) don't expose stream clips as files: {}",
+            path.display()
+        )),
+    }
+}
+
 fn locate_bdmv(path: &Path) -> Result<PathBuf> {
     // Walk up the path looking for a BDMV ancestor.
     let mut p: Option<&Path> = Some(path);
