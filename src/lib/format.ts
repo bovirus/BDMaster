@@ -109,6 +109,11 @@ export function formatBitRate(
   return `${bps} bps`;
 }
 
+export function formatPid(pid: number): string {
+  if (!Number.isFinite(pid)) return "";
+  return Math.trunc(pid).toString(10);
+}
+
 // Length is in 45 kHz units (BD time base) per BDInfo convention.
 export function formatLength45k(length45k: number): string {
   return formatLengthSeconds(length45k / 45000.0);

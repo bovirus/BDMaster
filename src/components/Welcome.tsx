@@ -10,12 +10,13 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
+import AlbumIcon from "@mui/icons-material/Album";
 import FolderIcon from "@mui/icons-material/Folder";
 import GitHubIcon from "@mui/icons-material/GitHub";
 import PersonIcon from "@mui/icons-material/Person";
 import { useTranslation } from "react-i18next";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
-import { openDiscDirectoryDialog } from "../lib/dialog";
+import { openDiscDirectoryDialog, openDiscFileDialog } from "../lib/dialog";
 
 const AUTHOR_NAME = "Sam Cao";
 const AUTHOR_URL = "https://github.com/caoccao";
@@ -190,8 +191,8 @@ export default function Welcome() {
         <Box sx={{ display: "flex", justifyContent: "center", gap: 1.5, flexWrap: "wrap" }}>
           <Button
             variant="contained"
-            startIcon={<FolderIcon />}
-            onClick={() => openDiscDirectoryDialog()}
+            startIcon={<AlbumIcon />}
+            onClick={() => openDiscFileDialog()}
             sx={{
               textTransform: "none",
               fontWeight: 600,
@@ -201,7 +202,19 @@ export default function Welcome() {
               "&:hover": { backgroundColor: "#1d4ed8" },
             }}
           >
-            {t("cards.addDisc")}
+            {t("cards.addDisk")}
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<FolderIcon />}
+            onClick={() => openDiscDirectoryDialog()}
+            sx={{
+              textTransform: "none",
+              fontWeight: 600,
+              borderRadius: 2,
+            }}
+          >
+            {t("cards.addDiskFolder")}
           </Button>
         </Box>
 

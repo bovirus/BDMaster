@@ -4,7 +4,8 @@
  */
 
 import { useEffect, useCallback } from "react";
-import { Box, ButtonGroup, IconButton, Tooltip } from "@mui/material";
+import { Box, ButtonGroup, Divider, IconButton, Tooltip } from "@mui/material";
+import AlbumIcon from "@mui/icons-material/Album";
 import FolderIcon from "@mui/icons-material/Folder";
 import DeleteIcon from "@mui/icons-material/Delete";
 import SettingsIcon from "@mui/icons-material/Settings";
@@ -12,7 +13,7 @@ import InfoIcon from "@mui/icons-material/Info";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../lib/store";
 import * as Protocol from "../lib/protocol";
-import { openDiscDirectoryDialog } from "../lib/dialog";
+import { openDiscDirectoryDialog, openDiscFileDialog } from "../lib/dialog";
 import { cancelFullScan } from "../lib/service";
 
 export default function Toolbar() {
@@ -64,15 +65,21 @@ export default function Toolbar() {
   const activeButtonSx = { ...buttonSx, color: "primary.main" };
 
   return (
-    <Box sx={{ mx: 1, my: 0, display: "flex", gap: 1 }}>
+    <Box sx={{ mx: 1, my: 0, display: "flex", gap: 1, alignItems: "center" }}>
       <ButtonGroup variant="outlined" size="small">
-        <Tooltip title={t("toolbar.addDisc")}>
+        <Tooltip title={t("toolbar.addDisk")}>
+          <IconButton sx={buttonSx} onClick={() => openDiscFileDialog()}>
+            <AlbumIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title={t("toolbar.addDiskFolder")}>
           <IconButton sx={buttonSx} onClick={() => openDiscDirectoryDialog()}>
             <FolderIcon fontSize="small" />
           </IconButton>
         </Tooltip>
       </ButtonGroup>
 
+      <Divider orientation="vertical" flexItem />
       <ButtonGroup variant="outlined" size="small">
         <Tooltip title={t("toolbar.clear")}>
           <span>
@@ -82,6 +89,7 @@ export default function Toolbar() {
           </span>
         </Tooltip>
       </ButtonGroup>
+      <Divider orientation="vertical" flexItem />
 
       <ButtonGroup variant="outlined" size="small">
         <Tooltip title={t("toolbar.settings")}>

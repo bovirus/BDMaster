@@ -3,7 +3,9 @@
     "addDisc": "新增光碟資料夾",
     "clear": "清除 (Ctrl + Q)",
     "settings": "設定 (F10)",
-    "about": "關於"
+    "about": "關於",
+    "addDisk": "新增光碟",
+    "addDiskFolder": "新增光碟資料夾"
   },
   "tabs": {
     "about": "關於",
@@ -32,7 +34,9 @@
     "audioCount": "音訊",
     "subtitleCount": "字幕",
     "open": "開啟光碟",
-    "remove": "移除"
+    "remove": "移除",
+    "addDisk": "新增光碟",
+    "addDiskFolder": "新增光碟資料夾"
   },
   "disc": {
     "summary": "摘要",

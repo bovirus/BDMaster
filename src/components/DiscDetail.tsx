@@ -44,7 +44,7 @@ import {
   openStreamFileInBetterMediaInfo,
   openStreamFileInMkvToolNixGui,
 } from "../lib/service";
-import { formatLength45k, formatBitRate, formatSize } from "../lib/format";
+import { formatLength45k, formatBitRate, formatPid, formatSize } from "../lib/format";
 
 type PlaylistSortKey =
   | "name"
@@ -1315,7 +1315,7 @@ function TrackTable({
                       />
                     </Tooltip>
                   )}
-                  {`0x${s.pid.toString(16).toUpperCase().padStart(4, "0")}`}
+                  {formatPid(s.pid)}
                 </TableCell>
                 <TableCell>{s.codecShortName || s.codecName}</TableCell>
                 <TableCell>{s.languageName || s.languageCode}</TableCell>

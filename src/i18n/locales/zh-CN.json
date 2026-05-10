@@ -3,7 +3,9 @@
     "addDisc": "添加光盘目录",
     "clear": "清空 (Ctrl + Q)",
     "settings": "设置 (F10)",
-    "about": "关于"
+    "about": "关于",
+    "addDisk": "添加光盘",
+    "addDiskFolder": "添加光盘目录"
   },
   "tabs": {
     "about": "关于",
@@ -32,7 +34,9 @@
     "audioCount": "音频",
     "subtitleCount": "字幕",
     "open": "打开光盘",
-    "remove": "移除"
+    "remove": "移除",
+    "addDisk": "添加光盘",
+    "addDiskFolder": "添加光盘目录"
   },
   "disc": {
     "summary": "摘要",

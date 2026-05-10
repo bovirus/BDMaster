@@ -3,7 +3,9 @@
     "addDisc": "Agregar carpeta de disco",
     "clear": "Limpiar (Ctrl + Q)",
     "settings": "Configuración (F10)",
-    "about": "Acerca de"
+    "about": "Acerca de",
+    "addDisk": "Agregar disco",
+    "addDiskFolder": "Agregar carpeta de disco"
   },
   "tabs": {
     "about": "Acerca de",
@@ -32,7 +34,9 @@
     "audioCount": "Audio",
     "subtitleCount": "Subtítulos",
     "open": "Abrir disco",
-    "remove": "Quitar"
+    "remove": "Quitar",
+    "addDisk": "Agregar disco",
+    "addDiskFolder": "Agregar carpeta de disco"
   },
   "disc": {
     "summary": "Resumen",

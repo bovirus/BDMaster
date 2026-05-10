@@ -4,7 +4,7 @@
  */
 
 import * as Protocol from "./protocol";
-import { formatSize } from "./format";
+import { formatPid, formatSize } from "./format";
 
 const DEFAULT_APP_VERSION = "0.1.0";
 
@@ -129,7 +129,7 @@ function printStreams(out: string[], streams: Protocol.TSStreamInfo[]) {
       : stream.languageCode
         ? ` [${stream.languageCode}]`
         : "";
-    const pid = `0x${stream.pid.toString(16).toUpperCase().padStart(4, "0")}`;
+    const pid = formatPid(stream.pid);
     line(
       out,
       `    ${pid}  ${padRight(streamCodecShortName(stream), 14)} ${stream.description}${lang}`
@@ -673,7 +673,7 @@ function streamReportTable(
       title,
       headers: [labels.pid, labels.codec, labels.description, labels.language],
       rows: streams.map((stream) => [
-        reportCell(`0x${stream.pid.toString(16).toUpperCase().padStart(4, "0")}`),
+        reportCell(formatPid(stream.pid)),
         reportCell(streamCodecShortName(stream)),
         reportCell(stream.description),
         reportCell(streamLanguage(stream)),

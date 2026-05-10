@@ -3,7 +3,9 @@
     "addDisc": "ディスクフォルダーを追加",
     "clear": "クリア (Ctrl + Q)",
     "settings": "設定 (F10)",
-    "about": "情報"
+    "about": "情報",
+    "addDisk": "ディスクを追加",
+    "addDiskFolder": "ディスクフォルダーを追加"
   },
   "tabs": {
     "about": "情報",
@@ -32,7 +34,9 @@
     "audioCount": "オーディオ",
     "subtitleCount": "字幕",
     "open": "ディスクを開く",
-    "remove": "削除"
+    "remove": "削除",
+    "addDisk": "ディスクを追加",
+    "addDiskFolder": "ディスクフォルダーを追加"
   },
   "disc": {
     "summary": "概要",
