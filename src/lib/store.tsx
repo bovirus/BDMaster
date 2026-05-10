@@ -12,6 +12,17 @@ interface DialogNotification {
   type: Protocol.DialogNotificationType;
 }
 
+/**
+ * One open tab in the main content area. Per-playlist views (Chapters,
+ * QuickSummary, FullReport, BitRate) are keyed by `(type, playlistName)` so
+ * each (type, playlist) combination gets its own tab. About/Config/DiscInfo
+ * have no playlist.
+ */
+export interface OpenTab {
+  type: Protocol.TabType;
+  playlistName?: string;
+}
+
 interface AppState {
   config: Protocol.Config | null;
   about: Protocol.About | null;
@@ -21,40 +32,30 @@ interface AppState {
   disc: Protocol.DiscInfo | null;
   scanningPath: string | null;
 
-  // Tab status
-  tabAboutStatus: Protocol.ControlStatus;
-  tabSettingsStatus: Protocol.ControlStatus;
-  tabChaptersStatus: Protocol.ControlStatus;
-  tabQuickSummaryStatus: Protocol.ControlStatus;
-  tabFullReportStatus: Protocol.ControlStatus;
-  tabBitRateStatus: Protocol.ControlStatus;
-  // Which playlist's chapters the Chapters tab should display.
-  chapterPlaylist: string | null;
-  // Which playlist's quick summary the QuickSummary tab should display.
-  quickSummaryPlaylist: string | null;
-  // Which playlist's full report the FullReport tab should display.
-  fullReportPlaylist: string | null;
-  // Which playlist's bit-rate chart the BitRate tab should display.
-  bitRatePlaylist: string | null;
+  // Tabs: index 0 is always DiscInfo and is non-closable.
+  openTabs: OpenTab[];
+  activeTabIndex: number;
 
   // Actions
   initConfig: () => Promise<void>;
   initAbout: () => Promise<void>;
   setConfig: (config: Protocol.Config | null) => void;
   setDialogNotification: (n: DialogNotification | null) => void;
-  setTabAboutStatus: (s: Protocol.ControlStatus) => void;
-  setTabSettingsStatus: (s: Protocol.ControlStatus) => void;
-  setTabChaptersStatus: (s: Protocol.ControlStatus) => void;
-  setTabQuickSummaryStatus: (s: Protocol.ControlStatus) => void;
-  setTabFullReportStatus: (s: Protocol.ControlStatus) => void;
-  setTabBitRateStatus: (s: Protocol.ControlStatus) => void;
-  setChapterPlaylist: (name: string | null) => void;
-  setQuickSummaryPlaylist: (name: string | null) => void;
-  setFullReportPlaylist: (name: string | null) => void;
-  setBitRatePlaylist: (name: string | null) => void;
   setDisc: (disc: Protocol.DiscInfo | null) => void;
   clearDisc: () => void;
   setScanningPath: (path: string | null) => void;
+
+  /** Open or focus a tab. Reuses an existing tab with the same
+   *  `(type, playlistName)` key; otherwise appends a new tab and selects it. */
+  openTab: (type: Protocol.TabType, playlistName?: string) => void;
+  closeTab: (index: number) => void;
+  setActiveTabIndex: (index: number) => void;
+}
+
+const DEFAULT_TABS: OpenTab[] = [{ type: Protocol.TabType.DiscInfo }];
+
+function tabsEqual(a: OpenTab, type: Protocol.TabType, playlistName?: string): boolean {
+  return a.type === type && (a.playlistName ?? null) === (playlistName ?? null);
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -63,16 +64,9 @@ export const useAppStore = create<AppState>((set) => ({
   dialogNotification: null,
   disc: null,
   scanningPath: null,
-  tabAboutStatus: Protocol.ControlStatus.Hidden,
-  tabSettingsStatus: Protocol.ControlStatus.Hidden,
-  tabChaptersStatus: Protocol.ControlStatus.Hidden,
-  tabQuickSummaryStatus: Protocol.ControlStatus.Hidden,
-  tabFullReportStatus: Protocol.ControlStatus.Hidden,
-  tabBitRateStatus: Protocol.ControlStatus.Hidden,
-  chapterPlaylist: null,
-  quickSummaryPlaylist: null,
-  fullReportPlaylist: null,
-  bitRatePlaylist: null,
+
+  openTabs: DEFAULT_TABS,
+  activeTabIndex: 0,
 
   initConfig: async () => {
     try {
@@ -94,17 +88,49 @@ export const useAppStore = create<AppState>((set) => ({
 
   setConfig: (config) => set({ config }),
   setDialogNotification: (dialogNotification) => set({ dialogNotification }),
-  setTabAboutStatus: (tabAboutStatus) => set({ tabAboutStatus }),
-  setTabSettingsStatus: (tabSettingsStatus) => set({ tabSettingsStatus }),
-  setTabChaptersStatus: (tabChaptersStatus) => set({ tabChaptersStatus }),
-  setTabQuickSummaryStatus: (tabQuickSummaryStatus) => set({ tabQuickSummaryStatus }),
-  setTabFullReportStatus: (tabFullReportStatus) => set({ tabFullReportStatus }),
-  setTabBitRateStatus: (tabBitRateStatus) => set({ tabBitRateStatus }),
-  setChapterPlaylist: (chapterPlaylist) => set({ chapterPlaylist }),
-  setQuickSummaryPlaylist: (quickSummaryPlaylist) => set({ quickSummaryPlaylist }),
-  setFullReportPlaylist: (fullReportPlaylist) => set({ fullReportPlaylist }),
-  setBitRatePlaylist: (bitRatePlaylist) => set({ bitRatePlaylist }),
-  setDisc: (disc) => set({ disc }),
-  clearDisc: () => set({ disc: null }),
+  setDisc: (disc) =>
+    set(() => ({
+      disc,
+      // Loading a new disc invalidates per-playlist tabs from the previous
+      // disc; reset to a clean slate.
+      openTabs: DEFAULT_TABS,
+      activeTabIndex: 0,
+    })),
+  clearDisc: () =>
+    set(() => ({
+      disc: null,
+      openTabs: DEFAULT_TABS,
+      activeTabIndex: 0,
+    })),
   setScanningPath: (scanningPath) => set({ scanningPath }),
+
+  openTab: (type, playlistName) =>
+    set((state) => {
+      const existing = state.openTabs.findIndex((t) => tabsEqual(t, type, playlistName));
+      if (existing >= 0) {
+        return { activeTabIndex: existing };
+      }
+      const next: OpenTab[] = [...state.openTabs, { type, playlistName }];
+      return { openTabs: next, activeTabIndex: next.length - 1 };
+    }),
+
+  closeTab: (index) =>
+    set((state) => {
+      // DiscInfo at index 0 is permanent.
+      if (index <= 0 || index >= state.openTabs.length) return {};
+      const nextTabs = state.openTabs.filter((_, i) => i !== index);
+      let nextActive = state.activeTabIndex;
+      if (nextActive === index) {
+        nextActive = Math.max(0, index - 1);
+      } else if (nextActive > index) {
+        nextActive -= 1;
+      }
+      return { openTabs: nextTabs, activeTabIndex: nextActive };
+    }),
+
+  setActiveTabIndex: (activeTabIndex) =>
+    set((state) => {
+      if (activeTabIndex < 0 || activeTabIndex >= state.openTabs.length) return {};
+      return { activeTabIndex };
+    }),
 }));

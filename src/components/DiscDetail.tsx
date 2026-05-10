@@ -281,37 +281,13 @@ export default function DiscDetail() {
     [persistInfoSplit]
   );
 
-  // Open the Chapters tab for the given playlist.
-  const setTabChaptersStatus = useAppStore((s) => s.setTabChaptersStatus);
-  const setChapterPlaylist = useAppStore((s) => s.setChapterPlaylist);
-  const handleViewChapters = (name: string) => {
-    setChapterPlaylist(name);
-    setTabChaptersStatus(Protocol.ControlStatus.Selected);
-  };
-
-  // Open the Quick Summary tab for the given playlist.
-  const setTabQuickSummaryStatus = useAppStore((s) => s.setTabQuickSummaryStatus);
-  const setQuickSummaryPlaylist = useAppStore((s) => s.setQuickSummaryPlaylist);
-  const handleViewQuickSummary = (name: string) => {
-    setQuickSummaryPlaylist(name);
-    setTabQuickSummaryStatus(Protocol.ControlStatus.Selected);
-  };
-
-  // Open the Full Report tab for the given playlist.
-  const setTabFullReportStatus = useAppStore((s) => s.setTabFullReportStatus);
-  const setFullReportPlaylist = useAppStore((s) => s.setFullReportPlaylist);
-  const handleViewFullReport = (name: string) => {
-    setFullReportPlaylist(name);
-    setTabFullReportStatus(Protocol.ControlStatus.Selected);
-  };
-
-  // Open the Bit Rate tab for the given playlist.
-  const setTabBitRateStatus = useAppStore((s) => s.setTabBitRateStatus);
-  const setBitRatePlaylist = useAppStore((s) => s.setBitRatePlaylist);
-  const handleViewBitRate = (name: string) => {
-    setBitRatePlaylist(name);
-    setTabBitRateStatus(Protocol.ControlStatus.Selected);
-  };
+  // Open or focus the per-(type, playlist) tab. Reuses an existing tab with
+  // the same key, otherwise opens a new one.
+  const openTab = useAppStore((s) => s.openTab);
+  const handleViewChapters = (name: string) => openTab(Protocol.TabType.Chapters, name);
+  const handleViewQuickSummary = (name: string) => openTab(Protocol.TabType.QuickSummary, name);
+  const handleViewFullReport = (name: string) => openTab(Protocol.TabType.FullReport, name);
+  const handleViewBitRate = (name: string) => openTab(Protocol.TabType.BitRate, name);
 
   const sortedPlaylists = useMemo(() => {
     if (!disc) return [];

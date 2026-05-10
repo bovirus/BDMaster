@@ -17,10 +17,13 @@ import { openDiscDirectoryDialog } from "../lib/dialog";
 export default function Toolbar() {
   const { t } = useTranslation();
   const disc = useAppStore((state) => state.disc);
-  const tabAboutStatus = useAppStore((state) => state.tabAboutStatus);
-  const tabSettingsStatus = useAppStore((state) => state.tabSettingsStatus);
-  const setTabAboutStatus = useAppStore((state) => state.setTabAboutStatus);
-  const setTabSettingsStatus = useAppStore((state) => state.setTabSettingsStatus);
+  const openTab = useAppStore((state) => state.openTab);
+  const aboutOpen = useAppStore((state) =>
+    state.openTabs.some((tab) => tab.type === Protocol.TabType.About)
+  );
+  const settingsOpen = useAppStore((state) =>
+    state.openTabs.some((tab) => tab.type === Protocol.TabType.Config)
+  );
   const clearDisc = useAppStore((state) => state.clearDisc);
 
   const handleClear = useCallback(() => {
@@ -28,12 +31,12 @@ export default function Toolbar() {
   }, [clearDisc]);
 
   const handleSelectTabSettings = useCallback(() => {
-    setTabSettingsStatus(Protocol.ControlStatus.Selected);
-  }, [setTabSettingsStatus]);
+    openTab(Protocol.TabType.Config);
+  }, [openTab]);
 
   const handleSelectTabAbout = useCallback(() => {
-    setTabAboutStatus(Protocol.ControlStatus.Selected);
-  }, [setTabAboutStatus]);
+    openTab(Protocol.TabType.About);
+  }, [openTab]);
 
   useEffect(() => {
     const handleKeyUp = (event: KeyboardEvent) => {
@@ -79,7 +82,7 @@ export default function Toolbar() {
       <ButtonGroup variant="outlined" size="small">
         <Tooltip title={t("toolbar.settings")}>
           <IconButton
-            sx={tabSettingsStatus !== Protocol.ControlStatus.Hidden ? activeButtonSx : buttonSx}
+            sx={settingsOpen ? activeButtonSx : buttonSx}
             onClick={handleSelectTabSettings}
           >
             <SettingsIcon fontSize="small" />
@@ -87,7 +90,7 @@ export default function Toolbar() {
         </Tooltip>
         <Tooltip title={t("toolbar.about")}>
           <IconButton
-            sx={tabAboutStatus !== Protocol.ControlStatus.Hidden ? activeButtonSx : buttonSx}
+            sx={aboutOpen ? activeButtonSx : buttonSx}
             onClick={handleSelectTabAbout}
           >
             <InfoIcon fontSize="small" />

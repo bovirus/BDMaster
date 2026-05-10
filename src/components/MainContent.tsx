@@ -3,7 +3,7 @@
  *   All rights reserved.
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Alert,
   Box,
@@ -25,7 +25,7 @@ import { getCurrentWindow, type DragDropEvent } from "@tauri-apps/api/window";
 import type { Event, UnlistenFn } from "@tauri-apps/api/event";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import * as Protocol from "../lib/protocol";
-import { useAppStore } from "../lib/store";
+import { useAppStore, type OpenTab } from "../lib/store";
 import { scanDiscPaths } from "../lib/fs";
 import { getUpdateResult, skipVersion } from "../lib/service";
 import DiscInfoTab from "./DiscInfoTab";
@@ -38,34 +38,12 @@ import BitRateTab from "./BitRateTab";
 
 const RELEASES_URL = "https://github.com/caoccao/BDMaster/releases";
 
-interface TabControl {
-  type: Protocol.TabType;
-  index: number;
-}
-
 export default function MainContent() {
   const { t } = useTranslation();
-  const [tabIndex, setTabIndex] = useState(0);
-  const [tabControls, setTabControls] = useState<TabControl[]>([
-    { type: Protocol.TabType.DiscInfo, index: 0 },
-  ]);
-
-  const tabAboutStatus = useAppStore((state) => state.tabAboutStatus);
-  const tabSettingsStatus = useAppStore((state) => state.tabSettingsStatus);
-  const tabChaptersStatus = useAppStore((state) => state.tabChaptersStatus);
-  const tabQuickSummaryStatus = useAppStore((state) => state.tabQuickSummaryStatus);
-  const tabFullReportStatus = useAppStore((state) => state.tabFullReportStatus);
-  const tabBitRateStatus = useAppStore((state) => state.tabBitRateStatus);
-  const setTabAboutStatus = useAppStore((state) => state.setTabAboutStatus);
-  const setTabSettingsStatus = useAppStore((state) => state.setTabSettingsStatus);
-  const setTabChaptersStatus = useAppStore((state) => state.setTabChaptersStatus);
-  const setTabQuickSummaryStatus = useAppStore((state) => state.setTabQuickSummaryStatus);
-  const setTabFullReportStatus = useAppStore((state) => state.setTabFullReportStatus);
-  const setTabBitRateStatus = useAppStore((state) => state.setTabBitRateStatus);
-  const chapterPlaylist = useAppStore((state) => state.chapterPlaylist);
-  const quickSummaryPlaylist = useAppStore((state) => state.quickSummaryPlaylist);
-  const fullReportPlaylist = useAppStore((state) => state.fullReportPlaylist);
-  const bitRatePlaylist = useAppStore((state) => state.bitRatePlaylist);
+  const openTabs = useAppStore((state) => state.openTabs);
+  const activeTabIndex = useAppStore((state) => state.activeTabIndex);
+  const setActiveTabIndex = useAppStore((state) => state.setActiveTabIndex);
+  const closeTab = useAppStore((state) => state.closeTab);
 
   const [newVersion, setNewVersion] = useState<string | null>(null);
   const [skipChecked, setSkipChecked] = useState(false);
@@ -97,158 +75,29 @@ export default function MainContent() {
     };
   }, []);
 
-  // Update tab controls when status changes.
-  useEffect(() => {
-    setTabControls((prev) => {
-      const controls: TabControl[] = [{ type: Protocol.TabType.DiscInfo, index: 0 }];
-      if (tabAboutStatus !== Protocol.ControlStatus.Hidden) {
-        controls.push({ type: Protocol.TabType.About, index: 0 });
-      }
-      if (tabSettingsStatus !== Protocol.ControlStatus.Hidden) {
-        controls.push({ type: Protocol.TabType.Config, index: 0 });
-      }
-      if (tabChaptersStatus !== Protocol.ControlStatus.Hidden) {
-        controls.push({ type: Protocol.TabType.Chapters, index: 0 });
-      }
-      if (tabQuickSummaryStatus !== Protocol.ControlStatus.Hidden) {
-        controls.push({ type: Protocol.TabType.QuickSummary, index: 0 });
-      }
-      if (tabFullReportStatus !== Protocol.ControlStatus.Hidden) {
-        controls.push({ type: Protocol.TabType.FullReport, index: 0 });
-      }
-      if (tabBitRateStatus !== Protocol.ControlStatus.Hidden) {
-        controls.push({ type: Protocol.TabType.BitRate, index: 0 });
-      }
-      controls.forEach((c, i) => (c.index = i));
-
-      const current = prev[tabIndex];
-      if (current) {
-        const newIdx = controls.findIndex((c) => c.type === current.type);
-        if (newIdx >= 0 && newIdx !== tabIndex) {
-          setTabIndex(newIdx);
-        }
-      }
-      return controls;
-    });
-  }, [tabAboutStatus, tabSettingsStatus, tabChaptersStatus, tabQuickSummaryStatus, tabFullReportStatus, tabBitRateStatus]);
-
-  // Handle Selected status: jump to that tab.
-  useEffect(() => {
-    if (tabAboutStatus === Protocol.ControlStatus.Selected) {
-      const t = tabControls.find((c) => c.type === Protocol.TabType.About);
-      if (t) {
-        setTabIndex(t.index);
-        setTabAboutStatus(Protocol.ControlStatus.Visible);
-      }
-    }
-  }, [tabAboutStatus, tabControls, setTabAboutStatus]);
-
-  useEffect(() => {
-    if (tabSettingsStatus === Protocol.ControlStatus.Selected) {
-      const t = tabControls.find((c) => c.type === Protocol.TabType.Config);
-      if (t) {
-        setTabIndex(t.index);
-        setTabSettingsStatus(Protocol.ControlStatus.Visible);
-      }
-    }
-  }, [tabSettingsStatus, tabControls, setTabSettingsStatus]);
-
-  useEffect(() => {
-    if (tabChaptersStatus === Protocol.ControlStatus.Selected) {
-      const t = tabControls.find((c) => c.type === Protocol.TabType.Chapters);
-      if (t) {
-        setTabIndex(t.index);
-        setTabChaptersStatus(Protocol.ControlStatus.Visible);
-      }
-    }
-  }, [tabChaptersStatus, tabControls, setTabChaptersStatus]);
-
-  useEffect(() => {
-    if (tabQuickSummaryStatus === Protocol.ControlStatus.Selected) {
-      const t = tabControls.find((c) => c.type === Protocol.TabType.QuickSummary);
-      if (t) {
-        setTabIndex(t.index);
-        setTabQuickSummaryStatus(Protocol.ControlStatus.Visible);
-      }
-    }
-  }, [tabQuickSummaryStatus, tabControls, setTabQuickSummaryStatus]);
-
-  useEffect(() => {
-    if (tabFullReportStatus === Protocol.ControlStatus.Selected) {
-      const t = tabControls.find((c) => c.type === Protocol.TabType.FullReport);
-      if (t) {
-        setTabIndex(t.index);
-        setTabFullReportStatus(Protocol.ControlStatus.Visible);
-      }
-    }
-  }, [tabFullReportStatus, tabControls, setTabFullReportStatus]);
-
-  useEffect(() => {
-    if (tabBitRateStatus === Protocol.ControlStatus.Selected) {
-      const t = tabControls.find((c) => c.type === Protocol.TabType.BitRate);
-      if (t) {
-        setTabIndex(t.index);
-        setTabBitRateStatus(Protocol.ControlStatus.Visible);
-      }
-    }
-  }, [tabBitRateStatus, tabControls, setTabBitRateStatus]);
-
-  // Keep tabIndex within bounds.
-  useEffect(() => {
-    if (tabIndex >= tabControls.length && tabControls.length > 0) {
-      setTabIndex(tabControls.length - 1);
-    }
-  }, [tabIndex, tabControls.length]);
-
-  const closeTab = useCallback(
-    (index: number) => {
-      const tabControl = tabControls[index];
-      if (!tabControl) return;
-      switch (tabControl.type) {
-        case Protocol.TabType.About:
-          setTabAboutStatus(Protocol.ControlStatus.Hidden);
-          break;
-        case Protocol.TabType.Config:
-          setTabSettingsStatus(Protocol.ControlStatus.Hidden);
-          break;
-        case Protocol.TabType.Chapters:
-          setTabChaptersStatus(Protocol.ControlStatus.Hidden);
-          break;
-        case Protocol.TabType.QuickSummary:
-          setTabQuickSummaryStatus(Protocol.ControlStatus.Hidden);
-          break;
-        case Protocol.TabType.FullReport:
-          setTabFullReportStatus(Protocol.ControlStatus.Hidden);
-          break;
-        case Protocol.TabType.BitRate:
-          setTabBitRateStatus(Protocol.ControlStatus.Hidden);
-          break;
-      }
-    },
-    [tabControls, setTabAboutStatus, setTabSettingsStatus, setTabChaptersStatus, setTabQuickSummaryStatus, setTabFullReportStatus, setTabBitRateStatus]
-  );
-
   // Keyboard shortcuts.
   useEffect(() => {
     const handleKeyUp = (event: KeyboardEvent) => {
       if (event.ctrlKey && !event.altKey && !event.shiftKey) {
         if (event.key >= "1" && event.key <= "9") {
           const newTabIndex = parseInt(event.key) - 1;
-          if (newTabIndex >= 0 && newTabIndex < tabControls.length) {
+          if (newTabIndex >= 0 && newTabIndex < openTabs.length) {
             event.stopPropagation();
-            setTabIndex(newTabIndex);
+            setActiveTabIndex(newTabIndex);
           }
         } else if (event.key === "w") {
           event.stopPropagation();
-          closeTab(tabIndex);
+          closeTab(activeTabIndex);
         } else if (event.key === "Tab") {
           event.stopPropagation();
-          setTabIndex((prev) => (prev >= tabControls.length - 1 ? 0 : prev + 1));
+          const next = activeTabIndex >= openTabs.length - 1 ? 0 : activeTabIndex + 1;
+          setActiveTabIndex(next);
         }
       } else if (event.ctrlKey && !event.altKey && event.shiftKey) {
         if (event.key === "Tab") {
           event.stopPropagation();
-          setTabIndex((prev) => (prev > 0 ? prev - 1 : tabControls.length - 1));
+          const prev = activeTabIndex > 0 ? activeTabIndex - 1 : openTabs.length - 1;
+          setActiveTabIndex(prev);
         }
       } else if (!event.ctrlKey && event.altKey && !event.shiftKey) {
         if (event.key === "x") {
@@ -259,7 +108,7 @@ export default function MainContent() {
     };
     document.addEventListener("keyup", handleKeyUp);
     return () => document.removeEventListener("keyup", handleKeyUp);
-  }, [tabIndex, tabControls.length, closeTab]);
+  }, [activeTabIndex, openTabs.length, setActiveTabIndex, closeTab]);
 
   // Drag-and-drop.
   useEffect(() => {
@@ -278,8 +127,8 @@ export default function MainContent() {
     };
   }, []);
 
-  const getTabLabel = (control: TabControl) => {
-    switch (control.type) {
+  const renderTabLabel = (tab: OpenTab) => {
+    switch (tab.type) {
       case Protocol.TabType.About:
         return <span>{t("tabs.about")}</span>;
       case Protocol.TabType.Config:
@@ -291,7 +140,7 @@ export default function MainContent() {
           <Tooltip title={t("tabs.chapters")}>
             <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
               <BookmarkIcon sx={{ fontSize: 16 }} />
-              <span>{chapterPlaylist ?? ""}</span>
+              <span>{tab.playlistName ?? ""}</span>
             </Box>
           </Tooltip>
         );
@@ -300,7 +149,7 @@ export default function MainContent() {
           <Tooltip title={t("tabs.quickSummary")}>
             <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
               <SummarizeIcon sx={{ fontSize: 16 }} />
-              <span>{quickSummaryPlaylist ?? ""}</span>
+              <span>{tab.playlistName ?? ""}</span>
             </Box>
           </Tooltip>
         );
@@ -309,7 +158,7 @@ export default function MainContent() {
           <Tooltip title={t("tabs.fullReport")}>
             <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
               <DescriptionIcon sx={{ fontSize: 16 }} />
-              <span>{fullReportPlaylist ?? ""}</span>
+              <span>{tab.playlistName ?? ""}</span>
             </Box>
           </Tooltip>
         );
@@ -318,10 +167,29 @@ export default function MainContent() {
           <Tooltip title={t("tabs.bitRate")}>
             <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
               <ShowChartIcon sx={{ fontSize: 16 }} />
-              <span>{bitRatePlaylist ?? ""}</span>
+              <span>{tab.playlistName ?? ""}</span>
             </Box>
           </Tooltip>
         );
+    }
+  };
+
+  const renderTabContent = (tab: OpenTab) => {
+    switch (tab.type) {
+      case Protocol.TabType.About:
+        return <About />;
+      case Protocol.TabType.Config:
+        return <Config />;
+      case Protocol.TabType.DiscInfo:
+        return <DiscInfoTab />;
+      case Protocol.TabType.Chapters:
+        return <ChaptersTab playlistName={tab.playlistName ?? null} />;
+      case Protocol.TabType.QuickSummary:
+        return <QuickSummaryTab playlistName={tab.playlistName ?? null} />;
+      case Protocol.TabType.FullReport:
+        return <FullReportTab playlistName={tab.playlistName ?? null} />;
+      case Protocol.TabType.BitRate:
+        return <BitRateTab playlistName={tab.playlistName ?? null} />;
     }
   };
 
@@ -367,27 +235,27 @@ export default function MainContent() {
       )}
       <Box sx={{ borderBottom: 1, borderColor: "divider", flexShrink: 0 }}>
         <Tabs
-          value={tabIndex}
-          onChange={(_, v) => setTabIndex(v)}
+          value={activeTabIndex}
+          onChange={(_, v) => setActiveTabIndex(v)}
           variant="scrollable"
           scrollButtons="auto"
           sx={{ mt: 0, minHeight: "24px", "& .MuiTab-root": { textTransform: "none" } }}
         >
-          {tabControls.map((control) => (
+          {openTabs.map((tab, index) => (
             <Tab
-              key={control.type}
+              key={`${tab.type}:${tab.playlistName ?? ""}`}
               style={{ minHeight: "24px" }}
               label={
                 <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                  {getTabLabel(control)}
-                  {control.type !== Protocol.TabType.DiscInfo && (
+                  {renderTabLabel(tab)}
+                  {tab.type !== Protocol.TabType.DiscInfo && (
                     <Tooltip title={t("tabs.close")}>
                       <IconButton
                         size="small"
                         sx={{ ml: 0.5, p: 0.25 }}
                         onClick={(e) => {
                           e.stopPropagation();
-                          closeTab(control.index);
+                          closeTab(index);
                         }}
                       >
                         <CloseIcon sx={{ fontSize: 14 }} />
@@ -416,11 +284,11 @@ export default function MainContent() {
           flexDirection: "column",
         }}
       >
-        {tabControls.map((control) => {
-          const isVisible = control.index === tabIndex;
+        {openTabs.map((tab, index) => {
+          const isVisible = index === activeTabIndex;
           return (
             <Box
-              key={`content-${control.type}`}
+              key={`content-${tab.type}:${tab.playlistName ?? ""}`}
               sx={{
                 display: isVisible ? "flex" : "none",
                 flexDirection: "column",
@@ -429,13 +297,7 @@ export default function MainContent() {
                 overflow: "auto",
               }}
             >
-              {control.type === Protocol.TabType.About && <About />}
-              {control.type === Protocol.TabType.Config && <Config />}
-              {control.type === Protocol.TabType.DiscInfo && <DiscInfoTab />}
-              {control.type === Protocol.TabType.Chapters && <ChaptersTab />}
-              {control.type === Protocol.TabType.QuickSummary && <QuickSummaryTab />}
-              {control.type === Protocol.TabType.FullReport && <FullReportTab />}
-              {control.type === Protocol.TabType.BitRate && <BitRateTab />}
+              {renderTabContent(tab)}
             </Box>
           );
         })}

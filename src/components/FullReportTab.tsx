@@ -23,10 +23,9 @@ import { useAppStore } from "../lib/store";
 import { generateReport, writeTextFile } from "../lib/service";
 import { openSaveReportDialog } from "../lib/dialog";
 
-export default function FullReportTab() {
+export default function FullReportTab({ playlistName }: { playlistName: string | null }) {
   const { t } = useTranslation();
   const disc = useAppStore((s) => s.disc);
-  const playlistName = useAppStore((s) => s.fullReportPlaylist);
   const setNotification = useAppStore((s) => s.setDialogNotification);
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

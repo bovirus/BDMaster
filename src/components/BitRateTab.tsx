@@ -21,10 +21,9 @@ interface ChartPoint {
   bitRate: number;
 }
 
-export default function BitRateTab() {
+export default function BitRateTab({ playlistName }: { playlistName: string | null }) {
   const { t } = useTranslation();
   const disc = useAppStore((s) => s.disc);
-  const playlistName = useAppStore((s) => s.bitRatePlaylist);
   const [data, setData] = useState<ChartPoint[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
