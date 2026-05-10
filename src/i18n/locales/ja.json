@@ -55,6 +55,7 @@
     "audioStreams": "オーディオ",
     "graphicsStreams": "グラフィック",
     "textStreams": "テキスト",
+    "subtitles": "字幕",
     "pid": "PID",
     "type": "種類",
     "codec": "コーデック",

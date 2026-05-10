@@ -55,6 +55,7 @@
     "audioStreams": "音訊",
     "graphicsStreams": "圖形",
     "textStreams": "文字",
+    "subtitles": "字幕",
     "pid": "PID",
     "type": "類型",
     "codec": "編解碼器",

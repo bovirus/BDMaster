@@ -55,6 +55,7 @@
     "audioStreams": "Audio",
     "graphicsStreams": "Graphiques",
     "textStreams": "Texte",
+    "subtitles": "Sous-titres",
     "pid": "PID",
     "type": "Type",
     "codec": "Codec",

@@ -22,6 +22,7 @@ import {
   TableHead,
   TableRow,
   TableSortLabel,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
@@ -29,6 +30,10 @@ import SaveIcon from "@mui/icons-material/Save";
 import ShowChartIcon from "@mui/icons-material/ShowChart";
 import DescriptionIcon from "@mui/icons-material/Description";
 import CloseIcon from "@mui/icons-material/Close";
+import MovieIcon from "@mui/icons-material/Movie";
+import AudiotrackIcon from "@mui/icons-material/Audiotrack";
+import SubtitlesIcon from "@mui/icons-material/Subtitles";
+import BookmarkIcon from "@mui/icons-material/Bookmark";
 import { useTranslation } from "react-i18next";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import * as Protocol from "../lib/protocol";
@@ -37,7 +42,16 @@ import { generateReport, getPlaylistChartData, setConfig as saveConfig, writeTex
 import { openSaveReportDialog } from "../lib/dialog";
 import { formatBitRate, formatLength45k, formatLengthSeconds, formatSize } from "../lib/format";
 
-type PlaylistSortKey = "name" | "groupIndex" | "totalLength" | "fileSize" | "measuredSize";
+type PlaylistSortKey =
+  | "name"
+  | "groupIndex"
+  | "totalLength"
+  | "videoCount"
+  | "audioCount"
+  | "subtitleCount"
+  | "chapterCount"
+  | "fileSize"
+  | "measuredSize";
 type StreamSortKey = "name" | "index" | "length" | "fileSize" | "measuredSize";
 type SortDir = "asc" | "desc";
 
@@ -74,6 +88,22 @@ function comparePlaylists(
       case "totalLength":
         av = a.totalLength;
         bv = b.totalLength;
+        break;
+      case "videoCount":
+        av = a.videoStreams.length;
+        bv = b.videoStreams.length;
+        break;
+      case "audioCount":
+        av = a.audioStreams.length;
+        bv = b.audioStreams.length;
+        break;
+      case "subtitleCount":
+        av = a.graphicsStreams.length + a.textStreams.length;
+        bv = b.graphicsStreams.length + b.textStreams.length;
+        break;
+      case "chapterCount":
+        av = a.chapters.length;
+        bv = b.chapters.length;
         break;
       case "fileSize":
         av = a.fileSize;
@@ -447,6 +477,46 @@ export default function DiscDetail() {
                     {t("disc.length")}
                   </SortableHeaderCell>
                   <SortableHeaderCell
+                    active={sortKey === "videoCount"}
+                    direction={sortDir}
+                    onSort={() => handleSort("videoCount")}
+                    align="right"
+                  >
+                    <Tooltip title={t("disc.videoStreams")}>
+                      <MovieIcon fontSize="small" sx={{ verticalAlign: "middle" }} />
+                    </Tooltip>
+                  </SortableHeaderCell>
+                  <SortableHeaderCell
+                    active={sortKey === "audioCount"}
+                    direction={sortDir}
+                    onSort={() => handleSort("audioCount")}
+                    align="right"
+                  >
+                    <Tooltip title={t("disc.audioStreams")}>
+                      <AudiotrackIcon fontSize="small" sx={{ verticalAlign: "middle" }} />
+                    </Tooltip>
+                  </SortableHeaderCell>
+                  <SortableHeaderCell
+                    active={sortKey === "subtitleCount"}
+                    direction={sortDir}
+                    onSort={() => handleSort("subtitleCount")}
+                    align="right"
+                  >
+                    <Tooltip title={t("disc.subtitles")}>
+                      <SubtitlesIcon fontSize="small" sx={{ verticalAlign: "middle" }} />
+                    </Tooltip>
+                  </SortableHeaderCell>
+                  <SortableHeaderCell
+                    active={sortKey === "chapterCount"}
+                    direction={sortDir}
+                    onSort={() => handleSort("chapterCount")}
+                    align="right"
+                  >
+                    <Tooltip title={t("disc.chapters")}>
+                      <BookmarkIcon fontSize="small" sx={{ verticalAlign: "middle" }} />
+                    </Tooltip>
+                  </SortableHeaderCell>
+                  <SortableHeaderCell
                     active={sortKey === "fileSize"}
                     direction={sortDir}
                     onSort={() => handleSort("fileSize")}
@@ -476,6 +546,20 @@ export default function DiscDetail() {
                     <TableCell>{p.name}</TableCell>
                     <TableCell align="right">{p.groupIndex || ""}</TableCell>
                     <TableCell>{formatLength45k(p.totalLength)}</TableCell>
+                    <TableCell align="right">
+                      {p.videoStreams.length > 0 ? p.videoStreams.length : ""}
+                    </TableCell>
+                    <TableCell align="right">
+                      {p.audioStreams.length > 0 ? p.audioStreams.length : ""}
+                    </TableCell>
+                    <TableCell align="right">
+                      {p.graphicsStreams.length + p.textStreams.length > 0
+                        ? p.graphicsStreams.length + p.textStreams.length
+                        : ""}
+                    </TableCell>
+                    <TableCell align="right">
+                      {p.chapters.length > 0 ? p.chapters.length : ""}
+                    </TableCell>
                     <TableCell align="right">
                       {formatSize(p.fileSize, sizePrecision, sizeUnit)}
                     </TableCell>
