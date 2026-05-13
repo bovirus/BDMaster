@@ -6,7 +6,7 @@
 import * as Protocol from "./protocol";
 import { formatPid, formatSize } from "./format";
 
-const DEFAULT_APP_VERSION = "0.1.0";
+const DEFAULT_APP_VERSION = "0.2.0";
 
 function line(out: string[], value = "") {
   out.push(value);

@@ -78,6 +78,9 @@
     "openInBetterMediaInfo": "Abrir en BetterMediaInfo",
     "openInBetterMediaInfoFailed": "No se pudo abrir BetterMediaInfo: {{message}}",
     "betterMediaInfoNotConfigured": "BetterMediaInfo no está configurado. Por favor, establezca la ruta de BetterMediaInfo en la Configuración.",
+    "openInMpcHc": "Abrir en MPC-HC",
+    "openInMpcHcFailed": "Error al abrir MPC-HC: {{message}}",
+    "mpcHcNotConfigured": "MPC-HC no está configurado. Por favor, establezca la ruta de MPC-HC en la Configuración.",
     "actions": "Acciones",
     "generateReport": "Generar informe",
     "generateQuickSummary": "Resumen rápido",
@@ -172,7 +175,11 @@
     "betterMediaInfo": "BetterMediaInfo",
     "betterMediaInfoPath": "Ruta de BetterMediaInfo",
     "betterMediaInfoFound": "BetterMediaInfo está disponible.",
-    "betterMediaInfoNotFound": "No se encontró BetterMediaInfo en la ruta indicada."
+    "betterMediaInfoNotFound": "No se encontró BetterMediaInfo en la ruta indicada.",
+    "mpchc": "MPC-HC",
+    "mpchcPath": "Ruta de MPC-HC",
+    "mpchcFound": "MPC-HC está disponible.",
+    "mpchcNotFound": "No se encontró MPC-HC en la ruta indicada."
   },
   "about": {
     "tagline": "Una interfaz de escritorio moderna para inspeccionar discos Blu-ray",

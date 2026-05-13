@@ -78,6 +78,9 @@
     "openInBetterMediaInfo": "Open in BetterMediaInfo",
     "openInBetterMediaInfoFailed": "Failed to open BetterMediaInfo: {{message}}",
     "betterMediaInfoNotConfigured": "BetterMediaInfo is not configured. Please set the BetterMediaInfo path in Settings.",
+    "openInMpcHc": "Open in MPC-HC",
+    "openInMpcHcFailed": "Failed to open MPC-HC: {{message}}",
+    "mpcHcNotConfigured": "MPC-HC is not configured. Please set the MPC-HC path in Settings.",
     "actions": "Actions",
     "generateReport": "Generate Report",
     "generateQuickSummary": "Quick Summary",
@@ -172,7 +175,11 @@
     "betterMediaInfo": "BetterMediaInfo",
     "betterMediaInfoPath": "BetterMediaInfo Path",
     "betterMediaInfoFound": "BetterMediaInfo is available.",
-    "betterMediaInfoNotFound": "BetterMediaInfo was not found at the given path."
+    "betterMediaInfoNotFound": "BetterMediaInfo was not found at the given path.",
+    "mpchc": "MPC-HC",
+    "mpchcPath": "MPC-HC Path",
+    "mpchcFound": "MPC-HC is available.",
+    "mpchcNotFound": "MPC-HC was not found at the given path."
   },
   "about": {
     "tagline": "A modern desktop GUI for inspecting Blu-ray discs",

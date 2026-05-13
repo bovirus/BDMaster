@@ -26,6 +26,12 @@ pub struct BetterMediaInfoStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MpcHcStatus {
+    pub found: bool,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateCheckResult {
     #[serde(rename = "hasUpdate")]
     pub has_update: bool,

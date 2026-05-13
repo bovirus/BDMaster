@@ -78,6 +78,9 @@
     "openInBetterMediaInfo": "在 BetterMediaInfo 中開啟",
     "openInBetterMediaInfoFailed": "無法開啟 BetterMediaInfo：{{message}}",
     "betterMediaInfoNotConfigured": "尚未設定 BetterMediaInfo。請在「設定」中指定 BetterMediaInfo 路徑。",
+    "openInMpcHc": "在 MPC-HC 中開啟",
+    "openInMpcHcFailed": "無法開啟 MPC-HC：{{message}}",
+    "mpcHcNotConfigured": "尚未設定 MPC-HC。請在「設定」中指定 MPC-HC 路徑。",
     "actions": "操作",
     "generateReport": "產生報告",
     "generateQuickSummary": "快速摘要",
@@ -172,7 +175,11 @@
     "betterMediaInfo": "BetterMediaInfo",
     "betterMediaInfoPath": "BetterMediaInfo 路徑",
     "betterMediaInfoFound": "BetterMediaInfo 可用。",
-    "betterMediaInfoNotFound": "在指定路徑下找不到 BetterMediaInfo。"
+    "betterMediaInfoNotFound": "在指定路徑下找不到 BetterMediaInfo。",
+    "mpchc": "MPC-HC",
+    "mpchcPath": "MPC-HC 路徑",
+    "mpchcFound": "MPC-HC 可用。",
+    "mpchcNotFound": "在指定路徑下找不到 MPC-HC。"
   },
   "about": {
     "tagline": "現代化的藍光光碟檢查工具",

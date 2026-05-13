@@ -15,6 +15,7 @@ mod config;
 mod constants;
 mod controller;
 mod mkvtoolnix;
+mod mpchc;
 mod protocol;
 
 use protocol::{FullScanState, ScanProgressInfo, UpdateCheckResult, UpdateCheckState};
@@ -145,6 +146,35 @@ async fn open_stream_file_in_bettermediainfo(
     let resolved =
         bdrom::resolve_stream_file_path(&disc_path, &stream_name).map_err(convert_error)?;
     bettermediainfo::spawn_bettermediainfo(&resolved.to_string_lossy()).map_err(convert_error)
+}
+
+#[tauri::command]
+async fn is_mpchc_found(
+    path: String,
+    check_running: bool,
+) -> Result<protocol::MpcHcStatus, String> {
+    mpchc::is_mpchc_found(path, check_running)
+        .await
+        .map_err(convert_error)
+}
+
+#[tauri::command]
+async fn open_playlist_in_mpchc(
+    disc_path: String,
+    playlist_name: String,
+) -> Result<(), String> {
+    let resolved = bdrom::resolve_playlist_path(&disc_path, &playlist_name).map_err(convert_error)?;
+    mpchc::spawn_mpchc(&resolved.to_string_lossy()).map_err(convert_error)
+}
+
+#[tauri::command]
+async fn open_stream_file_in_mpchc(
+    disc_path: String,
+    stream_name: String,
+) -> Result<(), String> {
+    let resolved =
+        bdrom::resolve_stream_file_path(&disc_path, &stream_name).map_err(convert_error)?;
+    mpchc::spawn_mpchc(&resolved.to_string_lossy()).map_err(convert_error)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -315,6 +345,9 @@ pub fn run() {
             is_bettermediainfo_found,
             open_playlist_in_bettermediainfo,
             open_stream_file_in_bettermediainfo,
+            is_mpchc_found,
+            open_playlist_in_mpchc,
+            open_stream_file_in_mpchc,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

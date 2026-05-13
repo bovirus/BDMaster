@@ -39,6 +39,8 @@ pub struct Config {
     #[serde(rename = "betterMediaInfo", default)]
     pub better_media_info: ConfigBetterMediaInfo,
     #[serde(default)]
+    pub mpchc: ConfigMpcHc,
+    #[serde(default)]
     pub window: ConfigWindow,
 }
 
@@ -145,6 +147,7 @@ impl Default for Config {
             update: Default::default(),
             mkv: Default::default(),
             better_media_info: Default::default(),
+            mpchc: Default::default(),
             window: Default::default(),
         }
     }
@@ -195,6 +198,30 @@ impl ConfigBetterMediaInfo {
 }
 
 impl Default for ConfigBetterMediaInfo {
+    fn default() -> Self {
+        Self {
+            path: Self::default_path(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ConfigMpcHc {
+    #[serde(default = "ConfigMpcHc::default_path")]
+    pub path: String,
+}
+
+impl ConfigMpcHc {
+    fn default_path() -> String {
+        if cfg!(target_os = "windows") {
+            r"C:\Program Files (x86)\K-Lite Codec Pack\MPC-HC64\mpc-hc64.exe".to_owned()
+        } else {
+            String::new()
+        }
+    }
+}
+
+impl Default for ConfigMpcHc {
     fn default() -> Self {
         Self {
             path: Self::default_path(),

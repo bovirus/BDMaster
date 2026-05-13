@@ -1,5 +1,9 @@
 # Release Notes
 
+## 0.2.0
+
+* External tool integration: open a playlist or stream file directly in MPC-HC (Windows).
+
 ## 0.1.0 (Initial Release)
 
 BDMaster is a modern, cross-platform GUI for inspecting Blu-ray discs.

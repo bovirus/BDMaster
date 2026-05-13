@@ -1,6 +1,6 @@
 [package]
 name = "bdmaster"
-version = "0.1.0"
+version = "0.2.0"
 description = "BDMaster - Blu-ray Disc Inspector"
 authors = ["Sam Cao"]
 edition = "2021"

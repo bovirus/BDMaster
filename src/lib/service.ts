@@ -113,3 +113,33 @@ export async function openStreamFileInBetterMediaInfo(
     streamName,
   });
 }
+
+export async function isMpcHcFound(
+  path: string,
+  checkRunning: boolean = false
+): Promise<Protocol.MpcHcStatus> {
+  return await invoke<Protocol.MpcHcStatus>("is_mpchc_found", {
+    path,
+    checkRunning,
+  });
+}
+
+export async function openPlaylistInMpcHc(
+  discPath: string,
+  playlistName: string
+): Promise<void> {
+  return await invoke<void>("open_playlist_in_mpchc", {
+    discPath,
+    playlistName,
+  });
+}
+
+export async function openStreamFileInMpcHc(
+  discPath: string,
+  streamName: string
+): Promise<void> {
+  return await invoke<void>("open_stream_file_in_mpchc", {
+    discPath,
+    streamName,
+  });
+}

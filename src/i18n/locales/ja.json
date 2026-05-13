@@ -78,6 +78,9 @@
     "openInBetterMediaInfo": "BetterMediaInfo で開く",
     "openInBetterMediaInfoFailed": "BetterMediaInfo を開けませんでした: {{message}}",
     "betterMediaInfoNotConfigured": "BetterMediaInfo が設定されていません。設定で BetterMediaInfo のパスを指定してください。",
+    "openInMpcHc": "MPC-HC で開く",
+    "openInMpcHcFailed": "MPC-HC を開けませんでした: {{message}}",
+    "mpcHcNotConfigured": "MPC-HC が設定されていません。設定で MPC-HC のパスを指定してください。",
     "actions": "操作",
     "generateReport": "レポートを生成",
     "generateQuickSummary": "簡易サマリー",
@@ -172,7 +175,11 @@
     "betterMediaInfo": "BetterMediaInfo",
     "betterMediaInfoPath": "BetterMediaInfo パス",
     "betterMediaInfoFound": "BetterMediaInfo が利用可能です。",
-    "betterMediaInfoNotFound": "指定されたパスに BetterMediaInfo が見つかりません。"
+    "betterMediaInfoNotFound": "指定されたパスに BetterMediaInfo が見つかりません。",
+    "mpchc": "MPC-HC",
+    "mpchcPath": "MPC-HC パス",
+    "mpchcFound": "MPC-HC が利用可能です。",
+    "mpchcNotFound": "指定されたパスに MPC-HC が見つかりません。"
   },
   "about": {
     "tagline": "Blu-ray ディスクを検査するためのモダンなデスクトップ GUI",

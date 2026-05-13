@@ -78,6 +78,9 @@
     "openInBetterMediaInfo": "In BetterMediaInfo öffnen",
     "openInBetterMediaInfoFailed": "BetterMediaInfo konnte nicht geöffnet werden: {{message}}",
     "betterMediaInfoNotConfigured": "BetterMediaInfo ist nicht konfiguriert. Bitte legen Sie den BetterMediaInfo-Pfad in den Einstellungen fest.",
+    "openInMpcHc": "In MPC-HC öffnen",
+    "openInMpcHcFailed": "MPC-HC konnte nicht geöffnet werden: {{message}}",
+    "mpcHcNotConfigured": "MPC-HC ist nicht konfiguriert. Bitte legen Sie den MPC-HC-Pfad in den Einstellungen fest.",
     "actions": "Aktionen",
     "generateReport": "Bericht erstellen",
     "generateQuickSummary": "Kurzbericht",
@@ -172,7 +175,11 @@
     "betterMediaInfo": "BetterMediaInfo",
     "betterMediaInfoPath": "BetterMediaInfo-Pfad",
     "betterMediaInfoFound": "BetterMediaInfo ist verfügbar.",
-    "betterMediaInfoNotFound": "BetterMediaInfo wurde im angegebenen Pfad nicht gefunden."
+    "betterMediaInfoNotFound": "BetterMediaInfo wurde im angegebenen Pfad nicht gefunden.",
+    "mpchc": "MPC-HC",
+    "mpchcPath": "MPC-HC-Pfad",
+    "mpchcFound": "MPC-HC ist verfügbar.",
+    "mpchcNotFound": "MPC-HC wurde im angegebenen Pfad nicht gefunden."
   },
   "about": {
     "tagline": "Eine moderne Desktop-Oberfläche zum Untersuchen von Blu-ray-Discs",

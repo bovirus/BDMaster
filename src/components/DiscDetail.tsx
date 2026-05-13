@@ -39,10 +39,13 @@ import {
   getScanProgress,
   isBetterMediaInfoFound,
   isMkvtoolnixFound,
+  isMpcHcFound,
   openPlaylistInBetterMediaInfo,
   openPlaylistInMkvToolNixGui,
+  openPlaylistInMpcHc,
   openStreamFileInBetterMediaInfo,
   openStreamFileInMkvToolNixGui,
+  openStreamFileInMpcHc,
 } from "../lib/service";
 import { formatLength45k, formatBitRate, formatPid, formatSize } from "../lib/format";
 
@@ -201,6 +204,7 @@ export default function DiscDetail() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [mkvtoolnixAvailable, setMkvtoolnixAvailable] = useState(false);
   const [betterMediaInfoAvailable, setBetterMediaInfoAvailable] = useState(false);
+  const [mpcHcAvailable, setMpcHcAvailable] = useState(false);
 
   // Probe whether mkvtoolnix-gui is reachable at the configured path. Used to
   // decide whether the per-playlist "Open in MKVToolNix GUI" action shows up
@@ -237,10 +241,28 @@ export default function DiscDetail() {
     };
   }, [config?.betterMediaInfo?.path]);
 
+  // Same probe for MPC-HC (Windows-only). Returns found=false on other OSes.
+  useEffect(() => {
+    let cancelled = false;
+    const path = config?.mpchc?.path ?? "";
+    isMpcHcFound(path.trim())
+      .then((status) => {
+        if (!cancelled) setMpcHcAvailable(status.found);
+      })
+      .catch(() => {
+        if (!cancelled) setMpcHcAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config?.mpchc?.path]);
+
   const isIsoDisc = (disc?.path ?? "").toLowerCase().endsWith(".iso");
   const showMkvToolNixButton = mkvtoolnixAvailable && !isIsoDisc;
   const showBetterMediaInfoButton = betterMediaInfoAvailable && !isIsoDisc;
-  const showActionsColumn = showMkvToolNixButton || showBetterMediaInfoButton;
+  const showMpcHcButton = mpcHcAvailable && !isIsoDisc;
+  const showActionsColumn =
+    showMkvToolNixButton || showBetterMediaInfoButton || showMpcHcButton;
 
   const isScanning = !!fullScanProgress?.isRunning;
   const scanComplete = !!disc && fullScanCompletedFor === disc.path;
@@ -538,6 +560,36 @@ export default function DiscDetail() {
         title: isNotConfigured
           ? t("disc.betterMediaInfoNotConfigured")
           : t("disc.openInBetterMediaInfoFailed", { message: raw }),
+        type: Protocol.DialogNotificationType.Error,
+      });
+    }
+  };
+  const handleOpenInMpcHc = async (name: string) => {
+    if (!disc) return;
+    try {
+      await openPlaylistInMpcHc(disc.path, name);
+    } catch (err) {
+      const raw = err == null ? "" : String(err);
+      const isNotConfigured = raw.includes("MPCHC_NOT_AVAILABLE");
+      setDialogNotification({
+        title: isNotConfigured
+          ? t("disc.mpcHcNotConfigured")
+          : t("disc.openInMpcHcFailed", { message: raw }),
+        type: Protocol.DialogNotificationType.Error,
+      });
+    }
+  };
+  const handleOpenStreamInMpcHc = async (name: string) => {
+    if (!disc) return;
+    try {
+      await openStreamFileInMpcHc(disc.path, name);
+    } catch (err) {
+      const raw = err == null ? "" : String(err);
+      const isNotConfigured = raw.includes("MPCHC_NOT_AVAILABLE");
+      setDialogNotification({
+        title: isNotConfigured
+          ? t("disc.mpcHcNotConfigured")
+          : t("disc.openInMpcHcFailed", { message: raw }),
         type: Protocol.DialogNotificationType.Error,
       });
     }
@@ -928,6 +980,25 @@ export default function DiscDetail() {
                               </IconButton>
                             </Tooltip>
                           )}
+                          {showMpcHcButton && (
+                            <Tooltip title={t("disc.openInMpcHc")}>
+                              <IconButton
+                                size="small"
+                                sx={{ p: 0 }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenInMpcHc(p.name);
+                                }}
+                              >
+                                <Box
+                                  component="img"
+                                  src="images/mpchc64.png"
+                                  alt="MPC-HC"
+                                  sx={{ width: 18, height: 18, objectFit: "contain" }}
+                                />
+                              </IconButton>
+                            </Tooltip>
+                          )}
                         </Stack>
                       </TableCell>
                     )}
@@ -1009,8 +1080,10 @@ export default function DiscDetail() {
                   sizeUnit={sizeUnit}
                   showMkvToolNixButton={showMkvToolNixButton}
                   showBetterMediaInfoButton={showBetterMediaInfoButton}
+                  showMpcHcButton={showMpcHcButton}
                   onOpenInMkvToolNixGui={handleOpenStreamInMkvToolNixGui}
                   onOpenInBetterMediaInfo={handleOpenStreamInBetterMediaInfo}
+                  onOpenInMpcHc={handleOpenStreamInMpcHc}
                 />
               </Paper>
 
@@ -1082,8 +1155,10 @@ function StreamClipTable({
   sizeUnit,
   showMkvToolNixButton,
   showBetterMediaInfoButton,
+  showMpcHcButton,
   onOpenInMkvToolNixGui,
   onOpenInBetterMediaInfo,
+  onOpenInMpcHc,
 }: {
   clips: Protocol.PlaylistStreamClipInfo[];
   sortKey: StreamSortKey;
@@ -1093,11 +1168,14 @@ function StreamClipTable({
   sizeUnit: Protocol.FormatUnit;
   showMkvToolNixButton: boolean;
   showBetterMediaInfoButton: boolean;
+  showMpcHcButton: boolean;
   onOpenInMkvToolNixGui: (name: string) => void;
   onOpenInBetterMediaInfo: (name: string) => void;
+  onOpenInMpcHc: (name: string) => void;
 }) {
   const { t } = useTranslation();
-  const showActionsColumn = showMkvToolNixButton || showBetterMediaInfoButton;
+  const showActionsColumn =
+    showMkvToolNixButton || showBetterMediaInfoButton || showMpcHcButton;
   // Filter to angle 0 only (mirroring the playlist grouping in BDInfo).
   const angle0 = useMemo(
     () => clips.filter((c) => c.angleIndex === 0),
@@ -1234,6 +1312,22 @@ function StreamClipTable({
                             component="img"
                             src="images/bettermediainfo.png"
                             alt="BetterMediaInfo"
+                            sx={{ width: 18, height: 18, objectFit: "contain" }}
+                          />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                    {showMpcHcButton && (
+                      <Tooltip title={t("disc.openInMpcHc")}>
+                        <IconButton
+                          size="small"
+                          sx={{ p: 0 }}
+                          onClick={() => onOpenInMpcHc(clip.name)}
+                        >
+                          <Box
+                            component="img"
+                            src="images/mpchc64.png"
+                            alt="MPC-HC"
                             sx={{ width: 18, height: 18, objectFit: "contain" }}
                           />
                         </IconButton>

@@ -84,6 +84,15 @@ export interface BetterMediaInfoStatus {
   path: string;
 }
 
+export interface ConfigMpcHc {
+  path: string;
+}
+
+export interface MpcHcStatus {
+  found: boolean;
+  path: string;
+}
+
 export interface ConfigWindowPosition {
   x: number;
   y: number;
@@ -118,6 +127,7 @@ export interface Config {
   update: ConfigUpdate;
   mkv: ConfigMkv;
   betterMediaInfo: ConfigBetterMediaInfo;
+  mpchc: ConfigMpcHc;
   window: ConfigWindow;
 }
 

@@ -33,6 +33,7 @@ import * as Protocol from "../lib/protocol";
 import {
   isBetterMediaInfoFound,
   isMkvtoolnixFound,
+  isMpcHcFound,
   setConfig as saveConfig,
 } from "../lib/service";
 import { useAppStore } from "../lib/store";
@@ -78,9 +79,12 @@ export default function Config() {
   const [draft, setDraft] = useState<Protocol.Config | null>(config);
   const [mkvtoolnixFound, setMkvtoolnixFound] = useState(false);
   const [betterMediaInfoFound, setBetterMediaInfoFound] = useState(false);
+  const [mpcHcFound, setMpcHcFound] = useState(false);
   const isInitializedRef = useRef(false);
   const mkvToolNixCheckDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const betterMediaInfoCheckDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const mpcHcCheckDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const isWindows = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
 
   useEffect(() => {
     if (config && !isInitializedRef.current) {
@@ -169,6 +173,35 @@ export default function Config() {
       }
     };
   }, [draft?.mkv?.mkvToolNixPath]);
+
+  // Validate the configured MPC-HC path (Windows only).
+  useEffect(() => {
+    if (!isInitializedRef.current || !draft || !isWindows) return;
+    const path = draft.mpchc?.path ?? "";
+    if (mpcHcCheckDebounceRef.current) {
+      clearTimeout(mpcHcCheckDebounceRef.current);
+    }
+    let isCancelled = false;
+    mpcHcCheckDebounceRef.current = setTimeout(async () => {
+      try {
+        const status = await isMpcHcFound(path.trim());
+        if (!isCancelled) {
+          setMpcHcFound(status.found);
+          if (status.found && status.path && status.path !== path) {
+            setDraft((d) => (d ? { ...d, mpchc: { path: status.path } } : d));
+          }
+        }
+      } catch {
+        if (!isCancelled) setMpcHcFound(false);
+      }
+    }, 250);
+    return () => {
+      isCancelled = true;
+      if (mpcHcCheckDebounceRef.current) {
+        clearTimeout(mpcHcCheckDebounceRef.current);
+      }
+    };
+  }, [draft?.mpchc?.path, isWindows]);
 
   // Validate the configured BetterMediaInfo path. Mirrors the same debounce +
   // auto-correct pattern used for MKVToolNix above.
@@ -261,6 +294,33 @@ export default function Config() {
     });
     if (typeof directory === "string" && directory.length > 0) {
       updateBetterMediaInfo({ path: directory });
+    }
+  };
+
+  const updateMpcHc = (patch: Partial<Protocol.ConfigMpcHc>) => {
+    setDraft({ ...draft, mpchc: { ...draft.mpchc, ...patch } });
+  };
+
+  const handleBrowseMpcHcPath = async () => {
+    const file = await openDialog({
+      multiple: false,
+      defaultPath: draft.mpchc?.path?.trim() || undefined,
+      filters: [{ name: "MPC-HC", extensions: ["exe"] }],
+    });
+    if (typeof file === "string" && file.length > 0) {
+      updateMpcHc({ path: file });
+    }
+  };
+
+  const handleDetectMpcHc = async () => {
+    try {
+      const status = await isMpcHcFound(draft.mpchc?.path?.trim() ?? "", true);
+      setMpcHcFound(status.found);
+      if (status.found && status.path && status.path !== draft.mpchc?.path) {
+        updateMpcHc({ path: status.path });
+      }
+    } catch {
+      setMpcHcFound(false);
     }
   };
 
@@ -481,6 +541,61 @@ export default function Config() {
           </Box>
         </Stack>
       </Paper>
+
+      {isWindows && (
+        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+          <SectionHeader
+            icon={
+              <Box
+                component="img"
+                src="images/mpchc64.png"
+                alt="MPC-HC"
+                sx={{ width: 20, height: 20, objectFit: "contain" }}
+              />
+            }
+            title={t("settings.mpchc")}
+          />
+          <Box sx={{ py: 1 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              {t("settings.mpchcPath")}
+            </Typography>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <TextField
+                value={draft.mpchc?.path ?? ""}
+                onChange={(e) => updateMpcHc({ path: e.target.value })}
+                size="small"
+                fullWidth
+              />
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={handleBrowseMpcHcPath}
+                sx={{ minWidth: 90, height: 36, textTransform: "none" }}
+              >
+                {t("settings.browse")}
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={handleDetectMpcHc}
+                sx={{ minWidth: 90, height: 36, textTransform: "none" }}
+              >
+                {t("settings.detect")}
+              </Button>
+            </Box>
+            <Typography
+              variant="caption"
+              sx={{
+                mt: 0.75,
+                display: "block",
+                color: mpcHcFound ? "success.main" : "error.main",
+              }}
+            >
+              {mpcHcFound ? t("settings.mpchcFound") : t("settings.mpchcNotFound")}
+            </Typography>
+          </Box>
+        </Paper>
+      )}
 
       <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
         <SectionHeader

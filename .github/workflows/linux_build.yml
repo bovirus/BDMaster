@@ -18,7 +18,7 @@ on:
       - "docs/**"
 
 env:
-  BDMASTER_VERSION: 0.1.0
+  BDMASTER_VERSION: 0.2.0
   RUSTFLAGS: "-A warnings"
 
 jobs:
