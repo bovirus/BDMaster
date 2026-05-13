@@ -3,6 +3,7 @@
 ## 0.2.0
 
 * External tool integration: open a playlist or stream file directly in MPC-HC (Windows).
+* Localization: added Italian (it) — UI, reports, and Windows installer.
 
 ## 0.1.0 (Initial Release)
 
