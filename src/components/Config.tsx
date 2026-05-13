@@ -362,6 +362,7 @@ export default function Config() {
             size="small"
             value={draft.displayMode}
             onChange={(_, v) => v && updateDraft({ displayMode: v })}
+            sx={{ "& .MuiToggleButton-root": { textTransform: "none" } }}
           >
             <ToggleButton value={Protocol.DisplayMode.Auto}>
               <AutoIcon fontSize="small" sx={{ mr: 0.5 }} />
