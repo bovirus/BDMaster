@@ -62,10 +62,10 @@ jobs:
 
     - name: Build BDMaster
       run: |
-        pnpm install --frozen-lockfile
         cd src-tauri
         cargo test --release
         cd ..
+        pnpm install --frozen-lockfile
         pnpm tauri build
 
     - name: Upload the Artifact
