@@ -126,6 +126,7 @@
   "settings": {
     "title": "Impostazioni",
     "appearance": "Aspetto",
+    "mode": "Modalità",
     "autoMode": "Modalità automatica",
     "lightMode": "Modalità chiara",
     "darkMode": "Modalità scura",

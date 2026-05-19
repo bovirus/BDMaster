@@ -126,6 +126,7 @@
   "settings": {
     "title": "Einstellungen",
     "appearance": "Erscheinungsbild",
+    "mode": "Modus",
     "autoMode": "Automatisch",
     "lightMode": "Hell",
     "darkMode": "Dunkel",

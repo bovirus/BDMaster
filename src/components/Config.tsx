@@ -355,7 +355,7 @@ export default function Config() {
     <Box sx={{ width: "100%", maxWidth: 640, mx: "auto", py: 2, px: 1, display: "flex", flexDirection: "column", gap: 2 }}>
       <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
         <SectionHeader icon={<AppearanceIcon />} title={t("settings.appearance")} />
-        <SettingRow label={t("settings.appearance")}>
+        <SettingRow label={t("settings.mode")}>
           <ToggleButtonGroup
             exclusive
             size="small"

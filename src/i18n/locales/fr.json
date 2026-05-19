@@ -126,6 +126,7 @@
   "settings": {
     "title": "Paramètres",
     "appearance": "Apparence",
+    "mode": "Mode",
     "autoMode": "Automatique",
     "lightMode": "Clair",
     "darkMode": "Sombre",
