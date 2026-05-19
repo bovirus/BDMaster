@@ -7,7 +7,6 @@ import { useEffect, useMemo } from "react";
 import { ThemeProvider, createTheme, CssBaseline, Box } from "@mui/material";
 import { useAppStore } from "./lib/store";
 import * as Protocol from "./lib/protocol";
-import { changeLanguage } from "./i18n";
 import Layout from "./components/Layout";
 import NotificationSnackbar from "./components/NotificationSnackbar";
 
@@ -44,16 +43,11 @@ function App() {
 
   const displayMode = config?.displayMode ?? Protocol.DisplayMode.Auto;
   const selectedTheme = config?.theme ?? Protocol.Theme.Ocean;
-  const language = config?.language ?? Protocol.Language.EnUS;
 
   useEffect(() => {
     initConfig();
     initAbout();
   }, [initConfig, initAbout]);
-
-  useEffect(() => {
-    changeLanguage(language);
-  }, [language]);
 
   const prefersDarkMode = useMemo(() => {
     if (typeof window !== "undefined") {

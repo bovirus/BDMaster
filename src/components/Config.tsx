@@ -126,7 +126,6 @@ export default function Config() {
       try {
         const saved = await saveConfig(draft);
         setConfigState(saved);
-        changeLanguage(saved.language);
       } catch (error) {
         setNotification({
           title: `${t("settings.settingsSaveError")} ${error}`,
