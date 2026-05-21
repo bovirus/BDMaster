@@ -9,7 +9,9 @@ import { cancelFullScan, scanDisc } from "./service";
 
 export async function scanDiscPaths(paths: string[]) {
   // Single-disc app: only the first path is inspected; any prior disc is replaced.
-  if (paths.length === 0) return;
+  if (paths.length === 0) {
+    return;
+  }
   // Loading a new disc supersedes any in-flight full scan on the previous
   // disc — fire cancel before kicking off the lightweight scan so the
   // worker thread releases the old M2TS reader.

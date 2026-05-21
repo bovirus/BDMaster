@@ -39,17 +39,23 @@ export default function QuickSummaryTab({ playlistName }: { playlistName: string
   const reportLabels = useMemo(() => createTranslatedReportLabels(t), [t]);
 
   const text = useMemo(() => {
-    if (!disc || !playlistName) return null;
+    if (!disc || !playlistName) {
+      return null;
+    }
     return generateQuickSummaryReport(disc, [playlistName], config?.formatting, reportLabels);
   }, [disc, playlistName, config?.formatting, reportLabels]);
 
   const document = useMemo(() => {
-    if (!disc || !playlistName) return null;
+    if (!disc || !playlistName) {
+      return null;
+    }
     return generateQuickSummaryReportDocument(disc, [playlistName], config?.formatting, reportLabels);
   }, [disc, playlistName, config?.formatting, reportLabels]);
 
   const handleCopy = async () => {
-    if (!text) return;
+    if (!text) {
+      return;
+    }
     await writeText(text);
     setNotification({
       title: t("disc.reportCopied"),
@@ -58,7 +64,9 @@ export default function QuickSummaryTab({ playlistName }: { playlistName: string
   };
 
   const handleSave = async () => {
-    if (!text) return;
+    if (!text) {
+      return;
+    }
     const filePath = await openSaveReportDialog("text");
     if (filePath) {
       try {

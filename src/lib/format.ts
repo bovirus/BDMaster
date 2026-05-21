@@ -70,10 +70,14 @@ function unitToTiers(u: Protocol.FormatUnit): FormatTier[] {
 
 function trimFractionZeros(value: string): string {
   const dot = value.lastIndexOf(".");
-  if (dot < 0) return value;
+  if (dot < 0) {
+    return value;
+  }
   let v = value;
   while (v.endsWith("0")) v = v.substring(0, v.length - 1);
-  if (v.endsWith(".")) v = v.substring(0, v.length - 1);
+  if (v.endsWith(".")) {
+    v = v.substring(0, v.length - 1);
+  }
   return v;
 }
 
@@ -82,7 +86,9 @@ export function formatSize(
   precision: Protocol.FormatPrecision = Protocol.FormatPrecision.Two,
   unit: Protocol.FormatUnit = Protocol.FormatUnit.KMGT
 ): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0";
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0";
+  }
   const dp = precisionToDecimalPlaces(precision);
   const tiers = unitToTiers(unit);
   for (let i = tiers.length - 1; i >= 0; i--) {
@@ -98,7 +104,9 @@ export function formatBitRate(
   precision: Protocol.FormatPrecision = Protocol.FormatPrecision.Two,
   unit: Protocol.FormatUnit = Protocol.FormatUnit.KMGT
 ): string {
-  if (!Number.isFinite(bps) || bps <= 0) return "";
+  if (!Number.isFinite(bps) || bps <= 0) {
+    return "";
+  }
   const dp = precisionToDecimalPlaces(precision);
   const tiers = unitToTiers(unit);
   for (let i = tiers.length - 1; i >= 0; i--) {
@@ -110,7 +118,9 @@ export function formatBitRate(
 }
 
 export function formatPid(pid: number): string {
-  if (!Number.isFinite(pid)) return "";
+  if (!Number.isFinite(pid)) {
+    return "";
+  }
   return Math.trunc(pid).toString(10);
 }
 
@@ -120,7 +130,9 @@ export function formatLength45k(length45k: number): string {
 }
 
 export function formatLengthSeconds(totalSeconds: number): string {
-  if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return "00:00:00";
+  if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
+    return "00:00:00";
+  }
   const total = Math.floor(totalSeconds);
   const ms = Math.floor((totalSeconds - total) * 1000);
   const s = total % 60;

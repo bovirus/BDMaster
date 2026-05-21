@@ -32,7 +32,9 @@ function trimFractionZeros(value: string): string {
 }
 
 function formatSecondsShort(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 0) return "0:00:00";
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return "0:00:00";
+  }
   const total = Math.floor(seconds);
   const s = total % 60;
   const m = Math.floor(total / 60) % 60;
@@ -41,7 +43,9 @@ function formatSecondsShort(seconds: number): string {
 }
 
 function formatSecondsFull(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 0) return "0:00:00.000";
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return "0:00:00.000";
+  }
   const total = Math.floor(seconds);
   const ms = Math.round((seconds - total) * 1000);
   const s = total % 60;
@@ -53,7 +57,9 @@ function formatSecondsFull(seconds: number): string {
 }
 
 function formatSeconds(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 0) return "00:00:00";
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return "00:00:00";
+  }
   const total = Math.floor(seconds);
   const ms = Math.floor((seconds - total) * 1000);
   const s = total % 60;
@@ -90,19 +96,35 @@ function streamCodecShortName(stream: Protocol.TSStreamInfo): string {
 }
 
 function discProtection(disc: Protocol.DiscInfo): string {
-  if (disc.isBdPlus) return "BD+";
-  if (disc.isUHD) return "AACS2";
+  if (disc.isBdPlus) {
+    return "BD+";
+  }
+  if (disc.isUHD) {
+    return "AACS2";
+  }
   return "AACS";
 }
 
 function discExtras(disc: Protocol.DiscInfo): string[] {
   const extras: string[] = [];
-  if (disc.isUHD) extras.push("Ultra HD");
-  if (disc.isBdJava) extras.push("BD-Java");
-  if (disc.is50Hz) extras.push("50Hz Content");
-  if (disc.is3D) extras.push("Blu-ray 3D");
-  if (disc.isDBOX) extras.push("D-BOX Motion Code");
-  if (disc.isPSP) extras.push("PSP Digital Copy");
+  if (disc.isUHD) {
+    extras.push("Ultra HD");
+  }
+  if (disc.isBdJava) {
+    extras.push("BD-Java");
+  }
+  if (disc.is50Hz) {
+    extras.push("50Hz Content");
+  }
+  if (disc.is3D) {
+    extras.push("Blu-ray 3D");
+  }
+  if (disc.isDBOX) {
+    extras.push("D-BOX Motion Code");
+  }
+  if (disc.isPSP) {
+    extras.push("PSP Digital Copy");
+  }
   return extras;
 }
 
@@ -114,11 +136,15 @@ function writeDiscInfoBlock(
   appVersion: string,
   labels: ReportLabels
 ) {
-  if (disc.discTitle) line(out, `${padRight(`${labels.discTitle}:`, 16)}${disc.discTitle}`);
+  if (disc.discTitle) {
+    line(out, `${padRight(`${labels.discTitle}:`, 16)}${disc.discTitle}`);
+  }
   line(out, `${padRight(`${labels.discLabel}:`, 16)}${disc.volumeLabel}`);
   line(out, `${padRight(`${labels.discSize}:`, 16)}${formatThousands(disc.size)} ${labels.bytes}`);
   line(out, `${padRight(`${labels.protection}:`, 16)}${protection}`);
-  if (extras.length > 0) line(out, `${padRight(`${labels.extras}:`, 16)}${extras.join(", ")}`);
+  if (extras.length > 0) {
+    line(out, `${padRight(`${labels.extras}:`, 16)}${extras.join(", ")}`);
+  }
   line(out, `${padRight(`${labels.application}:`, 16)}BDMaster v${appVersion}`);
 }
 
@@ -145,10 +171,14 @@ function formatAudioSummary(
   stream: Protocol.TSStreamInfo | undefined,
   labels: ReportLabels = DEFAULT_REPORT_LABELS
 ): [string, string] {
-  if (!stream) return ["", ""];
+  if (!stream) {
+    return ["", ""];
+  }
   let out = `${streamCodecLongName(stream)} ${stream.channelLayout}`.trim();
   const bitrate = effectiveBitrate(stream);
-  if (bitrate > 0) out += ` ${Math.round(bitrate / 1000.0)} ${labels.kbps}`;
+  if (bitrate > 0) {
+    out += ` ${Math.round(bitrate / 1000.0)} ${labels.kbps}`;
+  }
   if (stream.sampleRate > 0 && stream.bitDepth > 0) {
     out += ` (${Math.round(stream.sampleRate / 1000.0)}kHz/${stream.bitDepth}-bit)`;
   }
@@ -161,10 +191,14 @@ function formatSecondaryAudio(
   labels: ReportLabels = DEFAULT_REPORT_LABELS
 ): string {
   for (const stream of streams.slice(1)) {
-    if (stream.languageCode !== primaryLanguage) continue;
+    if (stream.languageCode !== primaryLanguage) {
+      continue;
+    }
     const isSecondary = stream.streamType === 0xa1 || stream.streamType === 0xa2;
     const isStereoAc3 = stream.streamType === 0x81 && stream.channelCount === 2;
-    if (isSecondary || isStereoAc3) continue;
+    if (isSecondary || isStereoAc3) {
+      continue;
+    }
     return formatAudioSummary(stream, labels)[0];
   }
   return "";
@@ -198,7 +232,9 @@ function writeChaptersTable(out: string[], playlist: Protocol.PlaylistInfo, labe
 }
 
 function selectedPlaylists(disc: Protocol.DiscInfo, playlistNames?: string[]): Protocol.PlaylistInfo[] {
-  if (!playlistNames) return disc.playlists;
+  if (!playlistNames) {
+    return disc.playlists;
+  }
   const selected = new Set(playlistNames);
   return disc.playlists.filter((playlist) => selected.has(playlist.name));
 }
@@ -403,7 +439,9 @@ function writePlaylistFull(
       "-------------"
   );
   for (const clip of playlist.streamClips) {
-    if (clip.angleIndex > 1) continue;
+    if (clip.angleIndex > 1) {
+      continue;
+    }
     const lengthSeconds = clip.length / 45000.0;
     const timeInSeconds = clip.relativeTimeIn / 45000.0;
     const size = clipSize(clip);
@@ -469,7 +507,9 @@ function writeStreamTable(
   type: "video" | "audio" | "subtitle",
   labels: ReportLabels
 ) {
-  if (streams.length === 0) return;
+  if (streams.length === 0) {
+    return;
+  }
   line(out);
   line(out, title);
   line(out);
@@ -667,7 +707,9 @@ function streamReportTable(
   type: "summary" | "video" | "audio" | "subtitle",
   labels: ReportLabels
 ): ReportTable | null {
-  if (streams.length === 0) return null;
+  if (streams.length === 0) {
+    return null;
+  }
   if (type === "summary") {
     return {
       title,
@@ -710,7 +752,9 @@ function streamReportTable(
 }
 
 function addTableIfPresent(tables: ReportTable[], table: ReportTable | null) {
-  if (table) tables.push(table);
+  if (table) {
+    tables.push(table);
+  }
 }
 
 function playlistLengthSeconds(playlist: Protocol.PlaylistInfo): number {
@@ -725,7 +769,9 @@ function playlistTotalBitrateMbps(playlist: Protocol.PlaylistInfo): number {
 }
 
 function chapterReportTable(playlist: Protocol.PlaylistInfo, labels: ReportLabels): ReportTable | null {
-  if (playlist.chapters.length === 0) return null;
+  if (playlist.chapters.length === 0) {
+    return null;
+  }
   const totalLengthSeconds = playlistLengthSeconds(playlist);
   return {
     headers: [
@@ -933,11 +979,15 @@ export function generateFullReportDocument(
     addTableIfPresent(streamTables, streamReportTable(labels.audio, playlist.audioStreams, "audio", labels));
     addTableIfPresent(streamTables, streamReportTable(labels.subtitles, playlist.graphicsStreams, "subtitle", labels));
     addTableIfPresent(streamTables, streamReportTable(labels.text, playlist.textStreams, "subtitle", labels));
-    if (streamTables.length > 0) sections.push({ title: `${labels.streams}: ${playlist.name}`, tables: streamTables });
+    if (streamTables.length > 0) {
+      sections.push({ title: `${labels.streams}: ${playlist.name}`, tables: streamTables });
+    }
 
     sections.push({ title: `${labels.files}: ${playlist.name}`, tables: [filesReportTable(playlist, labels)] });
     const chapters = chapterReportTable(playlist, labels);
-    if (chapters) sections.push({ title: `${labels.chapters}: ${playlist.name}`, tables: [chapters] });
+    if (chapters) {
+      sections.push({ title: `${labels.chapters}: ${playlist.name}`, tables: [chapters] });
+    }
   }
 
   return { title: labels.fullReport, sections };

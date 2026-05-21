@@ -97,7 +97,9 @@ export default function Config() {
   // of the UI re-themes and re-translates without waiting for the debounced
   // disk save.
   useEffect(() => {
-    if (!isInitializedRef.current || !draft || !config) return;
+    if (!isInitializedRef.current || !draft || !config) {
+      return;
+    }
     if (
       draft.displayMode !== config.displayMode ||
       draft.theme !== config.theme ||
@@ -114,14 +116,18 @@ export default function Config() {
 
   // Apply i18n language change immediately.
   useEffect(() => {
-    if (!isInitializedRef.current || !draft) return;
+    if (!isInitializedRef.current || !draft) {
+      return;
+    }
     changeLanguage(draft.language);
   }, [draft?.language]);
 
   // Auto-save: persist the entire draft to disk shortly after any change.
   // Debounced so text-input edits don't write on every keystroke.
   useEffect(() => {
-    if (!isInitializedRef.current || !draft) return;
+    if (!isInitializedRef.current || !draft) {
+      return;
+    }
     const handle = setTimeout(async () => {
       try {
         const saved = await saveConfig(draft);
@@ -140,7 +146,9 @@ export default function Config() {
   // macOS and return a corrected path; mirror that into the draft when it
   // happens so the user sees the resolved location.
   useEffect(() => {
-    if (!isInitializedRef.current || !draft) return;
+    if (!isInitializedRef.current || !draft) {
+      return;
+    }
     const path = draft.mkv?.mkvToolNixPath ?? "";
     if (mkvToolNixCheckDebounceRef.current) {
       clearTimeout(mkvToolNixCheckDebounceRef.current);
@@ -162,7 +170,9 @@ export default function Config() {
           }
         }
       } catch {
-        if (!isCancelled) setMkvtoolnixFound(false);
+        if (!isCancelled) {
+          setMkvtoolnixFound(false);
+        }
       }
     }, 250);
     return () => {
@@ -175,7 +185,9 @@ export default function Config() {
 
   // Validate the configured MPC-HC path (Windows only).
   useEffect(() => {
-    if (!isInitializedRef.current || !draft || !isWindows) return;
+    if (!isInitializedRef.current || !draft || !isWindows) {
+      return;
+    }
     const path = draft.mpchc?.path ?? "";
     if (mpcHcCheckDebounceRef.current) {
       clearTimeout(mpcHcCheckDebounceRef.current);
@@ -191,7 +203,9 @@ export default function Config() {
           }
         }
       } catch {
-        if (!isCancelled) setMpcHcFound(false);
+        if (!isCancelled) {
+          setMpcHcFound(false);
+        }
       }
     }, 250);
     return () => {
@@ -205,7 +219,9 @@ export default function Config() {
   // Validate the configured BetterMediaInfo path. Mirrors the same debounce +
   // auto-correct pattern used for MKVToolNix above.
   useEffect(() => {
-    if (!isInitializedRef.current || !draft) return;
+    if (!isInitializedRef.current || !draft) {
+      return;
+    }
     const path = draft.betterMediaInfo?.path ?? "";
     if (betterMediaInfoCheckDebounceRef.current) {
       clearTimeout(betterMediaInfoCheckDebounceRef.current);
@@ -223,7 +239,9 @@ export default function Config() {
           }
         }
       } catch {
-        if (!isCancelled) setBetterMediaInfoFound(false);
+        if (!isCancelled) {
+          setBetterMediaInfoFound(false);
+        }
       }
     }, 250);
     return () => {

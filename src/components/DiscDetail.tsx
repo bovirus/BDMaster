@@ -64,7 +64,9 @@ type StreamSortKey = "name" | "index" | "length" | "fileSize" | "measuredSize";
 type SortDir = "asc" | "desc";
 
 function formatHMS(totalSeconds: number): string {
-  if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "00:00:00";
+  if (!Number.isFinite(totalSeconds) || totalSeconds < 0) {
+    return "00:00:00";
+  }
   const total = Math.max(0, Math.floor(totalSeconds));
   const s = total % 60;
   const m = Math.floor(total / 60) % 60;
@@ -81,7 +83,9 @@ function stableSort<T>(items: T[], comparator: (a: T, b: T) => number): T[] {
   const arr = items.map((item, idx) => [item, idx] as const);
   arr.sort((a, b) => {
     const r = comparator(a[0], b[0]);
-    if (r !== 0) return r;
+    if (r !== 0) {
+      return r;
+    }
     return a[1] - b[1];
   });
   return arr.map((x) => x[0]);
@@ -215,10 +219,14 @@ export default function DiscDetail() {
     const path = config?.mkv?.mkvToolNixPath ?? "";
     isMkvtoolnixFound(path.trim())
       .then((status) => {
-        if (!cancelled) setMkvtoolnixAvailable(status.found);
+        if (!cancelled) {
+          setMkvtoolnixAvailable(status.found);
+        }
       })
       .catch(() => {
-        if (!cancelled) setMkvtoolnixAvailable(false);
+        if (!cancelled) {
+          setMkvtoolnixAvailable(false);
+        }
       });
     return () => {
       cancelled = true;
@@ -231,10 +239,14 @@ export default function DiscDetail() {
     const path = config?.betterMediaInfo?.path ?? "";
     isBetterMediaInfoFound(path.trim())
       .then((status) => {
-        if (!cancelled) setBetterMediaInfoAvailable(status.found);
+        if (!cancelled) {
+          setBetterMediaInfoAvailable(status.found);
+        }
       })
       .catch(() => {
-        if (!cancelled) setBetterMediaInfoAvailable(false);
+        if (!cancelled) {
+          setBetterMediaInfoAvailable(false);
+        }
       });
     return () => {
       cancelled = true;
@@ -247,10 +259,14 @@ export default function DiscDetail() {
     const path = config?.mpchc?.path ?? "";
     isMpcHcFound(path.trim())
       .then((status) => {
-        if (!cancelled) setMpcHcAvailable(status.found);
+        if (!cancelled) {
+          setMpcHcAvailable(status.found);
+        }
       })
       .catch(() => {
-        if (!cancelled) setMpcHcAvailable(false);
+        if (!cancelled) {
+          setMpcHcAvailable(false);
+        }
       });
     return () => {
       cancelled = true;
@@ -328,8 +344,12 @@ export default function DiscDetail() {
   }, [setFullScanProgress, setDisc, setFullScanCompletedFor, setDialogNotification, stopPolling, t]);
 
   const handleScan = useCallback(async () => {
-    if (!disc) return;
-    if (isScanning || scanComplete) return;
+    if (!disc) {
+      return;
+    }
+    if (isScanning || scanComplete) {
+      return;
+    }
     lastVersionRef.current = 0;
     expectedPathRef.current = disc.path;
     try {
@@ -362,17 +382,25 @@ export default function DiscDetail() {
   // Resume polling on mount (e.g. after a frontend reload) if the backend
   // is still in the middle of a scan for the currently displayed disc.
   useEffect(() => {
-    if (!disc) return;
+    if (!disc) {
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
         const p = await getScanProgress();
-        if (cancelled || !p.isRunning) return;
-        if (p.path && p.path !== disc.path) return;
+        if (cancelled || !p.isRunning) {
+          return;
+        }
+        if (p.path && p.path !== disc.path) {
+          return;
+        }
         expectedPathRef.current = disc.path;
         lastVersionRef.current = 0;
         setFullScanProgress(p);
-        if (p.disc) setDisc(p.disc);
+        if (p.disc) {
+          setDisc(p.disc);
+        }
         stopPolling();
         pollTimerRef.current = window.setInterval(tick, 1000);
       } catch {
@@ -393,13 +421,17 @@ export default function DiscDetail() {
     config?.discInfoSplit ?? 0.5
   );
   useEffect(() => {
-    if (config) setSplitFraction(config.discInfoSplit ?? 0.5);
+    if (config) {
+      setSplitFraction(config.discInfoSplit ?? 0.5);
+    }
   }, [config?.discInfoSplit]);
 
   const draggingRef = useRef(false);
   const persistSplit = useCallback(
     (fraction: number) => {
-      if (!config) return;
+      if (!config) {
+        return;
+      }
       const next = { ...config, discInfoSplit: fraction };
       saveConfig(next)
         .then((saved) => setConfigState(saved))
@@ -416,7 +448,9 @@ export default function DiscDetail() {
       draggingRef.current = true;
       const onMove = (ev: MouseEvent) => {
         const rect = containerRef.current?.getBoundingClientRect();
-        if (!rect || !draggingRef.current) return;
+        if (!rect || !draggingRef.current) {
+          return;
+        }
         const y = ev.clientY - rect.top;
         const fraction = Math.max(0.1, Math.min(0.9, y / rect.height));
         setSplitFraction(fraction);
@@ -478,12 +512,16 @@ export default function DiscDetail() {
     config?.infoPanelSplit ?? 0.4
   );
   useEffect(() => {
-    if (config) setInfoSplitFraction(config.infoPanelSplit ?? 0.4);
+    if (config) {
+      setInfoSplitFraction(config.infoPanelSplit ?? 0.4);
+    }
   }, [config?.infoPanelSplit]);
   const infoDraggingRef = useRef(false);
   const persistInfoSplit = useCallback(
     (fraction: number) => {
-      if (!config) return;
+      if (!config) {
+        return;
+      }
       const next = { ...config, infoPanelSplit: fraction };
       saveConfig(next)
         .then((saved) => setConfigState(saved))
@@ -497,7 +535,9 @@ export default function DiscDetail() {
       infoDraggingRef.current = true;
       const onMove = (ev: MouseEvent) => {
         const rect = infoPanelRef.current?.getBoundingClientRect();
-        if (!rect || !infoDraggingRef.current) return;
+        if (!rect || !infoDraggingRef.current) {
+          return;
+        }
         const x = ev.clientX - rect.left;
         const fraction = Math.max(0.1, Math.min(0.9, x / rect.width));
         setInfoSplitFraction(fraction);
@@ -520,7 +560,9 @@ export default function DiscDetail() {
   const openTab = useAppStore((s) => s.openTab);
   const handleOpenPlaylistTab = (name: string) => openTab(Protocol.TabType.Playlist, name);
   const handleOpenInMkvToolNixGui = async (name: string) => {
-    if (!disc) return;
+    if (!disc) {
+      return;
+    }
     try {
       await openPlaylistInMkvToolNixGui(disc.path, name);
     } catch (err) {
@@ -535,7 +577,9 @@ export default function DiscDetail() {
     }
   };
   const handleOpenInBetterMediaInfo = async (name: string) => {
-    if (!disc) return;
+    if (!disc) {
+      return;
+    }
     try {
       await openPlaylistInBetterMediaInfo(disc.path, name);
     } catch (err) {
@@ -550,7 +594,9 @@ export default function DiscDetail() {
     }
   };
   const handleOpenStreamInMkvToolNixGui = async (name: string) => {
-    if (!disc) return;
+    if (!disc) {
+      return;
+    }
     try {
       await openStreamFileInMkvToolNixGui(disc.path, name);
     } catch (err) {
@@ -565,7 +611,9 @@ export default function DiscDetail() {
     }
   };
   const handleOpenStreamInBetterMediaInfo = async (name: string) => {
-    if (!disc) return;
+    if (!disc) {
+      return;
+    }
     try {
       await openStreamFileInBetterMediaInfo(disc.path, name);
     } catch (err) {
@@ -580,7 +628,9 @@ export default function DiscDetail() {
     }
   };
   const handleOpenInMpcHc = async (name: string) => {
-    if (!disc) return;
+    if (!disc) {
+      return;
+    }
     try {
       await openPlaylistInMpcHc(disc.path, name);
     } catch (err) {
@@ -595,7 +645,9 @@ export default function DiscDetail() {
     }
   };
   const handleOpenStreamInMpcHc = async (name: string) => {
-    if (!disc) return;
+    if (!disc) {
+      return;
+    }
     try {
       await openStreamFileInMpcHc(disc.path, name);
     } catch (err) {
@@ -611,31 +663,43 @@ export default function DiscDetail() {
   };
 
   const sortedPlaylists = useMemo(() => {
-    if (!disc) return [];
+    if (!disc) {
+      return [];
+    }
     return stableSort(disc.playlists, comparePlaylists(sortKey, sortDir));
   }, [disc, sortKey, sortDir]);
 
   const handlePlaylistKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
-    if (sortedPlaylists.length === 0) return;
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") {
+      return;
+    }
+    if (sortedPlaylists.length === 0) {
+      return;
+    }
     e.preventDefault();
     const idx = sortedPlaylists.findIndex((p) => p.name === selectedPlaylist);
     const next =
       e.key === "ArrowDown"
         ? Math.min(sortedPlaylists.length - 1, (idx < 0 ? -1 : idx) + 1)
         : Math.max(0, idx < 0 ? 0 : idx - 1);
-    if (next !== idx) setSelectedPlaylist(sortedPlaylists[next].name);
+    if (next !== idx) {
+      setSelectedPlaylist(sortedPlaylists[next].name);
+    }
   };
 
   useEffect(() => {
-    if (!disc) return;
+    if (!disc) {
+      return;
+    }
     if (sortedPlaylists.length > 0 && !selectedPlaylist) {
       setSelectedPlaylist(sortedPlaylists[0].name);
     }
   }, [disc, sortedPlaylists, selectedPlaylist]);
 
   const playlist = useMemo(() => {
-    if (!disc || !selectedPlaylist) return null;
+    if (!disc || !selectedPlaylist) {
+      return null;
+    }
     return disc.playlists.find((p) => p.name === selectedPlaylist) ?? null;
   }, [disc, selectedPlaylist]);
 
@@ -1258,15 +1322,21 @@ function StreamClipTable({
   }, [selectedIndex]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
-    if (sorted.length === 0) return;
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") {
+      return;
+    }
+    if (sorted.length === 0) {
+      return;
+    }
     e.preventDefault();
     const current = selectedIndex ?? -1;
     const next =
       e.key === "ArrowDown"
         ? Math.min(sorted.length - 1, (current < 0 ? -1 : current) + 1)
         : Math.max(0, current < 0 ? 0 : current - 1);
-    if (next !== current) onSelectIndex(next);
+    if (next !== current) {
+      onSelectIndex(next);
+    }
   };
 
   if (sorted.length === 0) {

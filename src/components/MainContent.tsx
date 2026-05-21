@@ -200,7 +200,9 @@ export default function MainContent() {
         cancelFileDrop = value;
       });
     return () => {
-      if (cancelFileDrop) cancelFileDrop();
+      if (cancelFileDrop) {
+        cancelFileDrop();
+      }
     };
   }, []);
 
@@ -209,7 +211,9 @@ export default function MainContent() {
   // disc tree works.
   useEffect(() => {
     getLaunchArgs().then((args) => {
-      if (args.length > 0) scanDiscPaths(args);
+      if (args.length > 0) {
+        scanDiscPaths(args);
+      }
     });
   }, []);
 

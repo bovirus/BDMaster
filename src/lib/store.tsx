@@ -142,7 +142,9 @@ export const useAppStore = create<AppState>((set) => ({
   closeTab: (index) =>
     set((state) => {
       // DiscInfo at index 0 is permanent.
-      if (index <= 0 || index >= state.openTabs.length) return {};
+      if (index <= 0 || index >= state.openTabs.length) {
+        return {};
+      }
       const nextTabs = state.openTabs.filter((_, i) => i !== index);
       let nextActive = state.activeTabIndex;
       if (nextActive === index) {
@@ -155,7 +157,9 @@ export const useAppStore = create<AppState>((set) => ({
 
   setActiveTabIndex: (activeTabIndex) =>
     set((state) => {
-      if (activeTabIndex < 0 || activeTabIndex >= state.openTabs.length) return {};
+      if (activeTabIndex < 0 || activeTabIndex >= state.openTabs.length) {
+        return {};
+      }
       return { activeTabIndex };
     }),
 }));

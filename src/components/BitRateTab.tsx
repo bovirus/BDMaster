@@ -37,7 +37,9 @@ export default function BitRateTab({ playlistName }: { playlistName: string | nu
   const disc = useAppStore((s) => s.disc);
 
   const playlist = useMemo(() => {
-    if (!disc || !playlistName) return null;
+    if (!disc || !playlistName) {
+      return null;
+    }
     return disc.playlists.find((p) => p.name === playlistName) ?? null;
   }, [disc, playlistName]);
 
@@ -114,10 +116,14 @@ function BitRateChart({ playlistName, data }: { playlistName: string; data: Char
 
   const handleSaveChart = useCallback(async () => {
     const chart = chartRef.current?.getEchartsInstance();
-    if (!chart) return;
+    if (!chart) {
+      return;
+    }
     try {
       const filePath = await openSaveChartDialog(`${stripExtension(playlistName)}-bitrate.png`);
-      if (!filePath) return;
+      if (!filePath) {
+        return;
+      }
 
       const dataUrl = chart.getDataURL({
         type: "png",
@@ -196,7 +202,9 @@ function BitRateChart({ playlistName, data }: { playlistName: string; data: Char
           const rows = items
             .map((item) => {
               const value = pointValue(item.value);
-              if (!value) return "";
+              if (!value) {
+                return "";
+              }
               const marker = typeof item.marker === "string" ? item.marker : "";
               return `${marker}${item.seriesName ?? ""}: ${bitrateFormatter(value[1])}`;
             })
@@ -348,6 +356,8 @@ function stripExtension(fileName: string): string {
 }
 
 function trimChartNumber(value: number): string {
-  if (!Number.isFinite(value)) return "0";
+  if (!Number.isFinite(value)) {
+    return "0";
+  }
   return value.toFixed(value >= 100 ? 0 : 2).replace(/\.?0+$/, "");
 }
