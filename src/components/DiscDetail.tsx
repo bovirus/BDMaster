@@ -443,6 +443,21 @@ export default function DiscDetail() {
     config?.formatting?.bitRate?.precision ?? Protocol.FormatPrecision.Two;
   const bitRateUnit = config?.formatting?.bitRate?.unit ?? Protocol.FormatUnit.KMGT;
   const [selectedPlaylist, setSelectedPlaylist] = useState<string | null>(null);
+  const [selectedStreamIndex, setSelectedStreamIndex] = useState<number | null>(null);
+  // Reset stream selection when the user picks a different playlist so the
+  // first arrow press starts from row 0 instead of an index that may no
+  // longer exist in the new clip list.
+  useEffect(() => {
+    setSelectedStreamIndex(null);
+  }, [selectedPlaylist]);
+
+  // Scroll the currently selected playlist row into view as the selection
+  // moves under arrow-key navigation.
+  const playlistPaperRef = useRef<HTMLDivElement | null>(null);
+  const selectedPlaylistRowRef = useRef<HTMLTableRowElement | null>(null);
+  useEffect(() => {
+    selectedPlaylistRowRef.current?.scrollIntoView({ block: "nearest" });
+  }, [selectedPlaylist]);
 
   // Sort state for the Stream (clip) table inside the info panel.
   const [streamSortKey, setStreamSortKey] = useState<StreamSortKey>("index");
@@ -599,6 +614,18 @@ export default function DiscDetail() {
     if (!disc) return [];
     return stableSort(disc.playlists, comparePlaylists(sortKey, sortDir));
   }, [disc, sortKey, sortDir]);
+
+  const handlePlaylistKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    if (sortedPlaylists.length === 0) return;
+    e.preventDefault();
+    const idx = sortedPlaylists.findIndex((p) => p.name === selectedPlaylist);
+    const next =
+      e.key === "ArrowDown"
+        ? Math.min(sortedPlaylists.length - 1, (idx < 0 ? -1 : idx) + 1)
+        : Math.max(0, idx < 0 ? 0 : idx - 1);
+    if (next !== idx) setSelectedPlaylist(sortedPlaylists[next].name);
+  };
 
   useEffect(() => {
     if (!disc) return;
@@ -779,11 +806,15 @@ export default function DiscDetail() {
         {/* Playlist list (full row) */}
         <Paper
           variant="outlined"
+          ref={playlistPaperRef}
+          tabIndex={0}
+          onKeyDown={handlePlaylistKeyDown}
           sx={{
             overflow: "auto",
             minHeight: 0,
             minWidth: 0,
             flex: `0 0 ${(splitFraction * 100).toFixed(2)}%`,
+            outline: "none",
           }}
         >
           <TableContainer>
@@ -889,9 +920,16 @@ export default function DiscDetail() {
                 {sortedPlaylists.map((p) => (
                   <TableRow
                     key={p.name}
+                    ref={p.name === selectedPlaylist ? selectedPlaylistRowRef : null}
                     hover
                     selected={p.name === selectedPlaylist}
-                    onClick={() => setSelectedPlaylist(p.name)}
+                    onClick={() => {
+                      setSelectedPlaylist(p.name);
+                      // Pull focus back onto the table so the next arrow
+                      // press is captured here, not by whatever inner
+                      // element (link, button) received the click.
+                      playlistPaperRef.current?.focus();
+                    }}
                     sx={{ cursor: "pointer" }}
                   >
                     <TableCell>
@@ -1084,6 +1122,8 @@ export default function DiscDetail() {
                   onOpenInMkvToolNixGui={handleOpenStreamInMkvToolNixGui}
                   onOpenInBetterMediaInfo={handleOpenStreamInBetterMediaInfo}
                   onOpenInMpcHc={handleOpenStreamInMpcHc}
+                  selectedIndex={selectedStreamIndex}
+                  onSelectIndex={setSelectedStreamIndex}
                 />
               </Paper>
 
@@ -1159,6 +1199,8 @@ function StreamClipTable({
   onOpenInMkvToolNixGui,
   onOpenInBetterMediaInfo,
   onOpenInMpcHc,
+  selectedIndex,
+  onSelectIndex,
 }: {
   clips: Protocol.PlaylistStreamClipInfo[];
   sortKey: StreamSortKey;
@@ -1172,6 +1214,8 @@ function StreamClipTable({
   onOpenInMkvToolNixGui: (name: string) => void;
   onOpenInBetterMediaInfo: (name: string) => void;
   onOpenInMpcHc: (name: string) => void;
+  selectedIndex: number | null;
+  onSelectIndex: (index: number) => void;
 }) {
   const { t } = useTranslation();
   const showActionsColumn =
@@ -1207,6 +1251,24 @@ function StreamClipTable({
     });
   }, [angle0, sortKey, sortDir]);
 
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const selectedRowRef = useRef<HTMLTableRowElement | null>(null);
+  useEffect(() => {
+    selectedRowRef.current?.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex]);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    if (sorted.length === 0) return;
+    e.preventDefault();
+    const current = selectedIndex ?? -1;
+    const next =
+      e.key === "ArrowDown"
+        ? Math.min(sorted.length - 1, (current < 0 ? -1 : current) + 1)
+        : Math.max(0, current < 0 ? 0 : current - 1);
+    if (next !== current) onSelectIndex(next);
+  };
+
   if (sorted.length === 0) {
     return (
       <Typography variant="body2" color="text.secondary" sx={{ p: 1 }}>
@@ -1215,7 +1277,12 @@ function StreamClipTable({
     );
   }
   return (
-    <TableContainer>
+    <TableContainer
+      ref={containerRef}
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
+      sx={{ outline: "none" }}
+    >
       <Table size="small" stickyHeader>
         <TableHead>
           <TableRow>
@@ -1265,8 +1332,20 @@ function StreamClipTable({
           </TableRow>
         </TableHead>
         <TableBody>
-          {sorted.map(({ clip, index }) => (
-            <TableRow key={`${clip.name}-${index}`} hover>
+          {sorted.map(({ clip, index }, position) => (
+            <TableRow
+              key={`${clip.name}-${index}`}
+              ref={position === selectedIndex ? selectedRowRef : null}
+              hover
+              selected={position === selectedIndex}
+              onClick={() => {
+                onSelectIndex(position);
+                // Pull focus back onto the table for subsequent arrow
+                // navigation, mirroring the playlist table behavior.
+                containerRef.current?.focus();
+              }}
+              sx={{ cursor: "pointer" }}
+            >
               <TableCell>{clip.displayName}</TableCell>
               <TableCell align="right">{index}</TableCell>
               <TableCell>{formatLength45k(clip.length)}</TableCell>
