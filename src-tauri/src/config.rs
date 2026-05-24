@@ -15,6 +15,7 @@ use crate::constants::APP_NAME;
 static CONFIG: OnceLock<RwLock<Config>> = OnceLock::new();
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Config {
     #[serde(rename = "appendOnFileDrop")]
     pub append_on_file_drop: bool,
@@ -53,6 +54,7 @@ fn default_info_panel_split() -> f32 {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct ConfigFormatting {
     #[serde(rename = "bitRate", default)]
     pub bit_rate: ConfigBitRate,
@@ -70,6 +72,7 @@ impl Default for ConfigFormatting {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct ConfigBitRate {
     #[serde(default)]
     pub precision: FormatPrecision,
@@ -87,6 +90,7 @@ impl Default for ConfigBitRate {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct ConfigSize {
     #[serde(default)]
     pub precision: FormatPrecision,
@@ -154,6 +158,7 @@ impl Default for Config {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct ConfigMkv {
     #[serde(rename = "mkvToolNixPath", default = "ConfigMkv::default_mkv_toolnix_path")]
     pub mkv_toolnix_path: String,
@@ -180,6 +185,7 @@ impl Default for ConfigMkv {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct ConfigBetterMediaInfo {
     #[serde(default = "ConfigBetterMediaInfo::default_path")]
     pub path: String,
@@ -206,6 +212,7 @@ impl Default for ConfigBetterMediaInfo {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct ConfigMpcHc {
     #[serde(default = "ConfigMpcHc::default_path")]
     pub path: String,
@@ -230,6 +237,7 @@ impl Default for ConfigMpcHc {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct ConfigScan {
     #[serde(rename = "enableSsifSupport", default = "default_true")]
     pub enable_ssif_support: bool,
@@ -256,6 +264,7 @@ impl Default for ConfigScan {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct ConfigWindow {
     #[serde(default)]
     pub position: ConfigWindowPosition,
@@ -270,6 +279,7 @@ impl Default for ConfigWindow {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct ConfigWindowPosition {
     pub x: i32,
     pub y: i32,
@@ -282,6 +292,7 @@ impl Default for ConfigWindowPosition {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct ConfigWindowSize {
     pub width: u32,
     pub height: u32,
@@ -294,6 +305,7 @@ impl Default for ConfigWindowSize {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct ConfigUpdate {
     #[serde(rename = "checkInterval", default)]
     pub check_interval: UpdateCheckInterval,
@@ -506,4 +518,98 @@ pub fn set_config(config: Config) -> Result<()> {
         .unwrap()
         .clone_from(&config);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_deserialization_uses_defaults_for_missing_nodes() {
+        let config: Config = serde_json::from_str("{}").unwrap();
+
+        assert!(config.append_on_file_drop);
+        assert!(matches!(config.display_mode, DisplayMode::Auto));
+        assert!(matches!(config.theme, Theme::Ocean));
+        assert!(matches!(config.language, Language::EnUS));
+        assert!(config.scan.enable_ssif_support);
+        assert!(config.scan.filter_looping_playlists);
+        assert!(config.scan.filter_short_playlists);
+        assert_eq!(config.scan.filter_short_playlists_value, 20);
+        assert_eq!(config.disc_info_split, 0.5);
+        assert_eq!(config.info_panel_split, 0.4);
+        assert!(matches!(
+            config.formatting.bit_rate.precision,
+            FormatPrecision::Two
+        ));
+        assert!(matches!(config.formatting.bit_rate.unit, FormatUnit::KMGT));
+        assert_eq!(config.window.position.x, -1);
+        assert_eq!(config.window.position.y, -1);
+        assert_eq!(config.window.size.width, 1200);
+        assert_eq!(config.window.size.height, 900);
+        assert!(matches!(
+            config.update.check_interval,
+            UpdateCheckInterval::Weekly
+        ));
+    }
+
+    #[test]
+    fn config_deserialization_preserves_present_nodes_while_filling_missing_children() {
+        let config: Config = serde_json::from_str(
+            r#"{
+                "appendOnFileDrop": false,
+                "displayMode": "Dark",
+                "formatting": {
+                    "bitRate": {
+                        "unit": "KMi"
+                    }
+                },
+                "scan": {
+                    "filterShortPlaylistsValue": 30
+                },
+                "window": {
+                    "position": {
+                        "x": 10
+                    }
+                },
+                "update": {
+                    "lastVersion": "1.2.3"
+                },
+                "mkv": {},
+                "betterMediaInfo": {},
+                "mpchc": {}
+            }"#,
+        )
+        .unwrap();
+
+        assert!(!config.append_on_file_drop);
+        assert!(matches!(config.display_mode, DisplayMode::Dark));
+        assert!(matches!(config.formatting.bit_rate.unit, FormatUnit::KMi));
+        assert!(matches!(
+            config.formatting.bit_rate.precision,
+            FormatPrecision::Two
+        ));
+        assert!(matches!(config.formatting.size.unit, FormatUnit::KMGT));
+        assert!(config.scan.enable_ssif_support);
+        assert!(config.scan.filter_looping_playlists);
+        assert!(config.scan.filter_short_playlists);
+        assert_eq!(config.scan.filter_short_playlists_value, 30);
+        assert_eq!(config.window.position.x, 10);
+        assert_eq!(config.window.position.y, -1);
+        assert_eq!(config.window.size.width, 1200);
+        assert_eq!(config.update.last_version, "1.2.3");
+        assert!(matches!(
+            config.update.check_interval,
+            UpdateCheckInterval::Weekly
+        ));
+        assert_eq!(
+            config.mkv.mkv_toolnix_path,
+            ConfigMkv::default().mkv_toolnix_path
+        );
+        assert_eq!(
+            config.better_media_info.path,
+            ConfigBetterMediaInfo::default().path
+        );
+        assert_eq!(config.mpchc.path, ConfigMpcHc::default().path);
+    }
 }
