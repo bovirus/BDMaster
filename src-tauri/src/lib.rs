@@ -114,19 +114,24 @@ async fn is_mkvtoolnix_found(
 async fn open_playlist_in_mkvtoolnix_gui(
     disc_path: String,
     playlist_name: String,
+    to_path: Option<String>,
 ) -> Result<(), String> {
-    let resolved = bdrom::resolve_playlist_path(&disc_path, &playlist_name).map_err(convert_error)?;
-    mkvtoolnix::spawn_mkvtoolnix_gui(&resolved.to_string_lossy()).map_err(convert_error)
+    let resolved =
+        bdrom::resolve_playlist_path(&disc_path, &playlist_name).map_err(convert_error)?;
+    mkvtoolnix::spawn_mkvtoolnix_gui(&resolved, &disc_path, to_path.as_deref())
+        .map_err(convert_error)
 }
 
 #[tauri::command]
 async fn open_stream_file_in_mkvtoolnix_gui(
     disc_path: String,
     stream_name: String,
+    to_path: Option<String>,
 ) -> Result<(), String> {
     let resolved =
         bdrom::resolve_stream_file_path(&disc_path, &stream_name).map_err(convert_error)?;
-    mkvtoolnix::spawn_mkvtoolnix_gui(&resolved.to_string_lossy()).map_err(convert_error)
+    mkvtoolnix::spawn_mkvtoolnix_gui(&resolved, &disc_path, to_path.as_deref())
+        .map_err(convert_error)
 }
 
 #[tauri::command]

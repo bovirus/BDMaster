@@ -23,6 +23,7 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import MovieIcon from "@mui/icons-material/Movie";
 import AudiotrackIcon from "@mui/icons-material/Audiotrack";
 import SubtitlesIcon from "@mui/icons-material/Subtitles";
@@ -209,6 +210,7 @@ export default function DiscDetail() {
   const [mkvtoolnixAvailable, setMkvtoolnixAvailable] = useState(false);
   const [betterMediaInfoAvailable, setBetterMediaInfoAvailable] = useState(false);
   const [mpcHcAvailable, setMpcHcAvailable] = useState(false);
+  const [mkvToolNixToPath, setMkvToolNixToPath] = useState("");
 
   // Probe whether mkvtoolnix-gui is reachable at the configured path. Used to
   // decide whether the per-playlist "Open in MKVToolNix GUI" action shows up
@@ -232,6 +234,10 @@ export default function DiscDetail() {
       cancelled = true;
     };
   }, [config?.mkv?.mkvToolNixPath]);
+
+  useEffect(() => {
+    setMkvToolNixToPath(disc?.path ?? "");
+  }, [disc?.path]);
 
   // Same probe for BetterMediaInfo. Both feed into the Actions column gating.
   useEffect(() => {
@@ -559,21 +565,41 @@ export default function DiscDetail() {
 
   const openTab = useAppStore((s) => s.openTab);
   const handleOpenPlaylistTab = (name: string) => openTab(Protocol.TabType.Playlist, name);
+  const handleChooseMkvToolNixToPath = async () => {
+    if (!disc) {
+      return;
+    }
+    const directory = await openDialog({
+      directory: true,
+      multiple: false,
+      defaultPath: mkvToolNixToPath || disc.path,
+    });
+    if (typeof directory === "string") {
+      setMkvToolNixToPath(directory);
+    }
+  };
+  const reportMkvToolNixError = (err: unknown) => {
+    const raw = err == null ? "" : String(err);
+    const isNotConfigured = raw.includes("MKVTOOLNIX_GUI_NOT_AVAILABLE");
+    setDialogNotification({
+      title: isNotConfigured
+        ? t("disc.mkvToolNixGuiNotConfigured")
+        : t("disc.openInMkvToolNixGuiFailed", { message: raw }),
+      type: Protocol.DialogNotificationType.Error,
+    });
+  };
   const handleOpenInMkvToolNixGui = async (name: string) => {
     if (!disc) {
       return;
     }
     try {
-      await openPlaylistInMkvToolNixGui(disc.path, name);
+      await openPlaylistInMkvToolNixGui(
+        disc.path,
+        name,
+        mkvToolNixToPath || disc.path
+      );
     } catch (err) {
-      const raw = err == null ? "" : String(err);
-      const isNotConfigured = raw.includes("MKVTOOLNIX_GUI_NOT_AVAILABLE");
-      setDialogNotification({
-        title: isNotConfigured
-          ? t("disc.mkvToolNixGuiNotConfigured")
-          : t("disc.openInMkvToolNixGuiFailed", { message: raw }),
-        type: Protocol.DialogNotificationType.Error,
-      });
+      reportMkvToolNixError(err);
     }
   };
   const handleOpenInBetterMediaInfo = async (name: string) => {
@@ -598,16 +624,13 @@ export default function DiscDetail() {
       return;
     }
     try {
-      await openStreamFileInMkvToolNixGui(disc.path, name);
+      await openStreamFileInMkvToolNixGui(
+        disc.path,
+        name,
+        mkvToolNixToPath || disc.path
+      );
     } catch (err) {
-      const raw = err == null ? "" : String(err);
-      const isNotConfigured = raw.includes("MKVTOOLNIX_GUI_NOT_AVAILABLE");
-      setDialogNotification({
-        title: isNotConfigured
-          ? t("disc.mkvToolNixGuiNotConfigured")
-          : t("disc.openInMkvToolNixGuiFailed", { message: raw }),
-        type: Protocol.DialogNotificationType.Error,
-      });
+      reportMkvToolNixError(err);
     }
   };
   const handleOpenStreamInBetterMediaInfo = async (name: string) => {
@@ -742,19 +765,81 @@ export default function DiscDetail() {
             <Typography variant="h6" noWrap title={disc.discTitle || disc.discName}>
               {disc.discTitle || disc.discName}
             </Typography>
-            <Stack direction="row" spacing={3} sx={{ mt: 0.5, flexWrap: "wrap" }}>
-              <Typography variant="caption" title={disc.path} sx={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                <b>{t("disc.path")}:</b> {disc.path}
-              </Typography>
-              <Typography variant="caption">
-                <b>{t("disc.volume")}:</b> {disc.volumeLabel || "-"}
-              </Typography>
-              <Typography variant="caption">
-                <b>{t("disc.size")}:</b> {formatSize(disc.size, sizePrecision, sizeUnit)}
-              </Typography>
-              <Typography variant="caption">
-                <b>{t("disc.playlists")}:</b> {disc.playlists.length}
-              </Typography>
+            <Stack
+              direction="row"
+              spacing={3}
+              sx={{ mt: 0.5, flexWrap: "wrap", alignItems: "center" }}
+            >
+              <Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+                <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                  {t("disc.fromPath")}:
+                </Typography>
+                <Typography variant="caption">
+                  {disc.path}
+                </Typography>
+              </Stack>
+              <Stack direction="row" spacing={0} sx={{ alignItems: "center" }}>
+                <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                  {t("disc.toPath")}:
+                </Typography>
+                <Tooltip title={t("disc.changeOutputPathTooltip")}>
+                  <Box
+                    component="button"
+                    type="button"
+                    aria-label={t("disc.changeOutputPathTooltip")}
+                    onClick={handleChooseMkvToolNixToPath}
+                    sx={{
+                      alignItems: "center",
+                      display: "inherit",
+                      lineHeight: "inherit",
+                      m: 0,
+                      px: 0.5,
+                      py: 0,
+                      border: 0,
+                      borderRadius: 0.5,
+                      color: "primary.main",
+                      bgcolor: "transparent",
+                      cursor: "pointer",
+                      font: "inherit",
+                      fontSize: "caption.fontSize",
+                      overflow: "hidden",
+                      textAlign: "left",
+                      textOverflow: "ellipsis",
+                      verticalAlign: "baseline",
+                      whiteSpace: "nowrap",
+                      "&:hover": {
+                        bgcolor: "action.hover",
+                      },
+                    }}
+                  >
+                    {mkvToolNixToPath || disc.path}
+                  </Box>
+                </Tooltip>
+              </Stack>
+              <Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+                <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                  {t("disc.volume")}:
+                </Typography>
+                <Typography variant="caption">
+                  {disc.volumeLabel || "-"}
+                </Typography>
+              </Stack>
+              <Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+                <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                  {t("disc.size")}:
+                </Typography>
+                <Typography variant="caption">
+                  {formatSize(disc.size, sizePrecision, sizeUnit)}
+                </Typography>
+              </Stack>
+              <Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+                <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                  {t("disc.playlists")}:
+                </Typography>
+                <Typography variant="caption">
+                  {disc.playlists.length}
+                </Typography>
+              </Stack>
             </Stack>
           </Box>
           <Stack direction="row" spacing={0.5} sx={{ flexWrap: "wrap", gap: 0.5 }}>

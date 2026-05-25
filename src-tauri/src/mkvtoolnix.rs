@@ -6,9 +6,10 @@
 use anyhow::Result;
 #[cfg(target_os = "macos")]
 use std::cmp::Ordering;
-#[cfg(target_os = "macos")]
-use std::fs;
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::config;
 use crate::protocol::MkvToolNixStatus;
@@ -180,6 +181,119 @@ fn persist_mkvtoolnix_path_if_auto_detected(resolution: &MkvToolNixResolution) -
     Ok(())
 }
 
+fn normalized_path_string(path: &Path) -> String {
+    let text = path
+        .to_string_lossy()
+        .trim()
+        .trim_end_matches(|c| c == '/' || c == '\\')
+        .to_owned();
+    if cfg!(target_os = "windows") {
+        text.to_lowercase()
+    } else {
+        text
+    }
+}
+
+fn paths_equivalent(left: &Path, right: &Path) -> bool {
+    let left = left.canonicalize().unwrap_or_else(|_| left.to_path_buf());
+    let right = right.canonicalize().unwrap_or_else(|_| right.to_path_buf());
+    normalized_path_string(&left) == normalized_path_string(&right)
+}
+
+fn output_path(source_file: &Path, to_path: &str) -> Result<PathBuf> {
+    let file_stem = source_file
+        .file_stem()
+        .ok_or_else(|| anyhow::anyhow!("Source file has no file name: {}", source_file.display()))?
+        .to_string_lossy();
+    Ok(Path::new(to_path).join(format!("{file_stem}.mkv")))
+}
+
+fn optional_output_path(
+    source_file: &Path,
+    from_path: &str,
+    to_path: Option<&str>,
+) -> Result<Option<PathBuf>> {
+    let Some(to_path) = to_path.map(str::trim).filter(|p| !p.is_empty()) else {
+        return Ok(None);
+    };
+    if paths_equivalent(Path::new(from_path), Path::new(to_path)) {
+        return Ok(None);
+    }
+    Ok(Some(output_path(source_file, to_path)?))
+}
+
+fn write_gui_output_config(output: &Path) -> Result<PathBuf> {
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let output_dir = output.parent().filter(|p| !p.as_os_str().is_empty()).ok_or_else(|| {
+        anyhow::anyhow!("Output path has no parent directory: {}", output.display())
+    })?;
+    let config_path = output_dir.join(format!(
+        ".bdmaster-mkvtoolnix-{}-{timestamp}.mtxcfg",
+        std::process::id()
+    ));
+    let destination = output.to_string_lossy().to_string();
+    let destination_auto = output
+        .with_file_name(format!(
+            ".bdmaster-auto-destination-{}-{timestamp}.mkv",
+            std::process::id()
+        ))
+        .to_string_lossy()
+        .to_string();
+    let config = serde_json::json!({
+        "MKVToolNix GUI Settings": {
+            "version": 3,
+            "type": "MuxConfig"
+        },
+        "input": {
+            "files": {
+                "numberOfEntries": 0
+            },
+            "attachments": {
+                "numberOfEntries": 0
+            },
+            "trackOrder": [],
+            "firstInputFileName": ""
+        },
+        "global": {
+            "destination": destination,
+            "destinationAuto": destination_auto,
+            "destinationUniquenessSuffix": "",
+            "title": "",
+            "globalTags": "",
+            "segmentInfo": "",
+            "splitOptions": "",
+            "segmentUIDs": "",
+            "previousSegmentUID": "",
+            "nextSegmentUID": "",
+            "chapters": "",
+            "chapterTitleNumber": 1,
+            "chapterLanguage": "und",
+            "chapterCharacterSet": "",
+            "chapterDelay": "",
+            "chapterStretchBy": "",
+            "chapterCueNameFormat": "",
+            "additionalOptions": "",
+            "splitMode": 0,
+            "splitMaxFiles": 1,
+            "linkFiles": false,
+            "webmMode": false,
+            "stopAfterVideoEnds": false,
+            "chapterGenerationMode": 0,
+            "chapterGenerationNameTemplate": "Chapter <NUM:2>",
+            "chapterGenerationInterval": ""
+        }
+    });
+    serde_json::to_writer_pretty(File::create(&config_path)?, &config)?;
+    Ok(config_path)
+}
+
+fn remove_file_later(path: PathBuf) {
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(30));
+        let _ = fs::remove_file(path);
+    });
+}
+
 pub async fn is_mkvtoolnix_found(path: String, check_running: bool) -> Result<MkvToolNixStatus> {
     if check_running {
         if let Some(dir) = find_running_process_dir(mkvtoolnix_gui_process_name()) {
@@ -214,10 +328,16 @@ pub async fn is_mkvtoolnix_found(path: String, check_running: bool) -> Result<Mk
     })
 }
 
-pub fn spawn_mkvtoolnix_gui(file: &str) -> Result<()> {
-    let path = Path::new(file);
-    if !path.exists() {
-        return Err(anyhow::anyhow!("Path {} does not exist.", path.display()));
+pub fn spawn_mkvtoolnix_gui(
+    source_file: &Path,
+    from_path: &str,
+    to_path: Option<&str>,
+) -> Result<()> {
+    if !source_file.exists() {
+        return Err(anyhow::anyhow!(
+            "Path {} does not exist.",
+            source_file.display()
+        ));
     }
     let cfg = config::get_config();
     let resolution = resolve_mkvtoolnix(&cfg.mkv.mkv_toolnix_path, &["mkvtoolnix-gui"]);
@@ -229,8 +349,16 @@ pub fn spawn_mkvtoolnix_gui(file: &str) -> Result<()> {
     }
     persist_mkvtoolnix_path_if_auto_detected(&resolution)?;
     let gui_path = get_tool_path(&resolution.path, "mkvtoolnix-gui");
+    let output = optional_output_path(source_file, from_path, to_path)?;
+    let config_path = output
+        .as_deref()
+        .map(write_gui_output_config)
+        .transpose()?;
     let mut cmd = std::process::Command::new(&gui_path);
-    cmd.arg(file)
+    if let Some(config_path) = &config_path {
+        cmd.arg(config_path);
+    }
+    cmd.arg(source_file)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -239,8 +367,64 @@ pub fn spawn_mkvtoolnix_gui(file: &str) -> Result<()> {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
-    cmd.spawn().map_err(|e| {
+    let spawn_result = cmd.spawn().map(|_| ()).map_err(|e| {
         anyhow::anyhow!("MKVTOOLNIX_GUI_NOT_AVAILABLE:{}: {}", gui_path.display(), e)
-    })?;
-    Ok(())
+    });
+    match (spawn_result, config_path) {
+        (Ok(()), Some(config_path)) => {
+            remove_file_later(config_path);
+            Ok(())
+        }
+        (Ok(()), None) => Ok(()),
+        (Err(error), Some(config_path)) => {
+            let _ = fs::remove_file(config_path);
+            Err(error)
+        }
+        (Err(error), None) => Err(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_output_path_is_none_when_paths_match() {
+        let source_file = Path::new("BDMV").join("PLAYLIST").join("00001.mpls");
+
+        let output = optional_output_path(&source_file, "disc", Some("disc/")).unwrap();
+
+        assert!(output.is_none());
+    }
+
+    #[test]
+    fn optional_output_path_uses_to_path_and_source_file_stem() {
+        let source_file = Path::new("BDMV").join("STREAM").join("00002.m2ts");
+
+        let output = optional_output_path(&source_file, "disc", Some("output")).unwrap();
+
+        assert_eq!(output, Some(Path::new("output").join("00002.mkv")));
+    }
+
+    #[test]
+    fn gui_output_config_is_created_next_to_output_file() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let output_dir =
+            std::env::temp_dir().join(format!("bdmaster-mkvtoolnix-test-{timestamp}"));
+        fs::create_dir_all(&output_dir).unwrap();
+        let output = output_dir.join("00002.mkv");
+
+        let config_path = write_gui_output_config(&output).unwrap();
+
+        assert_eq!(config_path.parent(), Some(output_dir.as_path()));
+        assert!(config_path.exists());
+        let config = fs::read_to_string(&config_path).unwrap();
+        assert!(config.contains("\"chapterLanguage\": \"und\""));
+        assert!(config.contains("\"chapterGenerationNameTemplate\": \"Chapter <NUM:2>\""));
+        fs::remove_file(config_path).unwrap();
+        fs::remove_dir(output_dir).unwrap();
+    }
 }

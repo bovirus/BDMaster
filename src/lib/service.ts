@@ -66,21 +66,25 @@ export async function isMkvtoolnixFound(
 
 export async function openPlaylistInMkvToolNixGui(
   discPath: string,
-  playlistName: string
+  playlistName: string,
+  toPath: string | null = null
 ): Promise<void> {
   return await invoke<void>("open_playlist_in_mkvtoolnix_gui", {
     discPath,
     playlistName,
+    toPath,
   });
 }
 
 export async function openStreamFileInMkvToolNixGui(
   discPath: string,
-  streamName: string
+  streamName: string,
+  toPath: string | null = null
 ): Promise<void> {
   return await invoke<void>("open_stream_file_in_mkvtoolnix_gui", {
     discPath,
     streamName,
+    toPath,
   });
 }
 
