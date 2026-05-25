@@ -1,5 +1,9 @@
 # Release Notes
 
+## 0.3.0
+
+* Keyboard shortcuts for external tools: with a playlist selected, press **F9** (MKVToolNix GUI), **F10** (BetterMediaInfo), or **F11** (MPC-HC); with a stream selected, use **Ctrl+F9**, **Ctrl+F10**, or **Ctrl+F11**. The matching shortcut is shown in each action button's tooltip.
+
 ## 0.2.0
 
 * External tool integration: open a playlist or stream file directly in MPC-HC (Windows).

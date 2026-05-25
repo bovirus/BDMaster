@@ -45,12 +45,7 @@ export default function Toolbar() {
 
   useEffect(() => {
     const handleKeyUp = (event: KeyboardEvent) => {
-      if (!event.altKey && !event.ctrlKey && !event.shiftKey) {
-        if (event.key === "F10") {
-          event.stopPropagation();
-          handleSelectTabSettings();
-        }
-      } else if (event.ctrlKey && !event.altKey && !event.shiftKey) {
+      if (event.ctrlKey && !event.altKey && !event.shiftKey) {
         if (event.key === "q") {
           event.stopPropagation();
           handleClear();
@@ -59,7 +54,7 @@ export default function Toolbar() {
     };
     document.addEventListener("keyup", handleKeyUp);
     return () => document.removeEventListener("keyup", handleKeyUp);
-  }, [handleClear, handleSelectTabSettings]);
+  }, [handleClear]);
 
   const buttonSx = { width: 28, height: 28, margin: "2px", borderRadius: 1 };
   const activeButtonSx = { ...buttonSx, color: "primary.main" };

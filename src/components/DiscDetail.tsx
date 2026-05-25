@@ -670,20 +670,37 @@ export default function DiscDetail() {
   }, [disc, sortKey, sortDir]);
 
   const handlePlaylistKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") {
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      if (sortedPlaylists.length === 0) {
+        return;
+      }
+      e.preventDefault();
+      const idx = sortedPlaylists.findIndex((p) => p.name === selectedPlaylist);
+      const next =
+        e.key === "ArrowDown"
+          ? Math.min(sortedPlaylists.length - 1, (idx < 0 ? -1 : idx) + 1)
+          : Math.max(0, idx < 0 ? 0 : idx - 1);
+      if (next !== idx) {
+        setSelectedPlaylist(sortedPlaylists[next].name);
+      }
       return;
     }
-    if (sortedPlaylists.length === 0) {
+    // F9 / F10 / F11 open the selected playlist in MKVToolNix GUI /
+    // BetterMediaInfo / MPC-HC respectively, mirroring the Actions-column
+    // icon buttons (and gated on the same availability flags). Modifiers
+    // are excluded so these don't collide with the stream table's Ctrl+F*.
+    if (e.ctrlKey || e.altKey || e.shiftKey || e.metaKey || !selectedPlaylist) {
       return;
     }
-    e.preventDefault();
-    const idx = sortedPlaylists.findIndex((p) => p.name === selectedPlaylist);
-    const next =
-      e.key === "ArrowDown"
-        ? Math.min(sortedPlaylists.length - 1, (idx < 0 ? -1 : idx) + 1)
-        : Math.max(0, idx < 0 ? 0 : idx - 1);
-    if (next !== idx) {
-      setSelectedPlaylist(sortedPlaylists[next].name);
+    if (e.key === "F9" && showMkvToolNixButton) {
+      e.preventDefault();
+      handleOpenInMkvToolNixGui(selectedPlaylist);
+    } else if (e.key === "F10" && showBetterMediaInfoButton) {
+      e.preventDefault();
+      handleOpenInBetterMediaInfo(selectedPlaylist);
+    } else if (e.key === "F11" && showMpcHcButton) {
+      e.preventDefault();
+      handleOpenInMpcHc(selectedPlaylist);
     }
   };
 
@@ -1045,7 +1062,7 @@ export default function DiscDetail() {
                       <TableCell align="center" padding="none">
                         <Stack direction="row" spacing={0.5} sx={{ justifyContent: "center", alignItems: "center" }}>
                           {showMkvToolNixButton && (
-                            <Tooltip title={t("disc.openInMkvToolNixGui")}>
+                            <Tooltip title={`${t("disc.openInMkvToolNixGui")} (F9)`}>
                               <IconButton
                                 size="small"
                                 sx={{ p: 0 }}
@@ -1064,7 +1081,7 @@ export default function DiscDetail() {
                             </Tooltip>
                           )}
                           {showBetterMediaInfoButton && (
-                            <Tooltip title={t("disc.openInBetterMediaInfo")}>
+                            <Tooltip title={`${t("disc.openInBetterMediaInfo")} (F10)`}>
                               <IconButton
                                 size="small"
                                 sx={{ p: 0 }}
@@ -1083,7 +1100,7 @@ export default function DiscDetail() {
                             </Tooltip>
                           )}
                           {showMpcHcButton && (
-                            <Tooltip title={t("disc.openInMpcHc")}>
+                            <Tooltip title={`${t("disc.openInMpcHc")} (F11)`}>
                               <IconButton
                                 size="small"
                                 sx={{ p: 0 }}
@@ -1322,20 +1339,40 @@ function StreamClipTable({
   }, [selectedIndex]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") {
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      if (sorted.length === 0) {
+        return;
+      }
+      e.preventDefault();
+      const current = selectedIndex ?? -1;
+      const next =
+        e.key === "ArrowDown"
+          ? Math.min(sorted.length - 1, (current < 0 ? -1 : current) + 1)
+          : Math.max(0, current < 0 ? 0 : current - 1);
+      if (next !== current) {
+        onSelectIndex(next);
+      }
       return;
     }
-    if (sorted.length === 0) {
+    // Ctrl+F9 / Ctrl+F10 / Ctrl+F11 open the selected stream in MKVToolNix
+    // GUI / BetterMediaInfo / MPC-HC respectively, mirroring the
+    // Actions-column icon buttons (and gated on the same availability flags).
+    if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey || selectedIndex === null) {
       return;
     }
-    e.preventDefault();
-    const current = selectedIndex ?? -1;
-    const next =
-      e.key === "ArrowDown"
-        ? Math.min(sorted.length - 1, (current < 0 ? -1 : current) + 1)
-        : Math.max(0, current < 0 ? 0 : current - 1);
-    if (next !== current) {
-      onSelectIndex(next);
+    const selected = sorted[selectedIndex];
+    if (!selected) {
+      return;
+    }
+    if (e.key === "F9" && showMkvToolNixButton) {
+      e.preventDefault();
+      onOpenInMkvToolNixGui(selected.clip.name);
+    } else if (e.key === "F10" && showBetterMediaInfoButton) {
+      e.preventDefault();
+      onOpenInBetterMediaInfo(selected.clip.name);
+    } else if (e.key === "F11" && showMpcHcButton) {
+      e.preventDefault();
+      onOpenInMpcHc(selected.clip.name);
     }
   };
 
@@ -1435,7 +1472,7 @@ function StreamClipTable({
                     sx={{ justifyContent: "center", alignItems: "center" }}
                   >
                     {showMkvToolNixButton && (
-                      <Tooltip title={t("disc.openInMkvToolNixGui")}>
+                      <Tooltip title={`${t("disc.openInMkvToolNixGui")} (Ctrl+F9)`}>
                         <IconButton
                           size="small"
                           sx={{ p: 0 }}
@@ -1451,7 +1488,7 @@ function StreamClipTable({
                       </Tooltip>
                     )}
                     {showBetterMediaInfoButton && (
-                      <Tooltip title={t("disc.openInBetterMediaInfo")}>
+                      <Tooltip title={`${t("disc.openInBetterMediaInfo")} (Ctrl+F10)`}>
                         <IconButton
                           size="small"
                           sx={{ p: 0 }}
@@ -1467,7 +1504,7 @@ function StreamClipTable({
                       </Tooltip>
                     )}
                     {showMpcHcButton && (
-                      <Tooltip title={t("disc.openInMpcHc")}>
+                      <Tooltip title={`${t("disc.openInMpcHc")} (Ctrl+F11)`}>
                         <IconButton
                           size="small"
                           sx={{ p: 0 }}
