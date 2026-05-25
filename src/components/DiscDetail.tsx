@@ -772,7 +772,7 @@ export default function DiscDetail() {
             >
               <Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
                 <Typography variant="caption" sx={{ fontWeight: 600 }}>
-                  {t("disc.fromPath")}:
+                  {t("disc.path")}:
                 </Typography>
                 <Typography variant="caption">
                   {disc.path}
@@ -780,7 +780,7 @@ export default function DiscDetail() {
               </Stack>
               <Stack direction="row" spacing={0} sx={{ alignItems: "center" }}>
                 <Typography variant="caption" sx={{ fontWeight: 600 }}>
-                  {t("disc.toPath")}:
+                  {t("disc.outputPath")}:
                 </Typography>
                 <Tooltip title={t("disc.changeOutputPathTooltip")}>
                   <Box
