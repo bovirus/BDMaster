@@ -2,7 +2,7 @@
   "toolbar": {
     "addDisc": "Agregar carpeta de disco",
     "clear": "Limpiar (Ctrl + Q)",
-    "settings": "Configuración (F10)",
+    "settings": "Configuración",
     "about": "Acerca de",
     "addDisk": "Agregar disco",
     "addDiskFolder": "Agregar carpeta de disco"

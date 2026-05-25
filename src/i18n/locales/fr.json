@@ -2,7 +2,7 @@
   "toolbar": {
     "addDisc": "Ajouter un dossier de disque",
     "clear": "Effacer (Ctrl + Q)",
-    "settings": "Paramètres (F10)",
+    "settings": "Paramètres",
     "about": "À propos",
     "addDisk": "Ajouter un disque",
     "addDiskFolder": "Ajouter un dossier de disque"

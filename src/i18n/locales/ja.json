@@ -2,7 +2,7 @@
   "toolbar": {
     "addDisc": "ディスクフォルダーを追加",
     "clear": "クリア (Ctrl + Q)",
-    "settings": "設定 (F10)",
+    "settings": "設定",
     "about": "情報",
     "addDisk": "ディスクを追加",
     "addDiskFolder": "ディスクフォルダーを追加"
