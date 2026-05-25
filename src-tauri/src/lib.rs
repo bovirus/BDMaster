@@ -9,6 +9,16 @@ use tauri::Manager;
 
 static WINDOW_READY: AtomicBool = AtomicBool::new(false);
 
+#[cfg(target_os = "linux")]
+fn configure_linux_webkit_renderer() {
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        // SAFETY: This runs during process startup before Tauri spawns threads.
+        unsafe {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
+}
+
 mod bdrom;
 mod bettermediainfo;
 mod config;
@@ -179,6 +189,9 @@ async fn open_stream_file_in_mpchc(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    configure_linux_webkit_renderer();
+
     env_logger::init();
 
     tauri::Builder::default()
