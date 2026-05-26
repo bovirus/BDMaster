@@ -27,6 +27,7 @@ mod controller;
 mod mkvtoolnix;
 mod mpchc;
 mod protocol;
+mod template;
 
 use protocol::{FullScanState, ScanProgressInfo, UpdateCheckResult, UpdateCheckState};
 
@@ -118,7 +119,15 @@ async fn open_playlist_in_mkvtoolnix_gui(
 ) -> Result<(), String> {
     let resolved =
         bdrom::resolve_playlist_path(&disc_path, &playlist_name).map_err(convert_error)?;
-    mkvtoolnix::spawn_mkvtoolnix_gui(&resolved, &disc_path, to_path.as_deref())
+    // Only parse the disc for stream-derived placeholders when the configured
+    // template actually references them; the default `{file_name}` doesn't.
+    let template = config::get_config().integration.mkv.output_file_template;
+    let values = if template::template_needs_stream_values(&template) {
+        template::playlist_template_values(&disc_path, &playlist_name).unwrap_or_default()
+    } else {
+        Default::default()
+    };
+    mkvtoolnix::spawn_mkvtoolnix_gui(&resolved, &disc_path, to_path.as_deref(), &values)
         .map_err(convert_error)
 }
 
@@ -130,7 +139,13 @@ async fn open_stream_file_in_mkvtoolnix_gui(
 ) -> Result<(), String> {
     let resolved =
         bdrom::resolve_stream_file_path(&disc_path, &stream_name).map_err(convert_error)?;
-    mkvtoolnix::spawn_mkvtoolnix_gui(&resolved, &disc_path, to_path.as_deref())
+    let template = config::get_config().integration.mkv.output_file_template;
+    let values = if template::template_needs_stream_values(&template) {
+        template::stream_template_values(&disc_path, &stream_name).unwrap_or_default()
+    } else {
+        Default::default()
+    };
+    mkvtoolnix::spawn_mkvtoolnix_gui(&resolved, &disc_path, to_path.as_deref(), &values)
         .map_err(convert_error)
 }
 

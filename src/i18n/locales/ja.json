@@ -123,7 +123,8 @@
     "elapsed": "経過",
     "remaining": "残り",
     "reportCopied": "レポートをクリップボードにコピーしました。",
-    "savedTo": "{{path}} に保存しました"
+    "savedTo": "{{path}} に保存しました",
+    "outputDirNotWritable": "出力フォルダーに書き込めません：{{path}}"
   },
   "settings": {
     "title": "設定",
@@ -188,7 +189,9 @@
     "checkNewVersion": "新バージョンを確認",
     "daily": "毎日",
     "weekly": "毎週",
-    "monthly": "毎月"
+    "monthly": "毎月",
+    "outputFileTemplate": "出力ファイルテンプレート",
+    "placeholderVariables": "プレースホルダー変数："
   },
   "about": {
     "tagline": "Blu-ray ディスクを検査するためのモダンなデスクトップ GUI",

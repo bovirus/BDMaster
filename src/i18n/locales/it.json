@@ -123,7 +123,8 @@
     "elapsed": "Trascorso",
     "remaining": "Rimanente",
     "reportCopied": "Rapporto copiato negli appunti.",
-    "savedTo": "Salvato in {{path}}"
+    "savedTo": "Salvato in {{path}}",
+    "outputDirNotWritable": "La cartella di output non è scrivibile: {{path}}"
   },
   "settings": {
     "title": "Impostazioni",
@@ -188,7 +189,9 @@
     "checkNewVersion": "Verifica aggiornamenti",
     "daily": "Ogni giorno",
     "weekly": "Ogni settimana",
-    "monthly": "Ogni mese"
+    "monthly": "Ogni mese",
+    "outputFileTemplate": "Modello file di output",
+    "placeholderVariables": "Variabili segnaposto:"
   },
   "about": {
     "tagline": "Una GUI desktop moderna per analizzare i dischi Blu-ray",

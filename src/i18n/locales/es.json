@@ -123,7 +123,8 @@
     "elapsed": "Transcurrido",
     "remaining": "Restante",
     "reportCopied": "Informe copiado al portapapeles.",
-    "savedTo": "Guardado en {{path}}"
+    "savedTo": "Guardado en {{path}}",
+    "outputDirNotWritable": "La carpeta de salida no admite escritura: {{path}}"
   },
   "settings": {
     "title": "Configuración",
@@ -188,7 +189,9 @@
     "checkNewVersion": "Comprobar nueva versión",
     "daily": "Diario",
     "weekly": "Semanal",
-    "monthly": "Mensual"
+    "monthly": "Mensual",
+    "outputFileTemplate": "Plantilla de archivo de salida",
+    "placeholderVariables": "Variables de marcador de posición:"
   },
   "about": {
     "tagline": "Una interfaz de escritorio moderna para inspeccionar discos Blu-ray",

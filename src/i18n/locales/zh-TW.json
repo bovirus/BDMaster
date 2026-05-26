@@ -123,7 +123,8 @@
     "elapsed": "已用時",
     "remaining": "剩餘",
     "reportCopied": "報告已複製到剪貼簿。",
-    "savedTo": "已儲存到 {{path}}"
+    "savedTo": "已儲存到 {{path}}",
+    "outputDirNotWritable": "輸出資料夾無法寫入：{{path}}"
   },
   "settings": {
     "title": "設定",
@@ -188,7 +189,9 @@
     "checkNewVersion": "檢查新版本",
     "daily": "每天",
     "weekly": "每週",
-    "monthly": "每月"
+    "monthly": "每月",
+    "outputFileTemplate": "輸出檔案範本",
+    "placeholderVariables": "佔位符變數："
   },
   "about": {
     "tagline": "現代化的藍光光碟檢查工具",

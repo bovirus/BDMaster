@@ -123,7 +123,8 @@
     "elapsed": "Elapsed",
     "remaining": "Remaining",
     "reportCopied": "Report copied to clipboard.",
-    "savedTo": "Saved to {{path}}"
+    "savedTo": "Saved to {{path}}",
+    "outputDirNotWritable": "The output folder is not writable: {{path}}"
   },
   "settings": {
     "title": "Settings",
@@ -188,7 +189,9 @@
     "checkNewVersion": "Check New Version",
     "daily": "Daily",
     "weekly": "Weekly",
-    "monthly": "Monthly"
+    "monthly": "Monthly",
+    "outputFileTemplate": "Output file template",
+    "placeholderVariables": "Placeholder variables:"
   },
   "about": {
     "tagline": "A modern desktop GUI for inspecting Blu-ray discs",

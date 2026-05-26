@@ -51,6 +51,11 @@ enum ConfigTab {
   Update = "Update",
 }
 
+// Placeholder variables supported by the MKV output file template. These are
+// literal tokens, so they are intentionally not translated.
+const MKV_OUTPUT_TEMPLATE_VARIABLES =
+  "{file_name}, {video_count}, {video_codec_1}, {audio_count}, {audio_codec_1}, {text_count}, {text_codec_1}";
+
 function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
   return (
     <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
@@ -183,7 +188,7 @@ export default function Config() {
                     ...d,
                     integration: {
                       ...d.integration,
-                      mkv: { mkvToolNixPath: status.mkvToolNixPath },
+                      mkv: { ...d.integration.mkv, mkvToolNixPath: status.mkvToolNixPath },
                     },
                   }
                 : d
@@ -728,6 +733,20 @@ export default function Config() {
               {mkvtoolnixFound
                 ? t("settings.mkvtoolnixFound")
                 : t("settings.mkvtoolnixNotFound")}
+            </Typography>
+          </Box>
+          <Box sx={{ py: 1 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              {t("settings.outputFileTemplate")}
+            </Typography>
+            <TextField
+              value={draft.integration.mkv?.outputFileTemplate ?? ""}
+              onChange={(e) => updateMkv({ outputFileTemplate: e.target.value })}
+              size="small"
+              fullWidth
+            />
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.75, display: "block" }}>
+              {t("settings.placeholderVariables")} {MKV_OUTPUT_TEMPLATE_VARIABLES}
             </Typography>
           </Box>
         </Paper>

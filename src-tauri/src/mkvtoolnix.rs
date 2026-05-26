@@ -13,6 +13,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::config;
 use crate::protocol::MkvToolNixStatus;
+use crate::template::{render_output_file_name, StreamTemplateValues};
 
 fn mkvtoolnix_gui_process_name() -> &'static str {
     if cfg!(target_os = "windows") {
@@ -181,56 +182,109 @@ fn persist_mkvtoolnix_path_if_auto_detected(resolution: &MkvToolNixResolution) -
     Ok(())
 }
 
-fn normalized_path_string(path: &Path) -> String {
-    let text = path
-        .to_string_lossy()
-        .trim()
-        .trim_end_matches(|c| c == '/' || c == '\\')
-        .to_owned();
-    if cfg!(target_os = "windows") {
-        text.to_lowercase()
-    } else {
-        text
-    }
-}
-
-fn paths_equivalent(left: &Path, right: &Path) -> bool {
-    let left = left.canonicalize().unwrap_or_else(|_| left.to_path_buf());
-    let right = right.canonicalize().unwrap_or_else(|_| right.to_path_buf());
-    normalized_path_string(&left) == normalized_path_string(&right)
-}
-
-fn output_path(source_file: &Path, to_path: &str) -> Result<PathBuf> {
+fn output_path(
+    source_file: &Path,
+    to_path: &str,
+    template: &str,
+    values: &StreamTemplateValues,
+) -> Result<PathBuf> {
     let file_stem = source_file
         .file_stem()
         .ok_or_else(|| anyhow::anyhow!("Source file has no file name: {}", source_file.display()))?
         .to_string_lossy();
-    Ok(Path::new(to_path).join(format!("{file_stem}.mkv")))
+    // The rendered name is a base file name without extension; mkvmerge always
+    // produces Matroska, so the output extension is always `.mkv`. Fall back to
+    // the source stem when the template renders to an empty name so we never
+    // produce a bare ".mkv".
+    let rendered = render_output_file_name(template, &file_stem, values);
+    let base_name = if rendered.trim().is_empty() {
+        file_stem.into_owned()
+    } else {
+        rendered
+    };
+    Ok(Path::new(to_path).join(format!("{base_name}.mkv")))
 }
 
-fn optional_output_path(
+/// Resolve the muxed output path. The output directory defaults to the source
+/// (disc) path when the caller hasn't chosen a separate one, so the templated
+/// output file name is always applied — it is never skipped just because the
+/// chosen directory matches the disc.
+fn resolve_output_path(
     source_file: &Path,
     from_path: &str,
     to_path: Option<&str>,
-) -> Result<Option<PathBuf>> {
-    let Some(to_path) = to_path.map(str::trim).filter(|p| !p.is_empty()) else {
-        return Ok(None);
+    template: &str,
+    values: &StreamTemplateValues,
+) -> Result<PathBuf> {
+    let to_path = to_path
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .unwrap_or(from_path);
+    output_path(source_file, to_path, template, values)
+}
+
+/// The transient MKVToolNix GUI hand-off config is written into the output
+/// directory as `.bdm{n}.mtxcfg`, where `{n}` is a process-wide atomic counter.
+const CONFIG_FILE_PREFIX: &str = ".bdm";
+const CONFIG_FILE_SUFFIX: &str = ".mtxcfg";
+/// A hand-off config is safe to delete once it's older than this — MKVToolNix
+/// reads it at startup, well within the window.
+const CONFIG_STALE_SECS: u64 = 10;
+
+static CONFIG_FILE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Delete hand-off configs (`.bdm*.mtxcfg`) in `dir` older than
+/// `CONFIG_STALE_SECS` by creation time. Returns how many matching configs are
+/// still present afterwards (young ones, or any that couldn't be removed yet).
+fn remove_stale_configs(dir: &Path) -> usize {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
     };
-    if paths_equivalent(Path::new(from_path), Path::new(to_path)) {
-        return Ok(None);
+    let now = SystemTime::now();
+    let mut remaining = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !(name.starts_with(CONFIG_FILE_PREFIX) && name.ends_with(CONFIG_FILE_SUFFIX)) {
+            continue;
+        }
+        let old_enough = entry
+            .metadata()
+            .and_then(|m| m.created().or_else(|_| m.modified()))
+            .ok()
+            .and_then(|created| now.duration_since(created).ok())
+            .map(|age| age.as_secs() >= CONFIG_STALE_SECS)
+            .unwrap_or(false);
+        if old_enough && fs::remove_file(entry.path()).is_ok() {
+            continue;
+        }
+        remaining += 1;
     }
-    Ok(Some(output_path(source_file, to_path)?))
+    remaining
+}
+
+/// Background cleanup: poll the output directory and remove our `.bdm*.mtxcfg`
+/// hand-off configs once they age past `CONFIG_STALE_SECS`, until none remain.
+/// Bounded so the thread can't run forever if a file stays locked.
+fn schedule_config_cleanup(dir: PathBuf) {
+    thread::spawn(move || {
+        for _ in 0..12 {
+            thread::sleep(Duration::from_secs(5));
+            if remove_stale_configs(&dir) == 0 {
+                break;
+            }
+        }
+    });
 }
 
 fn write_gui_output_config(output: &Path) -> Result<PathBuf> {
+    let output_dir = output
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!("Output path has no parent directory: {}", output.display())
+        })?;
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-    let output_dir = output.parent().filter(|p| !p.as_os_str().is_empty()).ok_or_else(|| {
-        anyhow::anyhow!("Output path has no parent directory: {}", output.display())
-    })?;
-    let config_path = output_dir.join(format!(
-        ".bdmaster-mkvtoolnix-{}-{timestamp}.mtxcfg",
-        std::process::id()
-    ));
     let destination = output.to_string_lossy().to_string();
     let destination_auto = output
         .with_file_name(format!(
@@ -283,15 +337,15 @@ fn write_gui_output_config(output: &Path) -> Result<PathBuf> {
             "chapterGenerationInterval": ""
         }
     });
-    serde_json::to_writer_pretty(File::create(&config_path)?, &config)?;
+    // The hand-off config lives in the output directory as `.bdm{n}.mtxcfg`.
+    // Creating it here doubles as the writability check: a failure (e.g. a
+    // read-only mounted disc) surfaces a translatable error to the UI.
+    let number = CONFIG_FILE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let config_path = output_dir.join(format!("{CONFIG_FILE_PREFIX}{number}{CONFIG_FILE_SUFFIX}"));
+    let file = File::create(&config_path)
+        .map_err(|_| anyhow::anyhow!("OUTPUT_DIR_NOT_WRITABLE:{}", output_dir.display()))?;
+    serde_json::to_writer_pretty(file, &config)?;
     Ok(config_path)
-}
-
-fn remove_file_later(path: PathBuf) {
-    thread::spawn(move || {
-        thread::sleep(Duration::from_secs(30));
-        let _ = fs::remove_file(path);
-    });
 }
 
 pub async fn is_mkvtoolnix_found(path: String, check_running: bool) -> Result<MkvToolNixStatus> {
@@ -332,6 +386,7 @@ pub fn spawn_mkvtoolnix_gui(
     source_file: &Path,
     from_path: &str,
     to_path: Option<&str>,
+    values: &StreamTemplateValues,
 ) -> Result<()> {
     if !source_file.exists() {
         return Err(anyhow::anyhow!(
@@ -349,16 +404,19 @@ pub fn spawn_mkvtoolnix_gui(
     }
     persist_mkvtoolnix_path_if_auto_detected(&resolution)?;
     let gui_path = get_tool_path(&resolution.path, "mkvtoolnix-gui");
-    let output = optional_output_path(source_file, from_path, to_path)?;
-    let config_path = output
-        .as_deref()
-        .map(write_gui_output_config)
-        .transpose()?;
+    let output = resolve_output_path(
+        source_file,
+        from_path,
+        to_path,
+        &cfg.integration.mkv.output_file_template,
+        values,
+    )?;
+    // Writing the hand-off config into the output directory also acts as the
+    // writability check: a failure surfaces a translatable error to the UI.
+    let config_path = write_gui_output_config(&output)?;
     let mut cmd = std::process::Command::new(&gui_path);
-    if let Some(config_path) = &config_path {
-        cmd.arg(config_path);
-    }
-    cmd.arg(source_file)
+    cmd.arg(&config_path)
+        .arg(source_file)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -370,17 +428,18 @@ pub fn spawn_mkvtoolnix_gui(
     let spawn_result = cmd.spawn().map(|_| ()).map_err(|e| {
         anyhow::anyhow!("MKVTOOLNIX_GUI_NOT_AVAILABLE:{}: {}", gui_path.display(), e)
     });
-    match (spawn_result, config_path) {
-        (Ok(()), Some(config_path)) => {
-            remove_file_later(config_path);
+    match spawn_result {
+        Ok(()) => {
+            // Clean up the hand-off config in the background once it ages out.
+            if let Some(dir) = config_path.parent() {
+                schedule_config_cleanup(dir.to_path_buf());
+            }
             Ok(())
         }
-        (Ok(()), None) => Ok(()),
-        (Err(error), Some(config_path)) => {
-            let _ = fs::remove_file(config_path);
+        Err(error) => {
+            let _ = fs::remove_file(&config_path);
             Err(error)
         }
-        (Err(error), None) => Err(error),
     }
 }
 
@@ -389,42 +448,168 @@ mod tests {
     use super::*;
 
     #[test]
-    fn optional_output_path_is_none_when_paths_match() {
+    fn resolve_output_path_defaults_to_source_path_when_to_path_matches() {
         let source_file = Path::new("BDMV").join("PLAYLIST").join("00001.mpls");
 
-        let output = optional_output_path(&source_file, "disc", Some("disc/")).unwrap();
+        // No separate output directory chosen (to_path == from_path): the
+        // template is still applied and the file lands in the disc path.
+        let output = resolve_output_path(
+            &source_file,
+            "disc",
+            Some("disc"),
+            "{file_name}",
+            &StreamTemplateValues::default(),
+        )
+        .unwrap();
 
-        assert!(output.is_none());
+        assert_eq!(output, Path::new("disc").join("00001.mkv"));
     }
 
     #[test]
-    fn optional_output_path_uses_to_path_and_source_file_stem() {
+    fn resolve_output_path_defaults_to_source_path_when_to_path_missing() {
+        let source_file = Path::new("BDMV").join("PLAYLIST").join("00001.mpls");
+
+        let output = resolve_output_path(
+            &source_file,
+            "disc",
+            None,
+            "{file_name}",
+            &StreamTemplateValues::default(),
+        )
+        .unwrap();
+
+        assert_eq!(output, Path::new("disc").join("00001.mkv"));
+    }
+
+    #[test]
+    fn resolve_output_path_uses_to_path_and_source_file_stem() {
         let source_file = Path::new("BDMV").join("STREAM").join("00002.m2ts");
 
-        let output = optional_output_path(&source_file, "disc", Some("output")).unwrap();
+        let output = resolve_output_path(
+            &source_file,
+            "disc",
+            Some("output"),
+            "{file_name}",
+            &StreamTemplateValues::default(),
+        )
+        .unwrap();
 
-        assert_eq!(output, Some(Path::new("output").join("00002.mkv")));
+        assert_eq!(output, Path::new("output").join("00002.mkv"));
     }
 
     #[test]
-    fn gui_output_config_is_created_next_to_output_file() {
+    fn resolve_output_path_renders_stream_placeholders() {
+        let source_file = Path::new("BDMV").join("PLAYLIST").join("00001.mpls");
+        let values = StreamTemplateValues {
+            video_count: 1,
+            video_codec_1: "HEVC".to_owned(),
+            audio_count: 2,
+            ..StreamTemplateValues::default()
+        };
+
+        let output = resolve_output_path(
+            &source_file,
+            "disc",
+            Some("output"),
+            "{file_name}-{video_codec_1}-{audio_count}ch",
+            &values,
+        )
+        .unwrap();
+
+        assert_eq!(output, Path::new("output").join("00001-HEVC-2ch.mkv"));
+    }
+
+    #[test]
+    fn output_path_falls_back_to_stem_when_template_renders_empty() {
+        let source_file = Path::new("BDMV").join("STREAM").join("00002.m2ts");
+
+        let output =
+            output_path(&source_file, "output", "", &StreamTemplateValues::default()).unwrap();
+
+        assert_eq!(output, Path::new("output").join("00002.mkv"));
+    }
+
+    #[test]
+    fn output_path_appends_mkv_to_rendered_base_name() {
+        let source_file = Path::new("BDMV").join("PLAYLIST").join("00001.mpls");
+        let values = StreamTemplateValues::default();
+
+        // `{file_name}` is the source stem (no extension); `.mkv` is appended.
+        assert_eq!(
+            output_path(&source_file, "out", "{file_name}", &values).unwrap(),
+            Path::new("out").join("00001.mkv")
+        );
+        // Whatever literal text the template adds is kept verbatim before `.mkv`.
+        assert_eq!(
+            output_path(&source_file, "out", "{file_name}.abc", &values).unwrap(),
+            Path::new("out").join("00001.abc.mkv")
+        );
+    }
+
+    #[test]
+    fn gui_output_config_is_created_in_output_dir() {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let output_dir =
-            std::env::temp_dir().join(format!("bdmaster-mkvtoolnix-test-{timestamp}"));
+        let output_dir = std::env::temp_dir().join(format!("bdmaster-mkvtoolnix-test-{timestamp}"));
         fs::create_dir_all(&output_dir).unwrap();
         let output = output_dir.join("00002.mkv");
 
         let config_path = write_gui_output_config(&output).unwrap();
 
+        // The hand-off config lives in the output directory, named `.bdm{n}.mtxcfg`.
         assert_eq!(config_path.parent(), Some(output_dir.as_path()));
+        let name = config_path.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with(".bdm") && name.ends_with(".mtxcfg"), "name was {name}");
         assert!(config_path.exists());
         let config = fs::read_to_string(&config_path).unwrap();
+        // Destination still points at the real (absolute) output file.
+        assert!(config.contains("00002.mkv"));
         assert!(config.contains("\"chapterLanguage\": \"und\""));
         assert!(config.contains("\"chapterGenerationNameTemplate\": \"Chapter <NUM:2>\""));
         fs::remove_file(config_path).unwrap();
         fs::remove_dir(output_dir).unwrap();
+    }
+
+    #[test]
+    fn write_gui_output_config_reports_unwritable_output_dir() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        // A directory that doesn't exist can't be written to.
+        let missing = std::env::temp_dir().join(format!("bdmaster-missing-{timestamp}"));
+        let output = missing.join("00002.mkv");
+
+        let error = write_gui_output_config(&output).unwrap_err();
+
+        assert!(error.to_string().contains("OUTPUT_DIR_NOT_WRITABLE"));
+    }
+
+    #[test]
+    fn remove_stale_configs_keeps_fresh_and_ignores_other_files() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("bdmaster-cleanup-test-{timestamp}"));
+        fs::create_dir_all(&dir).unwrap();
+        // A freshly written config is younger than the stale window, so it's kept.
+        let fresh = dir.join(".bdm0.mtxcfg");
+        fs::write(&fresh, b"{}").unwrap();
+        // A non-matching file must never be touched.
+        let other = dir.join("keep.txt");
+        fs::write(&other, b"x").unwrap();
+
+        let remaining = remove_stale_configs(&dir);
+
+        assert_eq!(remaining, 1);
+        assert!(fresh.exists());
+        assert!(other.exists());
+
+        fs::remove_file(fresh).unwrap();
+        fs::remove_file(other).unwrap();
+        fs::remove_dir(dir).unwrap();
     }
 }

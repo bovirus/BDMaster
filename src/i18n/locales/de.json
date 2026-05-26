@@ -123,7 +123,8 @@
     "elapsed": "Verstrichen",
     "remaining": "Verbleibend",
     "reportCopied": "Bericht wurde in die Zwischenablage kopiert.",
-    "savedTo": "Gespeichert unter {{path}}"
+    "savedTo": "Gespeichert unter {{path}}",
+    "outputDirNotWritable": "Der Ausgabeordner ist nicht beschreibbar: {{path}}"
   },
   "settings": {
     "title": "Einstellungen",
@@ -188,7 +189,9 @@
     "checkNewVersion": "Neue Version prüfen",
     "daily": "Täglich",
     "weekly": "Wöchentlich",
-    "monthly": "Monatlich"
+    "monthly": "Monatlich",
+    "outputFileTemplate": "Ausgabedateivorlage",
+    "placeholderVariables": "Platzhaltervariablen:"
   },
   "about": {
     "tagline": "Eine moderne Desktop-Oberfläche zum Untersuchen von Blu-ray-Discs",

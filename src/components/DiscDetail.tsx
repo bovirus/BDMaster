@@ -580,6 +580,16 @@ export default function DiscDetail() {
   };
   const reportMkvToolNixError = (err: unknown) => {
     const raw = err == null ? "" : String(err);
+    const notWritablePrefix = "OUTPUT_DIR_NOT_WRITABLE:";
+    const notWritableIndex = raw.indexOf(notWritablePrefix);
+    if (notWritableIndex >= 0) {
+      const path = raw.slice(notWritableIndex + notWritablePrefix.length).trim();
+      setDialogNotification({
+        title: t("disc.outputDirNotWritable", { path }),
+        type: Protocol.DialogNotificationType.Error,
+      });
+      return;
+    }
     const isNotConfigured = raw.includes("MKVTOOLNIX_GUI_NOT_AVAILABLE");
     setDialogNotification({
       title: isNotConfigured

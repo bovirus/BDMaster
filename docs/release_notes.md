@@ -3,6 +3,7 @@
 ## 0.3.0
 
 * Keyboard shortcuts for external tools: with a playlist selected, press **F9** (MKVToolNix GUI), **F10** (BetterMediaInfo), or **F11** (MPC-HC); with a stream selected, use **Ctrl+F9**, **Ctrl+F10**, or **Ctrl+F11**. The matching shortcut is shown in each action button's tooltip.
+* MKVToolNix output file template: customize the muxed output file name in **Settings → Integration → MKV**. A parser-based template engine substitutes placeholder variables — `{file_name}`, `{video_count}`, `{video_codec_1}`, `{audio_count}`, `{audio_codec_1}`, `{text_count}`, `{text_codec_1}` — with the actual values of the selected playlist or stream. The output file always uses the `.mkv` extension.
 
 ## 0.2.0
 

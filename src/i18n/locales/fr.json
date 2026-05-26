@@ -123,7 +123,8 @@
     "elapsed": "Écoulé",
     "remaining": "Restant",
     "reportCopied": "Rapport copié dans le presse-papiers.",
-    "savedTo": "Enregistré dans {{path}}"
+    "savedTo": "Enregistré dans {{path}}",
+    "outputDirNotWritable": "Le dossier de sortie n’est pas accessible en écriture : {{path}}"
   },
   "settings": {
     "title": "Paramètres",
@@ -188,7 +189,9 @@
     "checkNewVersion": "Vérifier nouvelle version",
     "daily": "Quotidien",
     "weekly": "Hebdomadaire",
-    "monthly": "Mensuel"
+    "monthly": "Mensuel",
+    "outputFileTemplate": "Modèle de fichier de sortie",
+    "placeholderVariables": "Variables d’espace réservé :"
   },
   "about": {
     "tagline": "Une interface de bureau moderne pour inspecter les disques Blu-ray",

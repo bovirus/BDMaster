@@ -189,6 +189,8 @@ impl Default for ConfigIntegration {
 pub struct ConfigMkv {
     #[serde(rename = "mkvToolNixPath", default = "ConfigMkv::default_mkv_toolnix_path")]
     pub mkv_toolnix_path: String,
+    #[serde(rename = "outputFileTemplate", default = "ConfigMkv::default_output_file_template")]
+    pub output_file_template: String,
 }
 
 impl ConfigMkv {
@@ -201,12 +203,17 @@ impl ConfigMkv {
             "/usr/bin".to_owned()
         }
     }
+
+    fn default_output_file_template() -> String {
+        "{file_name}".to_owned()
+    }
 }
 
 impl Default for ConfigMkv {
     fn default() -> Self {
         Self {
             mkv_toolnix_path: Self::default_mkv_toolnix_path(),
+            output_file_template: Self::default_output_file_template(),
         }
     }
 }
@@ -690,5 +697,18 @@ mod tests {
         assert!(json.get("betterMediaInfo").is_none());
         assert!(json.get("mpchc").is_none());
         assert!(json.get("integration").is_some());
+    }
+
+    #[test]
+    fn mkv_output_file_template_defaults_and_deserializes() {
+        let defaulted: ConfigMkv = serde_json::from_str("{}").unwrap();
+        assert_eq!(defaulted.output_file_template, "{file_name}");
+
+        let custom: ConfigMkv =
+            serde_json::from_str(r#"{ "outputFileTemplate": "{file_name}-{video_codec_1}" }"#)
+                .unwrap();
+        assert_eq!(custom.output_file_template, "{file_name}-{video_codec_1}");
+        // Unrelated fields still fall back to their defaults.
+        assert_eq!(custom.mkv_toolnix_path, ConfigMkv::default().mkv_toolnix_path);
     }
 }

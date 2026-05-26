@@ -69,6 +69,7 @@ export interface ConfigUpdate {
 
 export interface ConfigMkv {
   mkvToolNixPath: string;
+  outputFileTemplate: string;
 }
 
 export interface MkvToolNixStatus {
