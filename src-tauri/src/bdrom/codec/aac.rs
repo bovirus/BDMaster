@@ -92,3 +92,97 @@ pub fn scan(stream: &mut TSStreamInfo, buffer: &mut TSStreamBuffer) {
     stream.is_vbr = true;
     stream.is_initialized = true;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bdrom::types::TSStreamType;
+
+    /// Pack an ADTS fixed header (28 bits, sync forced valid) MSB-aligned into 4
+    /// bytes, matching the parser's read order.
+    fn adts_header(version: u32, profile: u32, sr_idx: u32, channel_mode: u32) -> Vec<u8> {
+        let mut h: u32 = 0;
+        h = (h << 12) | 0xFFF; // sync (12 bits)
+        h = (h << 1) | (version & 0x1);
+        h = (h << 2) | 0; // layer
+        h = (h << 1) | 1; // protection_absent
+        h = (h << 2) | (profile & 0x3);
+        h = (h << 4) | (sr_idx & 0xF);
+        h = (h << 1) | 0; // private
+        h = (h << 3) | (channel_mode & 0x7);
+        h = (h << 1) | 0; // original
+        h = (h << 1) | 0; // home
+        (h << 4).to_be_bytes().to_vec()
+    }
+
+    fn aac_stream() -> TSStreamInfo {
+        TSStreamInfo::new(0x1100, TSStreamType::MPEG2Video as u8)
+    }
+
+    #[test]
+    fn invalid_sync_word_is_rejected() {
+        let mut stream = aac_stream();
+        let data = vec![0x00, 0x00, 0x00, 0x00];
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert!(!stream.is_initialized);
+    }
+
+    #[test]
+    fn aac_profile_table_matches_bdinfo() {
+        assert_eq!(aac_profile(0), "AAC Main");
+        assert_eq!(aac_profile(1), "AAC LC");
+        assert_eq!(aac_profile(2), "AAC SSR");
+        assert_eq!(aac_profile(3), "AAC LTP");
+        assert_eq!(aac_profile(16), "ER AAC LC");
+        assert_eq!(aac_profile(18), "ER AAC LTP");
+        assert_eq!(aac_profile(36), "SLS");
+        assert_eq!(aac_profile(99), "");
+    }
+
+    #[test]
+    fn full_samplerate_and_channel_matrix_matches_tables() {
+        for version in 0..2u32 {
+            for profile in 0..4u32 {
+                for sr_idx in 0..16u32 {
+                    for cm in 0..8u32 {
+                        let data = adts_header(version, profile, sr_idx, cm);
+                        let mut stream = aac_stream();
+                        let mut buffer = TSStreamBuffer::new(&data);
+                        scan(&mut stream, &mut buffer);
+                        assert!(stream.is_initialized);
+                        assert!(stream.is_vbr);
+
+                        let expected_sr = if sr_idx <= 13 {
+                            AAC_SAMPLE_RATES[sr_idx as usize]
+                        } else {
+                            0
+                        };
+                        assert_eq!(stream.sample_rate, expected_sr, "sr_idx {sr_idx}");
+
+                        let mut expected_ch = AAC_CHANNELS[cm as usize];
+                        let expected_lfe = if cm == 7 {
+                            if expected_ch > 0 {
+                                expected_ch -= 1;
+                            }
+                            1
+                        } else {
+                            0
+                        };
+                        assert_eq!(stream.channel_count, expected_ch, "cm {cm}");
+                        assert_eq!(stream.lfe, expected_lfe, "cm {cm}");
+                        assert_eq!(
+                            stream.audio_mode,
+                            AAC_CHANNEL_MODES[cm as usize].label(),
+                            "cm {cm}"
+                        );
+                        assert_eq!(
+                            stream.codec_name,
+                            format!("{} {}", AAC_ID[version as usize], aac_profile(profile as i32))
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

@@ -6,18 +6,13 @@ ISO 639 language-code lookup used to populate stream language names. This corres
 
 ## Implementation Progress
 
-20%
+100%
 
 ## Implementation Details
 
 - Provides `language_name(code)` for three-letter Blu-ray language codes.
-- Trims trailing NULs, lowercases the input, and maps a subset of common ISO 639-2/B and ISO 639-2/T aliases.
-- Returns an empty string for unknown or empty codes.
-
-## Open Issues
-
-- BDInfo contains roughly 459 language-code cases; this module only includes a small common subset.
-- The comment says unknown codes fall back to the raw code, but the implementation returns an empty string.
-- The Norwegian Bokmal label is mojibake in the source.
-- No generated data source or test coverage ensures parity with BDInfo or ISO 639 updates.
-- Region/script variants and many legacy bibliographic/terminologic aliases are missing.
+- Backed by `LANGUAGE_CODES`, a static table ported verbatim from BDInfo's `GetName` switch (all 459 cases, including ISO 639-2/B and ISO 639-2/T aliases). Parity with BDInfo is preserved by construction.
+- Trims trailing NULs and lowercases the input before lookup.
+- Unknown or empty codes fall back to the trimmed raw code, matching BDInfo's `default: return code;`.
+- The Norwegian Bokmål label is stored as valid UTF-8 and verified by test.
+- Tests iterate the whole table to assert each code resolves to its BDInfo name, and cover the fallback, NUL trimming, case-insensitivity, B/T aliases, and table uniqueness/size.

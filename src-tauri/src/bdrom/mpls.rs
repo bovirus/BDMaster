@@ -412,3 +412,126 @@ fn create_stream(data: &[u8], pos: &mut usize, post_extra: usize) -> Result<Opti
 
     Ok(Some(stream))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a minimal but structurally valid MPLS: one play item (clip
+    /// 00001.M2TS) with one AVC video stream and one AC3 audio stream, plus one
+    /// chapter. The MVC base-view-R flag is set.
+    fn build_mpls() -> Vec<u8> {
+        let mut d: Vec<u8> = Vec::new();
+        d.extend_from_slice(b"MPLS0200");
+        d.extend_from_slice(&[0u8; 4]); // playlist_offset @8 (patched later)
+        d.extend_from_slice(&[0u8; 4]); // chapters_offset @12 (patched later)
+        d.extend_from_slice(&[0u8; 4]); // extensions_offset @16
+        while d.len() < 0x38 {
+            d.push(0);
+        }
+        d.push(0x10); // misc flags @0x38 -> mvc_base_view_r = true
+
+        let playlist_offset = d.len() as u32;
+        d[8..12].copy_from_slice(&playlist_offset.to_be_bytes());
+        d.extend_from_slice(&0u32.to_be_bytes()); // playlist_length
+        d.extend_from_slice(&0u16.to_be_bytes()); // reserved
+        d.extend_from_slice(&1u16.to_be_bytes()); // item_count
+        d.extend_from_slice(&0u16.to_be_bytes()); // subitem_count
+
+        let item_start = d.len();
+        d.extend_from_slice(&0u16.to_be_bytes()); // item_length placeholder
+        d.extend_from_slice(b"00001"); // item name
+        d.extend_from_slice(b"M2TS"); // item type
+        d.push(0x00); // skip 1
+        d.push(0x00); // multiangle/condition (no multiangle)
+        d.push(0x00); // +1 (r.pos += 2)
+        d.extend_from_slice(&0u32.to_be_bytes()); // in_time
+        d.extend_from_slice(&4_500_000u32.to_be_bytes()); // out_time (100 s)
+        d.extend_from_slice(&[0u8; 12]); // reserved skip
+
+        // STN table header.
+        d.extend_from_slice(&0u16.to_be_bytes()); // stn_length
+        d.extend_from_slice(&0u16.to_be_bytes()); // reserved (parser skips 2)
+        d.push(1); // video count
+        d.push(1); // audio count
+        d.push(0); // pg
+        d.push(0); // ig
+        d.push(0); // secondary audio
+        d.push(0); // secondary video
+        d.push(0); // pip
+        d.extend_from_slice(&[0u8; 5]); // reserved skip
+
+        // Video stream entry.
+        d.push(3); // stream-entry header length
+        d.push(1); // header type 1 -> PID follows
+        d.extend_from_slice(&0x1011u16.to_be_bytes()); // PID
+        d.push(3); // stream coding info length
+        d.push(0x1b); // AVC
+        d.push((6 << 4) | 1); // video format 1080p, frame rate 23.976
+        d.push(3 << 4); // aspect 16:9
+
+        // Audio stream entry.
+        d.push(3);
+        d.push(1);
+        d.extend_from_slice(&0x1100u16.to_be_bytes()); // PID
+        d.push(5); // stream coding info length
+        d.push(0x81); // AC3
+        d.push((6 << 4) | 1); // channel layout 5.1, sample-rate code 48 kHz
+        d.extend_from_slice(b"eng");
+
+        let item_len = (d.len() - item_start - 2) as u16;
+        d[item_start..item_start + 2].copy_from_slice(&item_len.to_be_bytes());
+
+        // Chapters section: parser reads from chapters_offset + 4.
+        let chapters_offset = d.len() as u32;
+        d[12..16].copy_from_slice(&chapters_offset.to_be_bytes());
+        d.extend_from_slice(&0u32.to_be_bytes()); // length (skipped)
+        d.extend_from_slice(&1u16.to_be_bytes()); // chapter count
+        let mut chapter = vec![0u8; 14];
+        chapter[1] = 1; // chapter type 1
+        chapter[4..8].copy_from_slice(&(45000u32 * 10).to_be_bytes()); // 10 s
+        d.extend_from_slice(&chapter);
+
+        d
+    }
+
+    #[test]
+    fn rejects_unknown_signature() {
+        let data = b"XXXX0000".to_vec();
+        assert!(parse_mpls_bytes("00000.MPLS".into(), &data).is_err());
+    }
+
+    #[test]
+    fn parses_clips_streams_and_chapters() {
+        let data = build_mpls();
+        let pl = parse_mpls_bytes("00800.MPLS".into(), &data).expect("parses");
+
+        assert_eq!(pl.file_type, "MPLS0200");
+        assert!(pl.mvc_base_view_r);
+        assert_eq!(pl.angle_count, 0);
+
+        assert_eq!(pl.stream_clips.len(), 1);
+        assert_eq!(pl.stream_clips[0].name, "00001.M2TS");
+        assert_eq!(pl.stream_clips[0].time_in, 0);
+        assert_eq!(pl.stream_clips[0].time_out, 4_500_000);
+        assert_eq!(pl.stream_clips[0].angle_index, 0);
+
+        assert_eq!(pl.playlist_streams.len(), 2);
+        let video = &pl.playlist_streams[0];
+        assert_eq!(video.pid, 0x1011);
+        assert_eq!(video.stream_type, TSStreamType::AVCVideo);
+        assert_eq!(video.video_format, TSVideoFormat::Video1080p);
+        assert_eq!(video.frame_rate, TSFrameRate::F23_976);
+        assert_eq!(video.aspect_ratio, TSAspectRatio::Aspect16_9);
+
+        let audio = &pl.playlist_streams[1];
+        assert_eq!(audio.pid, 0x1100);
+        assert_eq!(audio.stream_type, TSStreamType::AC3Audio);
+        assert_eq!(audio.channel_layout, TSChannelLayout::Multi);
+        assert_eq!(audio.sample_rate_hz, 48000);
+        assert_eq!(audio.language_code, "eng");
+
+        assert_eq!(pl.chapters.len(), 1);
+        assert!((pl.chapters[0] - 10.0).abs() < 1e-6);
+    }
+}

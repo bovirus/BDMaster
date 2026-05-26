@@ -33,6 +33,7 @@ pub use stream_buffer::TSStreamBuffer;
 #[derive(Default)]
 pub struct CodecScanState {
     pub pgs: PgsState,
+    pub hevc: hevc::PersistentHevc,
 }
 
 pub fn scan_stream(
@@ -57,7 +58,7 @@ pub fn scan_stream(
             mvc::scan(stream, &mut buffer);
         }
         TSStreamType::HEVCVideo => {
-            hevc::scan(stream, &mut buffer, extended_diagnostics);
+            hevc::scan(stream, &mut buffer, extended_diagnostics, &mut state.hevc);
         }
         TSStreamType::VC1Video => {
             vc1::scan(stream, &mut buffer);
@@ -112,6 +113,19 @@ pub fn scan_stream(
 /// Update audio/video description strings using the populated parameters.
 pub fn finalize_description(stream: &mut TSStreamInfo) {
     let st = TSStreamType::from_u8(stream.stream_type);
+
+    // Refine codec names now that extension/audio-mode flags are known, so
+    // Atmos / DTS:X / Dolby Digital EX / DTS-ES labels appear like BDInfo.
+    if st.is_audio() {
+        let extended_mode = stream.audio_mode == "Extended";
+        stream.codec_name = st
+            .codec_name_dynamic(stream.has_extensions, extended_mode)
+            .to_string();
+        stream.codec_short_name = st
+            .codec_short_name_dynamic(stream.has_extensions, extended_mode)
+            .to_string();
+    }
+
     if st.is_video() {
         let mut parts: Vec<String> = Vec::new();
         if let Some(bv) = stream.base_view {
@@ -226,4 +240,89 @@ pub fn refine_from_pes(stream: &mut TSStreamInfo, sample: &[u8]) {
     let mut state = CodecScanState::default();
     scan_stream(stream, &mut state, sample, 0, false, false);
     finalize_description(stream);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lpcm_dispatch_sets_fields_and_bit_rate() {
+        // Channel code 9 (5ch + LFE), sample-rate code 4 (96 kHz), depth code 3 (24-bit).
+        let payload = vec![0x00, 0x00, (9 << 4) | 4, 3 << 6];
+        let mut stream = TSStreamInfo::new(0x1100, TSStreamType::LpcmAudio as u8);
+        let mut state = CodecScanState::default();
+        scan_stream(&mut stream, &mut state, &payload, 0, false, false);
+        assert!(stream.is_initialized);
+        assert_eq!(stream.channel_count, 5);
+        assert_eq!(stream.lfe, 1);
+        assert_eq!(stream.sample_rate, 96000);
+        assert_eq!(stream.bit_depth, 24);
+        assert_eq!(stream.bit_rate, 96000 * 24 * 6);
+    }
+
+    #[test]
+    fn unknown_stream_type_is_marked_initialized() {
+        let mut stream = TSStreamInfo::new(0x1FFF, 0xFF);
+        let mut state = CodecScanState::default();
+        scan_stream(&mut stream, &mut state, &[0u8; 4], 0, false, false);
+        assert!(stream.is_initialized);
+    }
+
+    #[test]
+    fn quick_init_marks_pgs_initialized_without_counting() {
+        let mut stream = TSStreamInfo::new(0x1200, TSStreamType::PresentationGraphics as u8);
+        let mut state = CodecScanState::default();
+        // is_full_scan = false -> quick init path.
+        scan_stream(&mut stream, &mut state, &[0x16, 0x00], 0, false, false);
+        assert!(stream.is_initialized);
+        assert_eq!(stream.captions, 0);
+    }
+
+    #[test]
+    fn finalize_audio_description() {
+        let mut stream = TSStreamInfo::new(0x1100, TSStreamType::AC3Audio as u8);
+        stream.channel_count = 5;
+        stream.lfe = 1;
+        stream.sample_rate = 48000;
+        stream.bit_rate = 1_500_000;
+        stream.bit_depth = 24;
+        stream.dial_norm = -27;
+        finalize_description(&mut stream);
+        assert_eq!(stream.description, "5.1 / 48 kHz / 1500 kbps / 24-bit / DN -27dB");
+    }
+
+    #[test]
+    fn finalize_video_description() {
+        let mut stream = TSStreamInfo::new(0x1011, TSStreamType::AVCVideo as u8);
+        stream.height = 1080;
+        stream.is_interlaced = false;
+        stream.frame_rate_enumerator = 24000;
+        stream.frame_rate_denominator = 1001;
+        stream.aspect_ratio = "16:9".to_string();
+        stream.encoding_profile = "High Profile 4.0".to_string();
+        finalize_description(&mut stream);
+        assert_eq!(stream.description, "1080p / 23.976 fps / 16:9 / High Profile 4.0");
+    }
+
+    #[test]
+    fn finalize_graphics_description() {
+        let mut stream = TSStreamInfo::new(0x1200, TSStreamType::PresentationGraphics as u8);
+        stream.width = 1920;
+        stream.height = 1080;
+        stream.captions = 3;
+        stream.forced_captions = 1;
+        finalize_description(&mut stream);
+        assert_eq!(stream.description, "1920x1080 / 3 Captions / 1 Forced Caption");
+    }
+
+    #[test]
+    fn refine_from_pes_runs_dispatch_and_description() {
+        let payload = vec![0x00, 0x00, (1 << 4) | 1, 1 << 6]; // mono, 48k, 16-bit
+        let mut stream = TSStreamInfo::new(0x1100, TSStreamType::LpcmAudio as u8);
+        refine_from_pes(&mut stream, &payload);
+        assert!(stream.is_initialized);
+        assert_eq!(stream.channel_count, 1);
+        assert!(!stream.description.is_empty());
+    }
 }

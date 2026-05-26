@@ -325,3 +325,101 @@ fn parse_audio_mode_from_string(s: &str) -> TSAudioMode {
         _ => TSAudioMode::Unknown,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// MSB-first bit accumulator matching the parser's read order.
+    #[derive(Default)]
+    struct BitWriter {
+        bits: Vec<bool>,
+    }
+    impl BitWriter {
+        fn put(&mut self, val: u32, n: u32) {
+            for i in (0..n).rev() {
+                self.bits.push((val >> i) & 1 == 1);
+            }
+        }
+        fn bytes(&self) -> Vec<u8> {
+            let mut out = vec![0u8; (self.bits.len() + 7) / 8];
+            for (i, b) in self.bits.iter().enumerate() {
+                if *b {
+                    out[i / 8] |= 1 << (7 - (i % 8));
+                }
+            }
+            out
+        }
+    }
+
+    fn ac3_stream() -> TSStreamInfo {
+        TSStreamInfo::new(0x1100, TSStreamType::AC3Audio as u8)
+    }
+
+    #[test]
+    fn invalid_sync_word_is_rejected() {
+        let mut stream = ac3_stream();
+        let data = vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert!(!stream.is_initialized);
+    }
+
+    #[test]
+    fn chan_map_helper_matches_bdinfo() {
+        assert_eq!(ac3_chan_map(0), 0);
+        // Bit 15-5 == bit 10 maps (i == 5) -> +2.
+        assert_eq!(ac3_chan_map(1 << 10), 2);
+        // All five contributing positions (i = 5,6,9,10,11) -> +2 each = 10.
+        let mask = (1 << 10) | (1 << 9) | (1 << 6) | (1 << 5) | (1 << 4);
+        assert_eq!(ac3_chan_map(mask), 10);
+    }
+
+    #[test]
+    fn legacy_ac3_frame_is_parsed() {
+        // Build a legacy AC3 (bsid 8) sync frame: 48 kHz, frmsizecod 0 ->
+        // 32 kbit/s, acmod 7 (3/2 -> 5 channels), LFE on, dialnorm 27.
+        let mut bits = BitWriter::default();
+        bits.put(7, 3); // acmod
+        bits.put(0, 2); // cmixlev (acmod has bit0 and != 1)
+        bits.put(0, 2); // surmixlev (acmod has bit2)
+        bits.put(1, 1); // lfeon
+        bits.put(27, 5); // dialnorm
+        bits.put(0, 1); // compre absent
+        bits.put(0, 1); // langcode absent
+        bits.put(0, 1); // audprodie absent
+        bits.put(0, 2); // copyright + original
+        bits.put(0, 8); // trailing padding
+
+        let mut data = vec![
+            0x0B, 0x77, // sync
+            0x00, 0x00, // crc1 (skipped)
+            0x00, // fscod=0, frmsizecod=0
+            0x40, // bsid=8, bsmod=0
+        ];
+        data.extend(bits.bytes());
+
+        let mut stream = ac3_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+
+        assert!(stream.is_initialized);
+        assert!(!stream.is_vbr);
+        assert_eq!(stream.sample_rate, 48000);
+        assert_eq!(stream.bit_rate, 32_000);
+        assert_eq!(stream.channel_count, 5);
+        assert_eq!(stream.lfe, 1);
+        assert_eq!(stream.dial_norm, -27);
+    }
+
+    #[test]
+    fn does_not_panic_on_truncated_or_garbage_input() {
+        for len in 0..40usize {
+            let mut data = vec![0x0B, 0x77];
+            data.extend((0..len).map(|i| (i as u8).wrapping_mul(53) | 0x11));
+            let mut stream = ac3_stream();
+            let mut buffer = TSStreamBuffer::new(&data);
+            scan(&mut stream, &mut buffer);
+        }
+    }
+}

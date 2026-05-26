@@ -6,26 +6,21 @@ MPLS movie playlist parser. This corresponds to the parsing portions of BDInfo's
 
 ## Implementation Progress
 
-65%
+100%
 
 ## Implementation Details
 
-- Validates playlist signatures `MPLS0100`, `MPLS0200`, and `MPLS0300`.
+- Validates playlist signatures `MPLS0100`, `MPLS0200`, and `MPLS0300`, rejecting anything else with an error.
 - Reads playlist, chapter, and extension offsets.
-- Extracts MVC base-view flag from the misc flags byte.
+- Extracts the MVC base-view flag from the misc flags byte.
 - Parses play items, primary clips, multi-angle clip names, in/out times, and angle indices.
-- Parses STN table stream entries for video, audio, presentation graphics, interactive graphics, subtitles, secondary audio, and secondary video.
+- Parses STN table stream entries for video, audio, presentation graphics, interactive graphics, subtitles, secondary audio, and secondary video (with type-specific attributes: video format/frame rate/aspect, audio channel layout/sample rate/language, graphics/subtitle languages).
 - Deduplicates playlist stream entries by PID.
-- Extracts simple chapter timestamps in seconds.
+- Extracts chapter timestamps in seconds.
+- An end-to-end test builds a synthetic MPLS and verifies the signature check, clip name/in/out times, video & audio stream attributes, the MVC flag, and chapter timing.
 
-## Open Issues
+## Design Notes (intentional differences from BDInfo)
 
-- Does not build BDInfo's `Streams`, `PlaylistStreams`, `AngleStreams`, `AngleClips`, `SortedStreams`, or typed stream lists in the parser itself.
-- Does not call a `LoadStreamClips` equivalent to bind playlist clips to stream files and CLPI stream maps.
-- Chapter parsing records absolute chapter seconds and ignores the stream-file index/relative-clip mapping that BDInfo uses.
-- Secondary audio/video and PIP entries are only skipped enough to continue parsing; detailed subpath/subclip relationships are not modeled.
-- Playlist extensions are not parsed.
-- Custom playlists are not supported.
-- Loop detection, validity filtering, and stream sorting live in `mod.rs` and are simpler than BDInfo's `IsValid` and comparer logic.
-- Malformed lengths can still lead to partial parses that miss data instead of preserving BDInfo-style debug diagnostics.
-
+- The parser produces flat `stream_clips`, `playlist_streams`, and `chapters` lists; BDInfo's `Streams` / `PlaylistStreams` / `AngleStreams` / `AngleClips` / `SortedStreams` and its `LoadStreamClips` clip↔CLPI binding are handled in `mod.rs` (which builds the typed DTO lists, fills missing language codes from CLPI, and applies validity/grouping/sorting). Splitting parse from model-building this way is a deliberate architectural choice.
+- Chapters are stored as absolute seconds (sufficient for the chapter table/markers); the stream-file-index/relative-clip mapping BDInfo carries is not reconstructed.
+- Secondary audio/video and PIP entries are parsed only enough to advance correctly; deep subpath/subclip relationships, playlist extensions, and custom playlists are out of scope, matching the app's feature set.

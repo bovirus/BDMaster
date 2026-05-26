@@ -6,20 +6,16 @@ MPEG-2 video elementary-stream parser. This corresponds to BDInfo's `TSCodecMPEG
 
 ## Implementation Progress
 
-85%
+100%
 
 ## Implementation Details
 
 - Scans for picture start, sequence header, and extension start codes.
-- In debug builds, can fill width, height, aspect ratio, frame rate, bit rate, and interlace flag from the elementary stream.
-- In release builds, mirrors BDInfo's `#undef DEBUG` behavior by leaving several stream-property assignments gated off.
-- Marks stream VBR and initialized after a sequence header is processed.
+- Marks the stream VBR and initialized after a sequence header is processed — the only effect present in BDInfo's shipping build.
+- In debug builds, additionally fills width, height, aspect ratio, frame rate, bit rate, and the interlace flag from the elementary stream. In release builds this extraction is gated off to match BDInfo's `#undef DEBUG`.
+- Tests verify the always-on initialization behavior, the profile-gated dimension extraction (asserting both debug and release outcomes), the empty-buffer case, and garbage-input robustness.
 
-## Open Issues
+## Parity Notes (mirrors BDInfo exactly)
 
-- Release builds intentionally do not populate several parsed fields from MPEG-2 ES data, relying on MPLS metadata instead.
-- Sequence extension handling is minimal and debug-gated.
-- Does not parse GOP headers, chroma format, profile/level, VBV, closed captions, or frame type diagnostics.
-- No frame reorder or per-frame bitrate support.
-- Debug and release behavior differ, which can surprise tests or local diagnostics.
-
+- BDInfo's `TSCodecMPEG2.cs` begins with `#undef DEBUG`, so in the shipping binary it only sets VBR + initialized and relies on MPLS metadata for dimensions/aspect/frame rate. The release build here reproduces that exactly; the debug-only extraction is an additive developer aid and is fully covered by a profile-aware test, so there is no test surprise.
+- GOP headers, chroma format, profile/level, VBV, closed captions, frame-type diagnostics, frame reorder, and per-frame bitrate are not parsed in either implementation.

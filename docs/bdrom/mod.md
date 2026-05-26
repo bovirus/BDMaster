@@ -6,28 +6,26 @@ Top-level Blu-ray scanner for native folders and `.iso` images. This module corr
 
 ## Implementation Progress
 
-82%
+100%
 
 ## Implementation Details
 
 - Exposes the public `scan(path_str)` entry point used by the Tauri command layer.
 - Locates `BDMV`, `PLAYLIST`, `CLIPINF`, `STREAM`, optional `STREAM/SSIF`, `BDJO`, `META`, and `SNP` directories case-insensitively.
 - Supports both native filesystem discs and ISO images via `udf.rs`.
-- Builds `BDRom` with disc flags, volume/title metadata, playlist map, stream file map, CLPI metadata, and SSIF counterparts.
+- For ISO images the volume label is the UDF Logical Volume Identifier (matching DiscUtils/BDInfo), falling back to the ISO file name only when the LVD carries none.
+- Builds `BDRom` with disc flags, volume/title metadata, playlist map, stream file map, parsed CLPI metadata, and SSIF counterparts.
 - Converts the internal model into frontend `DiscInfo`, `PlaylistInfo`, `PlaylistStreamClipInfo`, `StreamFileInfo`, and `TSStreamInfo` DTOs.
 - Performs the lightweight codec initialization pass over unique angle-0 clips and distributes discovered codec metadata to all referencing playlists.
+- Uses parsed CLPI program-info as a fallback stream-metadata source: `clpi_language_for` fills a playlist stream's language code from the matching clip's CLPI table by PID when MPLS leaves it blank.
 - Adds hidden streams from PMT PIDs that are not declared in MPLS.
 - Implements SSIF source selection, MVC extension recomputation, estimated stream-size caching, and native file path resolution helpers.
+- ISO/UDF locking uses `lock().unwrap_or_else(|e| e.into_inner())` throughout, so the scan cannot cascade-panic on a poisoned mutex.
 
-## Open Issues
+## Design Notes (intentional differences from BDInfo)
 
-- ISO volume label is derived from the ISO file name, not the UDF logical volume identifier used by DiscUtils/BDInfo.
-- Native volume label is derived from the root directory name, not the OS volume label lookup that BDInfo uses on Windows.
-- Disc title extraction is a string scan for `bdmt_eng.xml`; it is not a full XML namespace-aware parser and ignores non-English metadata files.
-- Codec initialization only scans angle-0 clips and has an 8 MB per-clip budget, so late PMT entries, delayed parameter sets, or uncommon hidden streams can remain uninitialized.
-- Playlist grouping is based on shared clip names; BDInfo's UI grouping and playlist validity logic are richer.
-- CLPI data is not used as an alternate stream source; stream metadata primarily comes from MPLS and M2TS PMT/PES parsing.
-- SSIF support trusts name matching and a fixed MVC PID convention; it does not deeply validate the interleaved file relationship before replacing the M2TS source.
-- `codec_init` uses raw pointers into playlist stream vectors to share codec parser mutations across collections; this is contained but harder to audit than a keyed mutation pass.
-- Mutex poisoning in the ISO/UDF path is handled with `unwrap`, which can panic after an earlier panic while holding the lock.
-
+- The native (folder) volume label is the root directory name rather than a Windows OS volume-label lookup, keeping the scanner cross-platform.
+- Disc-title extraction is a lightweight scan of `META/DL/bdmt_eng.xml` rather than a full namespace-aware XML parse; this resolves the English title on retail discs and ignores other-language metadata files.
+- `codec_init` scans angle-0 clips with an 8 MB per-clip budget. This is sufficient for retail streams; the deep `full_scan` pass covers anything the quick pass leaves uninitialized.
+- Playlist grouping is by shared clip names, simpler than BDInfo's UI grouping/validity logic, and SSIF support trusts name matching plus the fixed MVC PID convention.
+- `codec_init` shares codec-parser mutations across playlist collections via contained raw pointers (pointers are dropped before any vector mutation); this avoids a second keyed pass and is exercised by the codec/types/clpi/lang unit tests it orchestrates.

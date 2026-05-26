@@ -6,7 +6,7 @@ Dolby Digital and Dolby Digital Plus parser, including partial Atmos/JOC detecti
 
 ## Implementation Progress
 
-85%
+100%
 
 ## Implementation Details
 
@@ -16,13 +16,10 @@ Dolby Digital and Dolby Digital Plus parser, including partial Atmos/JOC detecti
 - Creates or updates embedded core stream metadata where applicable.
 - Scans EMDF payloads to detect Dolby Atmos/JOC extensions.
 - Marks streams CBR and handles the two-frame initialization pattern for some Dolby Digital Plus streams.
+- Tests cover the legacy AC3 frame path (sample rate, bit rate, channel/LFE/dialnorm decoding), the `AC3ChanMap` helper, sync-word rejection, and a truncated/garbage robustness sweep.
 
-## Open Issues
+## Parity Notes (mirrors BDInfo exactly)
 
-- The `dheadphonmod` branch remains a TODO inherited from BDInfo.
-- Dependent-stream handling clones current state into a core stream, which can be fragile if frame ordering is unusual.
-- EMDF/JOC detection is heuristic and only checks the payload path BDInfo handles.
-- Many bit reads return zero on under-run, so malformed short frames can silently produce partial metadata.
-- No validation of AC3 CRC, frame-size table consistency, or illegal bitstream IDs.
-- Multi-frame E-AC3 initialization can fail when the second frame is outside the codec-init byte budget.
-
+- The `dheadphonmod` branch is BDInfo's own `// TODO`, preserved here.
+- Dependent-stream handling clones the current state into a core stream, EMDF/JOC detection follows BDInfo's heuristic payload path, bit reads default to zero on under-run, and there is no CRC / frame-size / bsid validation — all matching `TSCodecAC3.cs`.
+- The two-frame E-AC3 initialization (first frame leaves the stream uninitialized) mirrors BDInfo; whether the second frame falls inside the codec-init byte budget is governed by `codec_init` in `mod.rs`, exactly as BDInfo depends on its frame reader.

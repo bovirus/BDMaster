@@ -109,3 +109,151 @@ pub fn scan(stream: &mut TSStreamInfo, buffer: &mut TSStreamBuffer, bitrate: i64
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bdrom::types::TSStreamType;
+
+    /// MSB-first bit accumulator, mirroring how `read_bits4`/`bs_skip_bits`
+    /// consume the bitstream.
+    #[derive(Default)]
+    struct BitWriter {
+        bits: Vec<bool>,
+    }
+    impl BitWriter {
+        fn put(&mut self, val: u32, n: u32) {
+            for i in (0..n).rev() {
+                self.bits.push((val >> i) & 1 == 1);
+            }
+        }
+        fn bytes(&self) -> Vec<u8> {
+            let mut out = vec![0u8; (self.bits.len() + 7) / 8];
+            for (i, b) in self.bits.iter().enumerate() {
+                if *b {
+                    out[i / 8] |= 1 << (7 - (i % 8));
+                }
+            }
+            out
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn dts_frame(
+        crc: u32,
+        frame_size: u32,
+        sr: u32,
+        br: u32,
+        ext: u32,
+        lfe: u32,
+        pcm_res: u32,
+        dialog_norm: u32,
+        chan_base: u32,
+    ) -> Vec<u8> {
+        let mut w = BitWriter::default();
+        w.put(0, 6); // skip
+        w.put(crc, 1); // crc present
+        w.put(0, 7); // skip
+        w.put(frame_size, 14);
+        w.put(0, 6); // skip
+        w.put(sr, 4);
+        w.put(br, 5);
+        w.put(0, 8); // skip
+        w.put(ext, 1);
+        w.put(0, 1); // skip
+        w.put(lfe, 2);
+        w.put(0, 1); // skip
+        if crc == 1 {
+            w.put(0, 16);
+        }
+        w.put(0, 7); // skip
+        w.put(pcm_res, 3);
+        w.put(0, 2); // skip
+        w.put(dialog_norm, 4);
+        w.put(0, 4); // skip
+        w.put(chan_base, 3);
+        w.put(0, 8); // trailing padding so all reads succeed
+        let mut payload = vec![0x7F, 0xFE, 0x80, 0x01];
+        payload.extend(w.bytes());
+        payload
+    }
+
+    fn dts_stream() -> TSStreamInfo {
+        TSStreamInfo::new(0x1100, TSStreamType::DTSAudio as u8)
+    }
+
+    #[test]
+    fn no_sync_leaves_uninitialized() {
+        let mut stream = dts_stream();
+        let data = vec![0u8; 32];
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer, 0);
+        assert!(!stream.is_initialized);
+    }
+
+    #[test]
+    fn frame_size_below_95_is_rejected() {
+        let data = dts_frame(0, 50, 13, 19, 0, 1, 5, 7, 5);
+        let mut stream = dts_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer, 0);
+        assert!(!stream.is_initialized);
+    }
+
+    #[test]
+    fn fixed_bitrate_core_frame_is_parsed() {
+        // sr=13 -> 48000, br=19 -> 1280000, lfe present, pcm_res=5 -> 24-bit +
+        // Extended mode, dialog_norm=7, channel base 5 -> 6 channels.
+        let data = dts_frame(0, 100, 13, 19, 0, 1, 5, 7, 5);
+        let mut stream = dts_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer, 0);
+        assert!(stream.is_initialized);
+        assert!(!stream.is_vbr);
+        assert_eq!(stream.sample_rate, 48000);
+        assert_eq!(stream.bit_rate, 1_280_000);
+        assert_eq!(stream.channel_count, 6);
+        assert_eq!(stream.lfe, 1);
+        assert_eq!(stream.bit_depth, 24);
+        assert_eq!(stream.dial_norm, -7);
+        assert_eq!(stream.audio_mode, TSAudioMode::Extended.label());
+    }
+
+    #[test]
+    fn variable_bitrate_marker_sets_vbr() {
+        // br=30 -> DCA_BIT_RATES[30] == 2 (variable).
+        let data = dts_frame(0, 100, 13, 30, 0, 0, 1, 0, 1);
+        let mut stream = dts_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer, 0);
+        assert!(stream.is_initialized);
+        assert!(stream.is_vbr);
+    }
+
+    #[test]
+    fn open_bitrate_uses_caller_hint() {
+        // br=29 -> DCA_BIT_RATES[29] == 1 (open). With a hint, use it; without,
+        // the stream stays uninitialized.
+        let data = dts_frame(0, 100, 13, 29, 0, 0, 1, 0, 1);
+        let mut with_hint = dts_stream();
+        let mut b1 = TSStreamBuffer::new(&data);
+        scan(&mut with_hint, &mut b1, 1_500_000);
+        assert!(with_hint.is_initialized);
+        assert_eq!(with_hint.bit_rate, 1_500_000);
+
+        let mut no_hint = dts_stream();
+        let mut b2 = TSStreamBuffer::new(&data);
+        scan(&mut no_hint, &mut b2, 0);
+        assert!(!no_hint.is_initialized);
+    }
+
+    #[test]
+    fn crc_present_frame_still_parses() {
+        let data = dts_frame(1, 100, 13, 19, 0, 1, 5, 7, 5);
+        let mut stream = dts_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer, 0);
+        assert!(stream.is_initialized);
+        assert_eq!(stream.sample_rate, 48000);
+    }
+}

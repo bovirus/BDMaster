@@ -134,7 +134,13 @@ pub fn scan(stream: &mut TSStreamInfo, buffer: &mut TSStreamBuffer, bitrate: i64
                     nu_spkr_activity_mask = buffer.read_bits4_default(nu_num_bits4_sa_mask);
                 }
             }
-            stream.sample_rate = SAMPLE_RATES[nu_max_sample_rate as usize];
+            // `nu_max_sample_rate` is a 4-bit field (0..=15) and SAMPLE_RATES has
+            // 16 entries, so this is always in range; the defensive lookup keeps
+            // the parser panic-free even on a malformed bitstream.
+            stream.sample_rate = SAMPLE_RATES
+                .get(nu_max_sample_rate as usize)
+                .copied()
+                .unwrap_or(0);
             stream.bit_depth = nu_bit_resolution;
 
             stream.lfe = 0;
@@ -178,6 +184,9 @@ pub fn scan(stream: &mut TSStreamInfo, buffer: &mut TSStreamBuffer, bitrate: i64
         if core.audio_mode == TSAudioMode::Extended.label() && stream.channel_count == 5 {
             stream.audio_mode = TSAudioMode::Extended.label().to_string();
         }
+        // BDInfo deliberately leaves the core dialnorm copy disabled (the block is
+        // commented out in TSCodecDTSHD.cs); we mirror that to keep parity:
+        //   if core.dial_norm != 0 { stream.dial_norm = core.dial_norm; }
     }
 
     if st == TSStreamType::DTSHDMasterAudio {
@@ -190,5 +199,73 @@ pub fn scan(stream: &mut TSStreamInfo, buffer: &mut TSStreamBuffer, bitrate: i64
             stream.bit_rate += core.bit_rate;
         }
         stream.is_initialized = stream.bit_rate > 0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ma_stream() -> TSStreamInfo {
+        TSStreamInfo::new(0x1100, TSStreamType::DTSHDMasterAudio as u8)
+    }
+
+    #[test]
+    fn empty_buffer_leaves_stream_uninitialized() {
+        let mut stream = ma_stream();
+        let data: Vec<u8> = Vec::new();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer, 0);
+        assert!(!stream.is_initialized);
+    }
+
+    #[test]
+    fn master_audio_with_sync_initializes_as_vbr() {
+        // DTS-HD sync 0x64582025, then a minimal header with static fields absent.
+        let mut data = vec![0x64, 0x58, 0x20, 0x25];
+        // Pad with zero bytes so the substream/header/asset-size reads succeed.
+        data.extend(std::iter::repeat(0u8).take(32));
+        let mut stream = ma_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer, 0);
+        assert!(stream.is_initialized, "MA streams init even without bitrate");
+        assert!(stream.is_vbr);
+    }
+
+    #[test]
+    fn no_hd_sync_falls_back_to_core_dts() {
+        // No DTS-HD sync present; a DTS core sync (0x7FFE8001) should be parsed
+        // into stream.core via the fallback path.
+        let mut data = vec![0x7F, 0xFE, 0x80, 0x01];
+        data.extend(std::iter::repeat(0u8).take(64));
+        let mut stream = TSStreamInfo::new(0x1100, TSStreamType::DTSHDAudio as u8);
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer, 1_500_000);
+        assert!(stream.core.is_some(), "core stream should be created");
+    }
+
+    #[test]
+    fn does_not_panic_on_truncated_or_garbage_input() {
+        // The sample-rate index is a 4-bit field into a 16-entry table and every
+        // read defaults on under-run, so no input should panic the parser.
+        for len in 4..48usize {
+            let mut data = vec![0x64, 0x58, 0x20, 0x25];
+            data.extend((0..len).map(|i| (i as u8).wrapping_mul(37) | 0x80));
+            let mut stream = ma_stream();
+            let mut buffer = TSStreamBuffer::new(&data);
+            scan(&mut stream, &mut buffer, 768_000);
+        }
+    }
+
+    #[test]
+    fn already_initialized_secondary_audio_returns_early() {
+        let mut stream = TSStreamInfo::new(0x1100, TSStreamType::DTSHDSecondaryAudio as u8);
+        stream.is_initialized = true;
+        stream.sample_rate = 48000;
+        let data = vec![0u8; 16];
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer, 0);
+        // Unchanged because the early-return guard fired.
+        assert_eq!(stream.sample_rate, 48000);
     }
 }

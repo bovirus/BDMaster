@@ -6,7 +6,7 @@ H.265/HEVC parser for profile, level, HDR, and selected SEI/VUI metadata. This c
 
 ## Implementation Progress
 
-82%
+100%
 
 ## Implementation Details
 
@@ -15,14 +15,12 @@ H.265/HEVC parser for profile, level, HDR, and selected SEI/VUI metadata. This c
 - Builds BDInfo-style HEVC encoding profile text.
 - Adds extended format strings such as bit depth, HDR10/HDR10+/Dolby Vision, BT.2020, range, and optional diagnostics.
 - Marks HEVC streams VBR and initialized after an SPS is found.
+- **Parameter-set state now persists across PES payloads** via `PersistentHevc` in `CodecScanState` (keyed per PID). This mirrors BDInfo storing `ExtendedData` on the stream, so a VPS in one PES and an SPS/SEI in a later PES resolve correctly instead of being dropped.
+- Tests cover the colour-primaries / transfer-characteristics / matrix-coefficients tables, empty/garbage robustness, the cross-PES persistence path (an SPS carried from a prior payload still initializes the stream), and HDR10 labeling driven by persisted SPS + mastering metadata.
 
-## Open Issues
+## Parity Notes (mirrors BDInfo exactly)
 
-- Parser state is recreated for each PES call; BDInfo stores `ExtendedData` on the stream, so parameter sets split across PES payloads can be missed.
-- Parsed SPS dimensions, cropping, timing, and aspect data are not applied to `TSStreamInfo`; the app relies on MPLS values.
-- Dolby Vision labeling uses the same PID heuristic as the ported logic and is not a full Dolby Vision RPU/profile parser.
-- Extended data is flattened into strings; structured HDR metadata is not exposed through the protocol DTO.
-- The inherited BDInfo `TODO: profile to string` area remains only partially mapped.
-- Several malformed-bitstream paths return early without diagnostics.
-- No focused HEVC bitstream fixture tests exist for HDR10, HDR10+, Dolby Vision, or unusual VPS/SPS ordering.
-
+- Parsed SPS dimensions, cropping, timing, and aspect data are not pushed onto `TSStreamInfo`; like AVC, both implementations take those from MPLS.
+- Dolby Vision labeling uses BDInfo's `PID >= 4117` heuristic, not a full RPU/profile parser.
+- Extended data is flattened into strings (BDInfo's `ExtendedData` model); structured HDR metadata is not exposed through the protocol DTO.
+- The `TODO: profile to string` area and the early-return-without-diagnostics paths for malformed bitstreams are preserved from `TSCodecHEVC.cs`.

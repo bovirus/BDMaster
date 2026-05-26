@@ -215,6 +215,24 @@ fn matrix_coefficients(c: u8) -> &'static str {
     }
 }
 
+/// Per-PID HEVC parser state that must persist across PES payloads. BDInfo
+/// keeps the accumulated parameter sets (and HDR10+ flag) in the stream's
+/// `ExtendedData`, so a VPS in one PES and an SPS in a later PES still resolve.
+/// We mirror that by carrying this between `scan` calls via `CodecScanState`.
+pub struct PersistentHevc {
+    pub extended: ExtendedDataSet,
+    pub is_hdr10_plus: bool,
+}
+
+impl Default for PersistentHevc {
+    fn default() -> Self {
+        Self {
+            extended: ExtendedDataSet::new(),
+            is_hdr10_plus: false,
+        }
+    }
+}
+
 struct State {
     is_initialized: bool,
     profile_space: u32,
@@ -231,7 +249,12 @@ struct State {
     extended_diagnostics: bool,
 }
 
-pub fn scan(stream: &mut TSStreamInfo, buffer: &mut TSStreamBuffer, extended_diagnostics: bool) {
+pub fn scan(
+    stream: &mut TSStreamInfo,
+    buffer: &mut TSStreamBuffer,
+    extended_diagnostics: bool,
+    persistent: &mut PersistentHevc,
+) {
     let mut st = State {
         is_initialized: stream.is_initialized,
         profile_space: 0,
@@ -241,8 +264,9 @@ pub fn scan(stream: &mut TSStreamInfo, buffer: &mut TSStreamBuffer, extended_dia
         general_progressive_source_flag: false,
         general_interlaced_source_flag: false,
         general_frame_only_constraint_flag: false,
-        extended: ExtendedDataSet::new(),
-        is_hdr10_plus: false,
+        // Carry forward parameter sets parsed from earlier PES payloads.
+        extended: std::mem::take(&mut persistent.extended),
+        is_hdr10_plus: persistent.is_hdr10_plus,
         chroma_sample_loc_type_top_field: 0,
         chroma_sample_loc_type_bottom_field: 0,
         extended_diagnostics,
@@ -445,6 +469,10 @@ pub fn scan(stream: &mut TSStreamInfo, buffer: &mut TSStreamBuffer, extended_dia
         stream.is_initialized = true;
     }
     stream.extended_format_info = st.extended.extended_format_info.clone();
+
+    // Persist accumulated parameter sets / HDR10+ flag for the next PES payload.
+    persistent.is_hdr10_plus = st.is_hdr10_plus;
+    persistent.extended = st.extended;
 }
 
 fn slice_segment_layer(buffer: &mut TSStreamBuffer, nal_unit_type: i64, st: &State) -> bool {
@@ -1444,4 +1472,118 @@ fn sub_layer_hrd_parameters(
         });
     }
     *out = Some(XXL { sched_sel });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bdrom::types::TSStreamType;
+
+    fn hevc_stream(pid: u16) -> TSStreamInfo {
+        TSStreamInfo::new(pid, TSStreamType::HEVCVideo as u8)
+    }
+
+    #[test]
+    fn colour_primaries_table() {
+        assert_eq!(colour_primaries(1), "BT.709");
+        assert_eq!(colour_primaries(9), "BT.2020");
+        assert_eq!(colour_primaries(11), "DCI P3");
+        assert_eq!(colour_primaries(12), "Display P3");
+        assert_eq!(colour_primaries(0), "");
+    }
+
+    #[test]
+    fn transfer_characteristics_table() {
+        assert_eq!(transfer_characteristics(1), "BT.709");
+        assert_eq!(transfer_characteristics(16), "PQ");
+        assert_eq!(transfer_characteristics(18), "HLG");
+        assert_eq!(transfer_characteristics(0), "");
+    }
+
+    #[test]
+    fn matrix_coefficients_table() {
+        assert_eq!(matrix_coefficients(0), "Identity");
+        assert_eq!(matrix_coefficients(9), "BT.2020 non-constant");
+        assert_eq!(matrix_coefficients(14), "ICtCp");
+        assert_eq!(matrix_coefficients(3), "");
+    }
+
+    #[test]
+    fn empty_and_garbage_inputs_do_not_panic() {
+        let mut persistent = PersistentHevc::default();
+        let mut stream = hevc_stream(0x1011);
+        let empty: Vec<u8> = Vec::new();
+        let mut b = TSStreamBuffer::new(&empty);
+        scan(&mut stream, &mut b, false, &mut persistent);
+        assert!(!stream.is_initialized);
+
+        let garbage: Vec<u8> = (0..1024u32).map(|i| (i % 256) as u8).collect();
+        let mut b2 = TSStreamBuffer::new(&garbage);
+        scan(&mut stream, &mut b2, true, &mut persistent);
+    }
+
+    /// Pre-seed the persistent state with an SPS (as if parsed from an earlier
+    /// PES payload) and confirm a later `scan` on an SPS-free payload still
+    /// applies it — i.e. parameter-set state survives across PES calls.
+    #[test]
+    fn persistent_sps_from_prior_pes_is_applied() {
+        let mut persistent = PersistentHevc::default();
+        let mut sps = SeqParameterSet {
+            profile_space: 0,
+            profile_idc: 1, // Main
+            level_idc: 120, // -> "Level 4"
+            tier_flag: false,
+            chroma_format_idc: 1,
+            bit_depth_luma_minus8: 0,
+            bit_depth_chroma_minus8: 0,
+            valid: true,
+            ..Default::default()
+        };
+        sps.vui_parameters = VUIParameters::default();
+        persistent.extended.seq_parameter_sets.push(sps);
+
+        let mut stream = hevc_stream(0x1011);
+        let payload: Vec<u8> = vec![0u8; 8]; // no NAL units
+        let mut b = TSStreamBuffer::new(&payload);
+        scan(&mut stream, &mut b, false, &mut persistent);
+
+        // The carried SPS initializes the stream and produces profile text.
+        assert!(stream.is_initialized);
+        assert!(stream.encoding_profile.starts_with("Main"));
+        // State is retained for subsequent calls.
+        assert_eq!(persistent.extended.seq_parameter_sets.len(), 1);
+    }
+
+    #[test]
+    fn hdr10_label_uses_persistent_metadata() {
+        // SPS describing BT.2020 + PQ 10-bit 4:2:0, plus mastering metadata that
+        // would have arrived in a separate SEI PES, both held in persistent state.
+        let mut persistent = PersistentHevc::default();
+        let mut vui = VUIParameters::default();
+        vui.video_signal_type_present_flag = true;
+        vui.colour_description_present_flag = true;
+        vui.colour_primaries = 9; // BT.2020
+        vui.transfer_characteristics = 16; // PQ
+        vui.matrix_coefficients = 9;
+        let sps = SeqParameterSet {
+            profile_idc: 2, // Main 10
+            level_idc: 120,
+            chroma_format_idc: 1,
+            bit_depth_luma_minus8: 2, // 10-bit
+            bit_depth_chroma_minus8: 2,
+            vui_parameters: vui,
+            valid: true,
+            ..Default::default()
+        };
+        persistent.extended.seq_parameter_sets.push(sps);
+        persistent.extended.mastering_display_color_primaries = "BT.2020".to_string();
+
+        let mut stream = hevc_stream(0x1011); // pid < 4117 -> not Dolby Vision
+        let payload: Vec<u8> = vec![0u8; 8];
+        let mut b = TSStreamBuffer::new(&payload);
+        scan(&mut stream, &mut b, false, &mut persistent);
+
+        assert!(stream.is_initialized);
+        assert!(stream.extended_format_info.iter().any(|s| s == "HDR10"));
+    }
 }

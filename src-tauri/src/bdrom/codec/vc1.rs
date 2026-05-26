@@ -60,3 +60,68 @@ pub fn scan(stream: &mut TSStreamInfo, buffer: &mut TSStreamBuffer) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bdrom::types::TSStreamType;
+
+    fn vc1_stream() -> TSStreamInfo {
+        TSStreamInfo::new(0x1011, TSStreamType::VC1Video as u8)
+    }
+
+    #[test]
+    fn empty_buffer_leaves_stream_uninitialized() {
+        let mut stream = vc1_stream();
+        let data: Vec<u8> = Vec::new();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert!(!stream.is_initialized);
+        assert!(stream.encoding_profile.is_empty());
+    }
+
+    #[test]
+    fn sequence_header_sets_advanced_profile_and_interlace() {
+        // 0x0000010F = sequence header start code. The byte after it carries the
+        // profile (top two bits == 3 -> Advanced) and level (bits 0x38).
+        // The sixth byte after the start code carries the interlace flag (0x40).
+        let data = vec![
+            0x00, 0x00, 0x01, 0x0F, // sequence header start code
+            0xC8, // profile_kind=3 (Advanced), profile_level=1
+            0x00, 0x00, 0x00, 0x00, // padding bytes
+            0x40, // interlace flag set
+        ];
+        let mut stream = vc1_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert!(stream.is_initialized);
+        assert!(stream.is_vbr);
+        assert_eq!(stream.encoding_profile, "Advanced Profile 1");
+        assert!(stream.is_interlaced);
+    }
+
+    #[test]
+    fn sequence_header_sets_main_profile_progressive() {
+        // Profile byte 0x00 -> profile_kind=0 (Main), profile_level=0; no
+        // interlace bit set in the trailing bytes -> progressive.
+        let data = vec![
+            0x00, 0x00, 0x01, 0x0F, // sequence header start code
+            0x00, // profile_kind=0 (Main), level=0
+            0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        let mut stream = vc1_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert!(stream.is_initialized);
+        assert_eq!(stream.encoding_profile, "Main Profile 0");
+        assert!(!stream.is_interlaced);
+    }
+
+    #[test]
+    fn does_not_panic_on_garbage() {
+        let mut stream = vc1_stream();
+        let data: Vec<u8> = (0..256u32).map(|i| (i % 256) as u8).collect();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+    }
+}

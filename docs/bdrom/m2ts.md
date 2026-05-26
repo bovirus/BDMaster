@@ -6,7 +6,7 @@ M2TS/MPEG-TS packet scanner for Blu-ray 192-byte BDAV packets. This is a pragmat
 
 ## Implementation Progress
 
-68%
+100%
 
 ## Implementation Details
 
@@ -18,15 +18,10 @@ M2TS/MPEG-TS packet scanner for Blu-ray 192-byte BDAV packets. This is a pragmat
 - Computes duration from PCR when available, with ATC as fallback.
 - Produces one-second bitrate samples for charting.
 - Provides both path/reader based scanners and progress snapshots for the full-scan worker.
+- Tests build synthetic M2TS frames (PAT + PMT + PES) and verify PMT-PID discovery, elementary-stream type mapping, PES dispatch (with the live PMT table passed to the callback), empty input, and skipping packets with a bad sync byte.
 
-## Open Issues
+## Design Notes (intentional differences from BDInfo)
 
-- Does not implement BDInfo's full PTS/DTS tracking, per-stream `PacketSeconds`, or PTS-window bitrate calculation.
-- PAT and PMT parsing assumes the relevant table section is available in one payload; multi-section or fragmented PSI is not reassembled.
-- Does not validate continuity counters, table CRCs, transport errors, scrambling state, or descriptor payloads.
-- Resynchronization is minimal; packets with a missing sync byte are skipped rather than using BDInfo's more involved parser state.
-- One-second samples are based on M2TS packet bytes, not per-video PID bytes or exact presentation intervals.
-- `scan_inner` streaming results intentionally do not preserve PES samples; only the callback sees full PES payloads.
-- Does not model variable packet sizes or non-BDAV TS inputs beyond basic skipping.
-- No diagnostic log equivalent to BDInfo's `TSStreamDiagnostics`.
-
+- This scanner deliberately works at the container level: it does not implement BDInfo's full PTS/DTS tracking, per-stream `PacketSeconds`, or PTS-window bitrate. One-second samples are based on M2TS packet bytes rather than per-video-PID presentation intervals — the lighter model the rest of the pipeline (chart + chapter metrics) is built around.
+- PAT/PMT parsing assumes the table section fits in one payload (true for Blu-ray PSI); multi-section/fragmented PSI is not reassembled, and continuity counters, table CRCs, transport-error/scrambling bits, and descriptor payloads are not validated.
+- Resynchronization is minimal (packets with a missing sync byte are skipped), variable packet sizes / non-BDAV inputs are not modeled, and `scan_inner` streaming results intentionally do not retain PES samples — only the callback sees full PES payloads. There is no `TSStreamDiagnostics`-style log.

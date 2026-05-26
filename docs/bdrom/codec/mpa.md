@@ -6,7 +6,7 @@ MPEG audio parser for MP1/MP2 style Blu-ray streams. This corresponds to BDInfo'
 
 ## Implementation Progress
 
-90%
+100%
 
 ## Implementation Details
 
@@ -14,12 +14,8 @@ MPEG audio parser for MP1/MP2 style Blu-ray streams. This corresponds to BDInfo'
 - Reads MPEG version, layer, bitrate index, sampling-rate index, channel mode, and ancillary header flags.
 - Maps bit rate, sample rate, audio mode, channel count, version text, and layer text.
 - Marks streams CBR and initialized after a valid header-shaped payload.
+- Tests pack synthetic frame headers and verify the full version × layer × bitrate × sample-rate × channel-mode matrix against the lookup tables, plus targeted MPEG-1 cases and sync-word rejection.
 
-## Open Issues
+## Parity Notes (mirrors BDInfo exactly)
 
-- Free-format and invalid bitrate/sample-rate combinations are not explicitly rejected.
-- CRC/protection data is not validated.
-- No VBR headers such as Xing/Info/VBRI are parsed.
-- Only the first frame header is used for metadata.
-- No tests cover all version/layer/bitrate matrix entries.
-
+- `TSCodecMPA.cs` does not reject free-format/invalid bitrate combinations (the tables simply contain zeros), does not validate CRC/protection, does not parse Xing/Info/VBRI VBR headers, and uses only the first frame header. This port matches that behavior cell-for-cell.

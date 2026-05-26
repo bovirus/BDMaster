@@ -190,11 +190,13 @@ impl<'a> TSStreamBuffer<'a> {
             data1 += (self.read_byte(skip_h26x) as u32) << shift;
             shift -= 8;
         }
-        // Next 4 bytes
+        // Next 4 bytes. C# checks `pos + i` against the length using the
+        // *original* captured position (not the advanced one), so the second
+        // half is read whenever the first half was in bounds. Mirror that.
         shift = 24;
         let mut data2: u32 = 0;
         for i in 0..4 {
-            if self.pos + i >= self.data.len() {
+            if pos + i >= self.data.len() {
                 break;
             }
             data2 += (self.read_byte(skip_h26x) as u32) << shift;
@@ -327,5 +329,169 @@ impl<'a> TSStreamBuffer<'a> {
 
     pub fn data_bit_stream_remain_bytes(&self) -> i64 {
         self.data.len() as i64 - self.pos as i64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_bits2_reads_msb_first() {
+        let data = [0xAB, 0xCD, 0xEF, 0x12];
+        let mut b = TSStreamBuffer::new(&data);
+        assert_eq!(b.read_bits2_default(16), 0xABCD);
+        assert_eq!(b.read_bits2_default(16), 0xEF12);
+    }
+
+    #[test]
+    fn read_bits2_sub_byte_fields() {
+        // 0xA = 1010, 0x5 = 0101 -> nibble reads.
+        let data = [0xA5];
+        let mut b = TSStreamBuffer::new(&data);
+        assert_eq!(b.read_bits2_default(4), 0xA);
+        assert_eq!(b.read_bits2_default(4), 0x5);
+    }
+
+    #[test]
+    fn read_bits4_reads_32_bits() {
+        let data = [0xDE, 0xAD, 0xBE, 0xEF];
+        let mut b = TSStreamBuffer::new(&data);
+        assert_eq!(b.read_bits4_default(32), 0xDEAD_BEEF);
+    }
+
+    #[test]
+    fn read_bits8_reads_64_bits_and_high_halves() {
+        let data = [0xAB, 0xCD, 0xEF, 0x12, 0x34, 0x56, 0x78, 0x9A];
+        let mut b = TSStreamBuffer::new(&data);
+        assert_eq!(b.read_bits8_default(64), 0xABCD_EF12_3456_789A);
+
+        let mut b2 = TSStreamBuffer::new(&data);
+        // The top 32 bits are the first four bytes.
+        assert_eq!(b2.read_bits8_default(32), 0xABCD_EF12);
+
+        let mut b3 = TSStreamBuffer::new(&data);
+        // 40 bits -> first five bytes worth of MSB-aligned data.
+        assert_eq!(b3.read_bits8_default(40), 0xABCD_EF12_34);
+    }
+
+    #[test]
+    fn read_bool_walks_bits_msb_first() {
+        let data = [0b1010_0000];
+        let mut b = TSStreamBuffer::new(&data);
+        assert!(b.read_bool_default());
+        assert!(!b.read_bool_default());
+        assert!(b.read_bool_default());
+        assert!(!b.read_bool_default());
+    }
+
+    #[test]
+    fn h26x_emulation_byte_is_skipped_after_two_zero_bytes() {
+        // 0x00 0x00 0x03 0x42 -> the 0x03 emulation-prevention byte is dropped.
+        let data = [0x00, 0x00, 0x03, 0x42];
+        let mut b = TSStreamBuffer::new(&data);
+        assert_eq!(b.read_byte(true), 0x00);
+        assert_eq!(b.read_byte(true), 0x00);
+        assert_eq!(b.read_byte(true), 0x42);
+        assert_eq!(b.position(), 4);
+    }
+
+    #[test]
+    fn h26x_emulation_byte_kept_when_not_preceded_by_two_zeros() {
+        // 0x03 preceded by 0x01 0x00 is real data, not an emulation byte.
+        let data = [0x01, 0x00, 0x03, 0x42];
+        let mut b = TSStreamBuffer::new(&data);
+        assert_eq!(b.read_byte(true), 0x01);
+        assert_eq!(b.read_byte(true), 0x00);
+        assert_eq!(b.read_byte(true), 0x03);
+        assert_eq!(b.read_byte(true), 0x42);
+    }
+
+    #[test]
+    fn h26x_disabled_keeps_emulation_byte() {
+        let data = [0x00, 0x00, 0x03, 0x42];
+        let mut b = TSStreamBuffer::new(&data);
+        assert_eq!(b.read_byte(false), 0x00);
+        assert_eq!(b.read_byte(false), 0x00);
+        assert_eq!(b.read_byte(false), 0x03);
+    }
+
+    #[test]
+    fn exp_golomb_decodes_sequence() {
+        // ue(v): "1"=0, "010"=1, "011"=2 -> bits 1 010 011 = 0b1010_0110.
+        let data = [0b1010_0110];
+        let mut b = TSStreamBuffer::new(&data);
+        assert_eq!(b.read_exp_default(), 0);
+        assert_eq!(b.read_exp_default(), 1);
+        assert_eq!(b.read_exp_default(), 2);
+    }
+
+    #[test]
+    fn signed_exp_golomb_maps_codes() {
+        // se(v): ue 0 -> 0, ue 1 -> +1, ue 2 -> -1.
+        let data = [0b1010_0110];
+        let mut b = TSStreamBuffer::new(&data);
+        assert_eq!(b.read_se_default(), 0);
+        assert_eq!(b.read_se_default(), 1);
+        assert_eq!(b.read_se_default(), -1);
+    }
+
+    #[test]
+    fn read_bytes_returns_none_at_or_past_end() {
+        // Mirrors BDInfo: returns None when pos + n >= length.
+        let data = [0x01, 0x02, 0x03, 0x04];
+        let mut b = TSStreamBuffer::new(&data);
+        assert_eq!(b.read_bytes(2), Some(vec![0x01, 0x02]));
+        // pos=2, requesting 2 -> 2+2 >= 4 -> None.
+        assert_eq!(b.read_bytes(2), None);
+    }
+
+    #[test]
+    fn seek_clamps_within_bounds() {
+        let data = [0u8; 8];
+        let mut b = TSStreamBuffer::new(&data);
+        b.seek(4, SeekOrigin::Begin);
+        assert_eq!(b.position(), 4);
+        b.seek(-2, SeekOrigin::Current);
+        assert_eq!(b.position(), 2);
+        b.seek(0, SeekOrigin::End);
+        assert_eq!(b.position(), 8);
+        b.seek(100, SeekOrigin::Begin); // clamps to len
+        assert_eq!(b.position(), 8);
+        b.seek(-100, SeekOrigin::Begin); // clamps to 0
+        assert_eq!(b.position(), 0);
+    }
+
+    #[test]
+    fn begin_read_resets_cursor_and_bit_state() {
+        let data = [0xFF, 0x00, 0xFF];
+        let mut b = TSStreamBuffer::new(&data);
+        b.read_bits2_default(4);
+        b.read_byte_default();
+        b.begin_read();
+        assert_eq!(b.position(), 0);
+        assert_eq!(b.read_bits2_default(8), 0xFF);
+    }
+
+    #[test]
+    fn remaining_counters_track_position() {
+        let data = [0u8; 4];
+        let mut b = TSStreamBuffer::new(&data);
+        assert_eq!(b.data_bit_stream_remain(), 32);
+        assert_eq!(b.data_bit_stream_remain_bytes(), 4);
+        b.read_byte_default();
+        assert_eq!(b.data_bit_stream_remain(), 24);
+        assert_eq!(b.data_bit_stream_remain_bytes(), 3);
+    }
+
+    #[test]
+    fn under_reads_default_without_panicking() {
+        let data = [0xFF];
+        let mut b = TSStreamBuffer::new(&data);
+        // Reading well past the end returns zero/false, never panics.
+        let _ = b.read_bits8_default(64);
+        let _ = b.read_bits4_default(32);
+        assert!(!b.read_bool_default());
+        assert_eq!(b.read_byte_default(), 0);
     }
 }

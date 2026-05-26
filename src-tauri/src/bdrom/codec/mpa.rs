@@ -90,3 +90,112 @@ pub fn scan(stream: &mut TSStreamInfo, buffer: &mut TSStreamBuffer) {
     stream.is_vbr = false;
     stream.is_initialized = true;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bdrom::types::TSStreamType;
+
+    /// Pack a 32-bit MPEG audio frame header (sync word forced valid) into 4
+    /// big-endian bytes, in the field order the parser consumes.
+    fn mpa_header(version: u32, layer: u32, bitrate_idx: u32, sr_idx: u32, channel_mode: u32) -> Vec<u8> {
+        let mut h: u32 = 0;
+        h = (h << 11) | 0x7FF; // sync (11 bits)
+        h = (h << 2) | (version & 0x3);
+        h = (h << 2) | (layer & 0x3);
+        h = (h << 1) | 1; // protection bit
+        h = (h << 4) | (bitrate_idx & 0xF);
+        h = (h << 2) | (sr_idx & 0x3);
+        h = (h << 1) | 0; // padding
+        h = (h << 1) | 0; // private
+        h = (h << 2) | (channel_mode & 0x3);
+        h = (h << 2) | 0; // mode extension
+        h = (h << 1) | 0; // copyright
+        h = (h << 1) | 0; // original
+        h = (h << 2) | 0; // emphasis
+        h.to_be_bytes().to_vec()
+    }
+
+    fn mpa_stream() -> TSStreamInfo {
+        TSStreamInfo::new(0x1100, TSStreamType::MPEG2Video as u8)
+    }
+
+    #[test]
+    fn invalid_sync_word_is_rejected() {
+        let mut stream = mpa_stream();
+        let data = vec![0x00, 0x00, 0x00, 0x00];
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert!(!stream.is_initialized);
+    }
+
+    #[test]
+    fn mpeg1_layer3_stereo_128k_48k() {
+        let data = mpa_header(3, 1, 9, 1, 0);
+        let mut stream = mpa_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert!(stream.is_initialized);
+        assert!(!stream.is_vbr);
+        assert_eq!(stream.bit_rate, 128_000);
+        assert_eq!(stream.sample_rate, 48_000);
+        assert_eq!(stream.channel_count, 2);
+        assert_eq!(stream.codec_name, "MPEG 1 Layer III");
+        assert_eq!(stream.audio_mode, TSAudioMode::Stereo.label());
+    }
+
+    #[test]
+    fn mpeg1_layer1_mono_448k_44k() {
+        let data = mpa_header(3, 3, 14, 0, 3);
+        let mut stream = mpa_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert_eq!(stream.bit_rate, 448_000);
+        assert_eq!(stream.sample_rate, 44_100);
+        assert_eq!(stream.channel_count, 1);
+        assert_eq!(stream.codec_name, "MPEG 1 Layer I");
+        assert_eq!(stream.audio_mode, TSAudioMode::Mono.label());
+    }
+
+    #[test]
+    fn full_version_layer_bitrate_matrix_matches_tables() {
+        // Exercises every version/layer/bitrate/sample-rate/channel-mode cell and
+        // confirms the parser reproduces the lookup tables exactly.
+        for version in 0..4u32 {
+            for layer in 0..4u32 {
+                for br in 0..16u32 {
+                    for sr in 0..4u32 {
+                        for ch in 0..4u32 {
+                            let data = mpa_header(version, layer, br, sr, ch);
+                            let mut stream = mpa_stream();
+                            let mut buffer = TSStreamBuffer::new(&data);
+                            scan(&mut stream, &mut buffer);
+                            assert!(stream.is_initialized);
+                            assert_eq!(
+                                stream.bit_rate,
+                                MPA_BITRATE[version as usize][layer as usize][br as usize] as u64
+                                    * 1000
+                            );
+                            assert_eq!(
+                                stream.sample_rate,
+                                MPA_SAMPLE_RATE[version as usize][sr as usize]
+                            );
+                            assert_eq!(stream.channel_count, MPA_CHANNELS[ch as usize]);
+                            assert_eq!(
+                                stream.audio_mode,
+                                MPA_CHANNEL_MODES[ch as usize].label()
+                            );
+                            assert_eq!(
+                                stream.codec_name,
+                                format!(
+                                    "{} {}",
+                                    MPA_VERSION[version as usize], MPA_LAYER[layer as usize]
+                                )
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

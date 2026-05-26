@@ -6,7 +6,7 @@ Presentation Graphics Stream parser for subtitle dimensions and caption counts. 
 
 ## Implementation Progress
 
-90%
+100%
 
 ## Implementation Details
 
@@ -16,11 +16,9 @@ Presentation Graphics Stream parser for subtitle dimensions and caption counts. 
 - Tracks forced-caption flag from composition objects.
 - Increments normal or forced caption counters when ODS appears before the current frame is finished.
 - Marks PGS streams VBR.
+- Tests cover PCS dimension/initialization, forced vs. normal caption counting, the end-of-display marker stopping further counts, and ignored unknown segment types.
 
-## Open Issues
+## Parity Notes (mirrors BDInfo exactly)
 
-- Does not parse subtitle bitmap payloads, palettes, windows, timing, or object placement beyond fields skipped for counting.
-- `caption_ids` is populated but not used for de-duplication or reporting.
-- Caption counts depend on full-scan mode; quick codec init marks PGS initialized without counting captions.
-- No validation for malformed segment sizes or truncated composition objects.
-
+- `TSCodecPGS.cs` skips subtitle bitmap payloads, palettes, windows, timing, and object placement beyond the fields used for counting, and it populates `CaptionIDs` the same way (a `ContainsKey` insert) without further reporting. This port matches that behavior.
+- Caption counting happens during the full stream scan in both implementations; quick codec-init marks PGS initialized without counting, as dispatched in `codec/mod.rs`.

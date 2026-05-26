@@ -74,7 +74,7 @@ impl<R: Read> Read for ProgressReader<R> {
         let n = self.inner.read(buf)?;
         self.bytes_read += n as u64;
         if self.last_report.elapsed() >= self.min_interval {
-            let mut p = self.state.progress.lock().unwrap();
+            let mut p = self.state.progress.lock().unwrap_or_else(|e| e.into_inner());
             p.finished_bytes = self.base_completed + self.bytes_read;
             self.last_report = Instant::now();
         }
@@ -102,7 +102,7 @@ pub fn start(path: String, state: Arc<FullScanState>) {
         .unwrap_or(0);
 
     {
-        let mut p = state.progress.lock().unwrap();
+        let mut p = state.progress.lock().unwrap_or_else(|e| e.into_inner());
         *p = ScanProgressInfo {
             path: path.clone(),
             total_bytes: 0,
@@ -122,7 +122,7 @@ pub fn start(path: String, state: Arc<FullScanState>) {
     std::thread::spawn(move || {
         let result = run_worker(path, state_for_thread.clone());
         let cancelled = state_for_thread.cancel.load(Ordering::SeqCst);
-        let mut p = state_for_thread.progress.lock().unwrap();
+        let mut p = state_for_thread.progress.lock().unwrap_or_else(|e| e.into_inner());
         p.is_running = false;
         match result {
             Ok(()) => {
@@ -158,7 +158,7 @@ pub fn cancel(state: &FullScanState) {
 }
 
 pub fn snapshot(state: &FullScanState) -> ScanProgressInfo {
-    state.progress.lock().unwrap().clone()
+    state.progress.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
@@ -205,7 +205,7 @@ fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
         .sum();
 
     {
-        let mut p = state.progress.lock().unwrap();
+        let mut p = state.progress.lock().unwrap_or_else(|e| e.into_inner());
         p.total_bytes = total_bytes;
         p.disc = Some(disc.clone());
         p.version += 1;
@@ -248,7 +248,7 @@ fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
         let file_size = entry.1;
 
         {
-            let mut p = state.progress.lock().unwrap();
+            let mut p = state.progress.lock().unwrap_or_else(|e| e.into_inner());
             p.current_file = Some(clip_name.clone());
             p.version += 1;
         }
@@ -294,7 +294,7 @@ fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
         restore_stream_estimates(&mut disc, &cached_estimates);
         finalize_after_file(&mut disc);
 
-        let mut p = state.progress.lock().unwrap();
+        let mut p = state.progress.lock().unwrap_or_else(|e| e.into_inner());
         p.finished_bytes = completed_bytes;
         p.disc = Some(disc.clone());
         p.version += 1;
@@ -306,13 +306,13 @@ fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
     if !state.cancel.load(Ordering::SeqCst) {
         restore_stream_estimates(&mut disc, &cached_estimates);
         finalize_after_file(&mut disc);
-        let mut p = state.progress.lock().unwrap();
+        let mut p = state.progress.lock().unwrap_or_else(|e| e.into_inner());
         p.disc = Some(disc);
         p.current_file = None;
         p.finished_bytes = total_bytes;
         p.version += 1;
     } else {
-        let mut p = state.progress.lock().unwrap();
+        let mut p = state.progress.lock().unwrap_or_else(|e| e.into_inner());
         p.current_file = None;
         p.version += 1;
     }
@@ -707,7 +707,7 @@ fn publish_partial_file_snapshot(
     restore_stream_estimates(disc, cached_estimates);
     finalize_after_file(disc);
 
-    let mut p = state.progress.lock().unwrap();
+    let mut p = state.progress.lock().unwrap_or_else(|e| e.into_inner());
     p.finished_bytes = base_completed + progress.bytes;
     p.disc = Some(disc.clone());
     p.version += 1;

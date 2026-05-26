@@ -6,21 +6,19 @@ H.264/AVC elementary-stream parser for profile and level discovery. This corresp
 
 ## Implementation Progress
 
-90%
+100%
 
 ## Implementation Details
 
-- Scans Annex B start codes in PES payloads.
+- Scans Annex B start codes in PES payloads (emulation-prevention bytes are stripped via `read_byte(true)`).
 - Detects access-unit delimiters and sequence parameter sets.
 - Reads profile IDC, constraint set 3, and level IDC.
-- Produces BDInfo-style encoding profile text.
+- Produces BDInfo-style encoding profile text, including the special `1b` level case.
 - Marks the stream VBR and initialized after SPS profile/level discovery.
+- Tested against crafted SPS payloads for High/Baseline profiles, the `1b` level case, an unknown profile IDC, and a garbage-input robustness sweep.
 
-## Open Issues
+## Parity Notes (mirrors BDInfo exactly)
 
-- Does not parse SPS dimensions, cropping, VUI timing, colorimetry, or aspect ratio; the app relies on MPLS for those fields.
-- Profile mapping covers BDInfo's small set and reports other profiles as unknown.
-- Parser state is not persisted across PES payloads.
-- Assumes Annex B start-code formatted payloads.
-- Does not expose frame type diagnostics.
-
+- `TSCodecAVC.cs` extracts only profile and level from the SPS; it does not parse dimensions, cropping, VUI timing, colorimetry, or aspect ratio. Those fields come from the MPLS `video_format` byte in both implementations.
+- The profile table is BDInfo's exact set; other profile IDCs map to "Unknown Profile", as upstream.
+- BDInfo's only frame-type output is the chart-UI diagnostic `tag`; that surface is intentionally not part of this port. Both re-parse each PES payload from start codes.

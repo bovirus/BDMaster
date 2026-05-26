@@ -6,7 +6,7 @@ AAC ADTS header parser. This corresponds to BDInfo's `TSCodecAAC.cs`.
 
 ## Implementation Progress
 
-90%
+100%
 
 ## Implementation Details
 
@@ -14,12 +14,8 @@ AAC ADTS header parser. This corresponds to BDInfo's `TSCodecAAC.cs`.
 - Reads MPEG version, profile object type, sampling-rate index, and channel configuration.
 - Maps common AAC profile names, sample rates, channel counts, and audio modes.
 - Sets codec name, sample rate, channel count, LFE flag, audio mode, VBR flag, and initialized state.
+- Tests pack synthetic ADTS headers and verify the full version × profile × sample-rate-index × channel-mode matrix against the lookup tables, the profile-name table directly, and sync-word rejection.
 
-## Open Issues
+## Parity Notes (mirrors BDInfo exactly)
 
-- Does not parse AAC extensions such as SBR/PS or explicit AudioSpecificConfig data.
-- Channel configuration 0 (program config element) is not parsed.
-- ADTS CRC/protection fields are skipped and not validated.
-- Invalid/reserved combinations become zero/empty fields instead of reported errors.
-- No tests compare all BDInfo sample-rate and channel-mode cases.
-
+- `TSCodecAAC.cs` parses only the ADTS fixed header: it does not decode SBR/PS extensions or explicit AudioSpecificConfig, does not parse channel configuration 0 (program config element), and skips CRC/protection. Invalid/reserved combinations collapse to zero/empty fields rather than errors. This port matches that behavior.

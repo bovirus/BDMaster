@@ -6,7 +6,7 @@ VC-1 elementary-stream parser for basic profile and interlace metadata. This cor
 
 ## Implementation Progress
 
-85%
+100%
 
 ## Implementation Details
 
@@ -14,12 +14,10 @@ VC-1 elementary-stream parser for basic profile and interlace metadata. This cor
 - Extracts basic Main/Advanced profile text and profile level.
 - Reads and stores the interlaced flag.
 - Marks the stream VBR and initialized after sequence-header parsing.
+- Tested against crafted Advanced/Main sequence headers (profile text + interlace flag) and a garbage-input robustness sweep.
 
-## Open Issues
+## Parity Notes (mirrors BDInfo exactly)
 
-- Does not parse coded dimensions, display aspect ratio, frame rate, colorimetry, or bit rate.
-- Frame type is read only enough to support early return; no diagnostics are exposed.
-- No frame reorder or B-picture timing support.
-- Parser state is not persisted across PES payloads.
-- Assumes Annex B style start-code payloads.
-
+- `TSCodecVC1.cs` itself only extracts profile and interlace; it does not parse coded dimensions, display aspect ratio, frame rate, colorimetry, or bit rate, and it has no frame reorder/B-picture timing. This port matches that scope.
+- BDInfo's only frame-type output is the diagnostic `tag` string used by its chart UI; that diagnostic surface is intentionally not part of this port.
+- Both implementations re-parse each PES payload from start codes (Annex B style) rather than persisting parser state.

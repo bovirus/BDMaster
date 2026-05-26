@@ -19,7 +19,7 @@
  */
 
 use anyhow::{anyhow, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
@@ -120,6 +120,8 @@ pub struct UdfImage {
     partitions: HashMap<u16, Partition>,
     partition_maps: Vec<PartitionMap>,
     pub root: UdfFile,
+    /// Logical Volume Identifier from the LVD (UDF's disc volume label).
+    pub volume_label: String,
 }
 
 fn read_long_ad(buf: &[u8]) -> LongAd {
@@ -373,6 +375,9 @@ impl UdfImage {
             }
         }
 
+        // Logical Volume Identifier: a 128-byte d-string at offset 84 of the LVD.
+        let volume_label = parse_d_string(&lvd_sector[84..212]);
+
         // Build the image with what we have so we can use its resolver.
         let mut img = UdfImage {
             file,
@@ -385,6 +390,7 @@ impl UdfImage {
                 allocation_descriptors: Vec::new(),
                 partition_reference: 0,
             },
+            volume_label,
         };
 
         // Resolve the FSD physical LBA via the partition maps.
@@ -585,14 +591,27 @@ impl UdfImage {
     }
 
     pub fn directory_size(&mut self, fe: &UdfFile) -> Result<u64> {
-        directory_size_inner(self, fe)
+        let mut visited: HashSet<(u32, u16)> = HashSet::new();
+        directory_size_inner(self, fe, &mut visited, 0)
     }
 }
 
-fn directory_size_inner(image: &mut UdfImage, fe: &UdfFile) -> Result<u64> {
+/// Recursive directory-byte tally with explicit loop protection: a `visited`
+/// set of (block, partition) ICB locations prevents cycles from a malformed
+/// disc, and `MAX_DIR_DEPTH` caps pathological nesting.
+fn directory_size_inner(
+    image: &mut UdfImage,
+    fe: &UdfFile,
+    visited: &mut HashSet<(u32, u16)>,
+    depth: u32,
+) -> Result<u64> {
+    const MAX_DIR_DEPTH: u32 = 100;
     let mut total: u64 = 0;
     if !fe.is_directory {
         return Ok(fe.size);
+    }
+    if depth >= MAX_DIR_DEPTH {
+        return Ok(0);
     }
     let entries = image.list_dir(fe)?;
     for e in entries {
@@ -601,7 +620,15 @@ fn directory_size_inner(image: &mut UdfImage, fe: &UdfFile) -> Result<u64> {
         }
         let child = image.read_file_entry(&e.icb)?;
         if child.is_directory {
-            total += directory_size_inner(image, &child)?;
+            let key = (
+                e.icb.location.logical_block_number,
+                e.icb.location.partition_reference_number,
+            );
+            // Don't descend into a directory ICB we've already seen.
+            if !visited.insert(key) {
+                continue;
+            }
+            total += directory_size_inner(image, &child, visited, depth + 1)?;
         } else if !e.name.to_ascii_lowercase().ends_with(".ssif") {
             total += child.size;
         }
@@ -780,7 +807,7 @@ impl UdfFileReader {
     pub fn new(image: Arc<Mutex<UdfImage>>, fe: &UdfFile) -> Result<Self> {
         let mut runs: Vec<(u64, u64)> = Vec::new();
         {
-            let img = image.lock().unwrap();
+            let img = image.lock().unwrap_or_else(|e| e.into_inner());
             for ad in &fe.allocation_descriptors {
                 let (prn, lbn, len) = match ad {
                     AllocDesc::Short(s) => {
@@ -825,7 +852,7 @@ impl Read for UdfFileReader {
                 return Ok(0);
             }
             let abs_byte = lba * SECTOR_SIZE as u64 + self.run_offset;
-            let mut img = self.image.lock().unwrap();
+            let mut img = self.image.lock().unwrap_or_else(|e| e.into_inner());
             img.file.seek(SeekFrom::Start(abs_byte))?;
             let n = img.file.read(&mut buf[..want])?;
             self.run_offset += n as u64;
@@ -833,5 +860,49 @@ impl Read for UdfFileReader {
             return Ok(n);
         }
         Ok(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn d_string_compression_8_is_ascii() {
+        // [compression id][bytes...]; compression 8 = 8-bit characters.
+        let mut buf = vec![8u8];
+        buf.extend_from_slice(b"BD_VIDEO\0\0");
+        assert_eq!(parse_d_string(&buf), "BD_VIDEO");
+    }
+
+    #[test]
+    fn d_string_compression_16_is_utf16_be() {
+        let mut buf = vec![16u8];
+        for ch in "Café".chars() {
+            buf.extend_from_slice(&(ch as u16).to_be_bytes());
+        }
+        assert_eq!(parse_d_string(&buf), "Café");
+    }
+
+    #[test]
+    fn d_string_empty_or_unknown_compression() {
+        assert_eq!(parse_d_string(&[]), "");
+        // Unknown compression id -> empty, never panics.
+        assert_eq!(parse_d_string(&[5, 1, 2, 3]), "");
+    }
+
+    #[test]
+    fn long_ad_length_masks_type_bits() {
+        // length_and_type with the top type bits set; length() masks to 30 bits.
+        let buf = [0x00, 0x08, 0x00, 0xC0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let ad = read_long_ad(&buf);
+        assert_eq!(ad.length(), 0x0000_0800);
+    }
+
+    #[test]
+    fn short_ad_length_masks_type_bits() {
+        let buf = [0x00, 0x10, 0x00, 0x40, 0, 0, 0, 0];
+        let ad = read_short_ad(&buf);
+        assert_eq!(ad.length(), 0x0000_1000);
     }
 }

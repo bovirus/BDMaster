@@ -2,20 +2,18 @@
 
 ## Description
 
-MVC stream marker/parser stub. This corresponds to BDInfo's `TSCodecMVC.cs`.
+MVC stream marker/parser. This corresponds to BDInfo's `TSCodecMVC.cs`.
 
 ## Implementation Progress
 
-95%
+100%
 
 ## Implementation Details
 
-- Matches BDInfo's current behavior: mark MVC streams VBR and initialized.
+- Faithful port of `TSCodecMVC.Scan`, which only marks MVC streams VBR and initialized (the C# source itself carries the `// TODO: Do something more interesting here...` comment).
 - Actual 3D/base-view presentation is handled by MPLS metadata and SSIF handling in `mod.rs` and `full_scan.rs`.
+- Tested to confirm the two flags are set.
 
-## Open Issues
+## Parity Notes (mirrors BDInfo exactly)
 
-- Does not parse MVC NAL units, view identifiers, dependency information, or MVC-specific profile/level metadata.
-- Relies on SSIF source selection and a fixed MVC PID convention for practical 3D handling.
-- Does not validate that the MVC stream is paired with the expected AVC base view.
-
+- BDInfo does not parse MVC NAL units, view identifiers, dependency information, or MVC profile/level metadata; neither does this port. Practical 3D handling relies on SSIF source selection and the MVC PID convention, exactly as upstream.

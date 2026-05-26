@@ -305,7 +305,7 @@ fn open_bdrom_iso(path: &Path, use_ssif: bool) -> Result<BDRom> {
 
     // Resolve the BDMV directory (case-insensitive).
     let bdmv = {
-        let mut img = image.lock().unwrap();
+        let mut img = image.lock().unwrap_or_else(|e| e.into_inner());
         img.resolve("BDMV")
             .map_err(|e| anyhow!("UDF: BDMV not found in image: {}", e))?
     };
@@ -313,16 +313,24 @@ fn open_bdrom_iso(path: &Path, use_ssif: bool) -> Result<BDRom> {
         return Err(anyhow!("UDF: BDMV is not a directory"));
     }
 
-    // Volume label: derive from the ISO file name (without extension).
-    let volume_label = path
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
+    // Volume label: prefer the UDF Logical Volume Identifier (what DiscUtils /
+    // BDInfo report); fall back to the ISO file name when the LVD has none.
+    let volume_label = {
+        let img = image.lock().unwrap_or_else(|e| e.into_inner());
+        let lvid = img.volume_label.trim().to_string();
+        if lvid.is_empty() {
+            path.file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default()
+        } else {
+            lvid
+        }
+    };
 
     // Total disc size: sum of all files in the root directory tree, skipping
     // .ssif files (mirroring BDInfo's behavior).
     let size = {
-        let mut img = image.lock().unwrap();
+        let mut img = image.lock().unwrap_or_else(|e| e.into_inner());
         let root = img.root.clone();
         img.directory_size(&root).unwrap_or(0)
     };
@@ -330,7 +338,7 @@ fn open_bdrom_iso(path: &Path, use_ssif: bool) -> Result<BDRom> {
     // index.bdmv → UHD detection.
     let mut is_uhd = false;
     {
-        let mut img = image.lock().unwrap();
+        let mut img = image.lock().unwrap_or_else(|e| e.into_inner());
         if let Ok(index_fe) = img.resolve("BDMV/index.bdmv") {
             if let Ok(bytes) = img.read_file(&index_fe) {
                 if bytes.len() >= 8 {
@@ -341,7 +349,7 @@ fn open_bdrom_iso(path: &Path, use_ssif: bool) -> Result<BDRom> {
         }
     }
 
-    let mut img = image.lock().unwrap();
+    let mut img = image.lock().unwrap_or_else(|e| e.into_inner());
 
     let is_bd_plus = img.try_resolve("BDSVM").is_some()
         || img.try_resolve("SLYVM").is_some()
@@ -423,13 +431,17 @@ fn open_bdrom_iso(path: &Path, use_ssif: bool) -> Result<BDRom> {
                 }
                 if let Ok(fe) = crate::bdrom::udf::read_file_entry_at(&mut img, &entry.icb) {
                     let name = entry.name.to_uppercase();
-                    stream_clip_files.insert(
-                        name.clone(),
-                        StreamClipFile {
-                            name,
+                    // CLPI files are small; read and parse the content so stream
+                    // metadata is available (same as the native-folder path).
+                    let scf = match img.read_file(&fe) {
+                        Ok(bytes) => clpi::parse_clpi_bytes(name.clone(), fe.size, &bytes),
+                        Err(_) => StreamClipFile {
+                            name: name.clone(),
                             size: fe.size,
+                            ..Default::default()
                         },
-                    );
+                    };
+                    stream_clip_files.insert(name, scf);
                 }
             }
         }
@@ -919,8 +931,24 @@ fn build_playlist_info(pl: &PlaylistFile, bd: &BDRom, group_index: u32) -> Playl
     let mut audio_streams = Vec::new();
     let mut graphics_streams = Vec::new();
     let mut text_streams = Vec::new();
+    // First angle-0 clip, used to cross-check stream language codes against the
+    // matching CLPI program-info table when MPLS leaves them blank.
+    let first_clip = pl
+        .stream_clips
+        .iter()
+        .find(|c| c.angle_index == 0)
+        .map(|c| c.name.clone());
+
     for s in &pl.playlist_streams {
-        let info = playlist_stream_to_info(s);
+        let mut info = playlist_stream_to_info(s);
+        if info.language_code.is_empty() {
+            if let Some(clip_name) = &first_clip {
+                if let Some(code) = clpi_language_for(bd, clip_name, s.pid) {
+                    info.language_name = language_name(&code);
+                    info.language_code = code;
+                }
+            }
+        }
         if s.stream_type.is_video() {
             video_streams.push(info);
         } else if s.stream_type.is_audio() {
@@ -991,6 +1019,21 @@ fn playlist_has_loops(pl: &PlaylistFile) -> bool {
     false
 }
 
+/// Look up a stream's language code from the matching CLPI clip's program-info
+/// table by PID. Used only as a fallback when MPLS supplies no language code.
+fn clpi_language_for(bd: &BDRom, clip_name: &str, pid: u16) -> Option<String> {
+    let stem = clip_name.rsplit_once('.').map(|(s, _)| s).unwrap_or(clip_name);
+    let clpi_name = format!("{}.CLPI", stem.to_uppercase());
+    let scf = bd.stream_clip_files.get(&clpi_name)?;
+    if !scf.is_valid {
+        return None;
+    }
+    scf.streams
+        .iter()
+        .find(|s| s.pid == pid && !s.language_code.is_empty())
+        .map(|s| s.language_code.clone())
+}
+
 fn playlist_stream_to_info(s: &PlaylistStream) -> TSStreamInfo {
     let mut info = TSStreamInfo::new(s.pid, s.stream_type as u8);
     info.stream_type_text = s.stream_type.type_text().to_string();
@@ -1001,7 +1044,7 @@ fn playlist_stream_to_info(s: &PlaylistStream) -> TSStreamInfo {
     info.is_graphics_stream = s.stream_type.is_graphics();
     info.is_text_stream = s.stream_type.is_text();
     info.language_code = s.language_code.trim_end_matches('\0').to_string();
-    info.language_name = language_name(&info.language_code).to_string();
+    info.language_name = language_name(&info.language_code);
 
     if s.stream_type.is_video() {
         info.height = s.video_format.height();

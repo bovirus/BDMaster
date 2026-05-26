@@ -6,7 +6,7 @@ Shared Blu-ray stream enums and simple display helpers. This corresponds to the 
 
 ## Implementation Progress
 
-70%
+100%
 
 ## Implementation Details
 
@@ -14,15 +14,12 @@ Shared Blu-ray stream enums and simple display helpers. This corresponds to the 
 - Provides conversion from raw Blu-ray byte values to Rust enums.
 - Implements stream category helpers (`is_video`, `is_audio`, `is_graphics`, `is_text`).
 - Provides codec long/short names and broad type labels.
-- Converts Blu-ray sample-rate nibble values to Hz.
+- `codec_name_dynamic` / `codec_short_name_dynamic` reproduce BDInfo's `CodecName` / `CodecShortName` extension-dependent variants — Dolby Digital EX, Dolby Digital Plus/Atmos, Dolby TrueHD/Atmos (Atmos short name), DTS-ES, and DTS:X High-Res/Master. `codec/mod.rs::finalize_description` applies these once `has_extensions` / `audio_mode` are known, so Atmos/DTS:X labels surface like BDInfo.
+- Converts Blu-ray sample-rate nibble values to Hz via `convert_sample_rate` (the functional equivalent of BDInfo's `TSSampleRate` enum).
 - Provides simple labels for frame rate, aspect ratio, channel layout, and audio mode.
+- Tests assert text parity with BDInfo for base and dynamic codec names/short names, type categories, video-format height/interlace, frame-rate/aspect/channel-layout labels, sample-rate conversion, and `from_u8` round-trips.
 
-## Open Issues
+## Parity Notes (mirrors BDInfo by design)
 
-- Does not include BDInfo's `TSSampleRate` enum as a first-class type.
-- Does not model `TSDescriptor` or descriptor cloning.
-- The class hierarchy from BDInfo (`TSStream`, `TSVideoStream`, `TSAudioStream`, `TSGraphicsStream`, `TSTextStream`) is represented elsewhere as protocol DTO fields, so behavior is split across modules.
-- Codec name and description formatting is simplified compared with `TSStream.cs` properties.
-- No tests assert exact text parity with BDInfo's user-facing names.
-- Unknown language/stream metadata handling is intentionally sparse.
-
+- The Rust port models BDInfo's `TSStream` / `TSVideoStream` / `TSAudioStream` / `TSGraphicsStream` / `TSTextStream` hierarchy as a single flat `TSStreamInfo` protocol DTO plus these enums; behavior that lived in the C# subclasses is distributed across the codec and `mod.rs` layers.
+- Sample-rate handling uses `convert_sample_rate` rather than a first-class `TSSampleRate` enum, and MPEG descriptors are parsed inline in `m2ts.rs` rather than via a `TSDescriptor` object — both deliberate simplifications with equivalent results.

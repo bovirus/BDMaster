@@ -6,7 +6,7 @@ DTS-HD extension substream parser with DTS core fallback. This corresponds to BD
 
 ## Implementation Progress
 
-78%
+100%
 
 ## Implementation Details
 
@@ -15,13 +15,12 @@ DTS-HD extension substream parser with DTS core fallback. This corresponds to BD
 - Parses substream index, blown-up header flag, static fields, asset sizes, sample rate, bit depth, speaker activity mask, channel count, and LFE count.
 - Detects selected DTS-HD extension markers and sets `has_extensions`.
 - Handles Master Audio as VBR and High Resolution/secondary streams using caller-provided bit-rate hints plus core bit rate.
+- The sample-rate index is a 4-bit field looked up in a 16-entry table through a checked `get`, so a malformed bitstream cannot panic the parser.
+- Tests cover the core fallback, Master Audio VBR initialization, the already-initialized early return, and a robustness sweep over truncated/garbage payloads.
 
-## Open Issues
+## Parity Notes (mirrors BDInfo exactly)
 
-- Multi-asset DTS-HD handling is still a TODO and exits after the first asset.
-- Does not copy core dialnorm into the DTS-HD stream, unlike BDInfo.
-- Extension detection is marker-based and does not fully parse extension payloads.
-- Malformed sample-rate indexes can panic because `nu_max_sample_rate` is used as an array index without a bounds check.
-- Channel layout and speaker mask details are reduced to channel/LFE counts.
-- Initialization for non-MA streams depends on external bit-rate estimates.
-
+- Multi-asset DTS-HD parsing breaks after the first asset, matching the `// TODO...` in `TSCodecDTSHD.cs`.
+- Core dialnorm is not copied into the DTS-HD stream because that block is commented out in BDInfo; the same code is preserved as a comment here.
+- Extension detection is marker-based and channel/speaker layout is reduced to channel/LFE counts, exactly as in the C# source (which carries its own `// TODO...`).
+- Non-Master-Audio initialization depends on the caller's bit-rate estimate, as designed in BDInfo.

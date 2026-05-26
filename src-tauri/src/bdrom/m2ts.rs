@@ -674,3 +674,123 @@ fn parse_pmt(
         i += 5 + es_info_length;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a 188-byte TS packet (payload-only, cc=0), padded with 0xFF.
+    fn ts_packet(pusi: bool, pid: u16, payload: &[u8]) -> Vec<u8> {
+        let mut ts = vec![0xFFu8; TS_PACKET_SIZE];
+        ts[0] = SYNC_BYTE;
+        ts[1] = ((pid >> 8) as u8 & 0x1F) | if pusi { 0x40 } else { 0 };
+        ts[2] = (pid & 0xFF) as u8;
+        ts[3] = 0x10; // adaptation_field_control = payload only
+        let n = payload.len().min(TS_PACKET_SIZE - 4);
+        ts[4..4 + n].copy_from_slice(&payload[..n]);
+        ts
+    }
+
+    /// Wrap a TS packet in the 192-byte M2TS frame (4-byte ATC prefix).
+    fn m2ts(ts: &[u8]) -> Vec<u8> {
+        let mut p = vec![0u8; 4];
+        p.extend_from_slice(ts);
+        p
+    }
+
+    fn pat_payload(program: u16, pmt_pid: u16) -> Vec<u8> {
+        vec![
+            0x00, // pointer
+            0x00, // table_id (PAT)
+            0xB0, 0x0D, // section_length = 13
+            0x00, 0x01, // transport_stream_id
+            0x01, // version / current_next
+            0x00, // section_number
+            0x00, // last_section_number
+            (program >> 8) as u8,
+            (program & 0xFF) as u8,
+            0xE0 | (pmt_pid >> 8) as u8,
+            (pmt_pid & 0xFF) as u8,
+            0x00, 0x00, 0x00, 0x00, // CRC (not validated)
+        ]
+    }
+
+    fn pmt_payload() -> Vec<u8> {
+        vec![
+            0x00, // pointer
+            0x02, // table_id (PMT)
+            0xB0, 0x17, // section_length = 23
+            0x00, 0x01, // program_number
+            0x01, 0x00, 0x00, // version / section / last
+            0xE0, 0x00, // PCR PID
+            0xF0, 0x00, // program_info_length = 0
+            // ES1: AVC (0x1b) on PID 0x1011, es_info_length 0
+            0x1b, 0xF0, 0x11, 0xF0, 0x00,
+            // ES2: AC3 (0x81) on PID 0x1100, es_info_length 0
+            0x81, 0xF1, 0x00, 0xF0, 0x00,
+            0x00, 0x00, 0x00, 0x00, // CRC
+        ]
+    }
+
+    fn pes_payload(es: &[u8]) -> Vec<u8> {
+        let mut v = vec![
+            0x00, 0x00, 0x01, // PES start code
+            0xE0, // stream id (video)
+            0x00, 0x00, // PES packet length
+            0x80, 0x00, // flags
+            0x00, // header data length = 0
+        ];
+        v.extend_from_slice(es);
+        v
+    }
+
+    #[test]
+    fn discovers_pmt_pids_and_stream_types_and_dispatches_pes() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0000, &pat_payload(1, 0x0100))));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0100, &pmt_payload())));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x1011, &pes_payload(&[0xAA, 0xBB]))));
+
+        let mut pes_calls: Vec<(u16, u8, Vec<u8>, bool)> = Vec::new();
+        let result = scan_m2ts_streaming_from_reader(data.as_slice(), |pid, st, payload, pmt| {
+            let has_ac3 = pmt.get(&0x1100) == Some(&0x81);
+            pes_calls.push((pid, st, payload.to_vec(), has_ac3));
+            PesAction::Continue
+        })
+        .expect("scan succeeds");
+
+        // PAT discovered the PMT PID.
+        assert_eq!(result.program_pmt_pids, vec![0x0100]);
+        // PMT mapped the AVC elementary stream PID to its type.
+        let avc = result.streams.get(&0x1011).expect("AVC PID seen");
+        assert_eq!(avc.stream_type, 0x1b);
+
+        // The PES on PID 0x1011 was dispatched (flushed at end of stream), and
+        // the PMT table passed to the callback knew about the AC3 PID.
+        let call = pes_calls
+            .iter()
+            .find(|(pid, _, _, _)| *pid == 0x1011)
+            .expect("PES dispatched for AVC PID");
+        assert_eq!(call.1, 0x1b);
+        assert_eq!(&call.2[..2], &[0xAA, 0xBB]);
+        assert!(call.3, "PMT map should carry the AC3 PID");
+    }
+
+    #[test]
+    fn empty_input_yields_no_streams() {
+        let data: Vec<u8> = Vec::new();
+        let result = scan_m2ts_from_reader(data.as_slice()).expect("scan succeeds");
+        assert_eq!(result.bytes, 0);
+        assert!(result.streams.is_empty());
+        assert!(result.program_pmt_pids.is_empty());
+    }
+
+    #[test]
+    fn packets_without_sync_byte_are_skipped() {
+        // A 192-byte frame whose TS sync byte is wrong must be ignored, not panic.
+        let mut bad = vec![0u8; M2TS_PACKET_SIZE];
+        bad[4] = 0x00; // not 0x47
+        let result = scan_m2ts_from_reader(bad.as_slice()).expect("scan succeeds");
+        assert!(result.streams.is_empty());
+    }
+}

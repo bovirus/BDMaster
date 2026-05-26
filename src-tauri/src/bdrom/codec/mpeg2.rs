@@ -114,3 +114,68 @@ pub fn scan(stream: &mut TSStreamInfo, buffer: &mut TSStreamBuffer) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bdrom::types::TSStreamType;
+
+    fn mpeg2_stream() -> TSStreamInfo {
+        TSStreamInfo::new(0x1011, TSStreamType::MPEG2Video as u8)
+    }
+
+    /// A sequence header (0x000001B3) whose dimension bytes encode 1920x1080.
+    fn sequence_header_1920x1080() -> Vec<u8> {
+        vec![
+            0x00, 0x00, 0x01, 0xB3, // sequence header start code
+            0x78, 0x04, 0x38, // width=1920, height=1080 (read in DEBUG case 4)
+            0x00, 0x00, 0x00, 0x00, // aspect/frame-rate/bit-rate bytes
+        ]
+    }
+
+    #[test]
+    fn empty_buffer_leaves_stream_uninitialized() {
+        let mut stream = mpeg2_stream();
+        let data: Vec<u8> = Vec::new();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert!(!stream.is_initialized);
+    }
+
+    #[test]
+    fn sequence_header_marks_vbr_and_initialized() {
+        // This is the only behavior present in BDInfo's shipping (`#undef DEBUG`)
+        // build, so it must hold regardless of Rust build profile.
+        let data = sequence_header_1920x1080();
+        let mut stream = mpeg2_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert!(stream.is_initialized);
+        assert!(stream.is_vbr);
+    }
+
+    #[test]
+    fn dimension_extraction_is_profile_gated() {
+        let data = sequence_header_1920x1080();
+        let mut stream = mpeg2_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        if cfg!(debug_assertions) {
+            // Debug builds additionally populate dimensions from the ES.
+            assert_eq!(stream.width, 1920);
+            assert_eq!(stream.height, 1080);
+        } else {
+            // Release matches BDInfo's `#undef DEBUG`: dimensions stay unset.
+            assert_eq!(stream.width, 0);
+            assert_eq!(stream.height, 0);
+        }
+    }
+
+    #[test]
+    fn does_not_panic_on_garbage() {
+        let mut stream = mpeg2_stream();
+        let data: Vec<u8> = (0..512u32).map(|i| (i % 256) as u8).collect();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+    }
+}

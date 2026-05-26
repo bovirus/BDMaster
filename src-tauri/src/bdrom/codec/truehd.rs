@@ -125,10 +125,135 @@ pub fn scan(stream: &mut TSStreamInfo, buffer: &mut TSStreamBuffer) {
         }
     }
 
+    // BDInfo keeps the TrueHD-metadata-dialnorm copy disabled (the block is
+    // commented out in TSCodecTrueHD.cs with `// TODO: Get THD dialnorm from
+    // metadata`); we mirror that to preserve parity:
+    //   if let Some(core) = &stream.core {
+    //       if core.dial_norm != 0 { stream.dial_norm = core.dial_norm; }
+    //   }
+
     stream.is_vbr = true;
     if let Some(c) = &stream.core {
         if c.is_initialized {
             stream.is_initialized = true;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// MSB-first bit accumulator matching the parser's read order.
+    #[derive(Default)]
+    struct BitWriter {
+        bits: Vec<bool>,
+    }
+    impl BitWriter {
+        fn put(&mut self, val: u32, n: u32) {
+            for i in (0..n).rev() {
+                self.bits.push((val >> i) & 1 == 1);
+            }
+        }
+        fn bytes(&self) -> Vec<u8> {
+            let mut out = vec![0u8; (self.bits.len() + 7) / 8];
+            for (i, b) in self.bits.iter().enumerate() {
+                if *b {
+                    out[i / 8] |= 1 << (7 - (i % 8));
+                }
+            }
+            out
+        }
+    }
+
+    /// A valid legacy AC3 (bsid 8) sync frame, used to exercise the core
+    /// fallback. Contains no TrueHD sync word.
+    fn ac3_core_frame() -> Vec<u8> {
+        let mut bits = BitWriter::default();
+        bits.put(7, 3); // acmod
+        bits.put(0, 2); // cmixlev
+        bits.put(0, 2); // surmixlev
+        bits.put(1, 1); // lfeon
+        bits.put(27, 5); // dialnorm
+        bits.put(0, 1); // compre
+        bits.put(0, 1); // langcode
+        bits.put(0, 1); // audprodie
+        bits.put(0, 2); // copyright + original
+        bits.put(0, 8); // padding
+        let mut data = vec![0x0B, 0x77, 0x00, 0x00, 0x00, 0x40];
+        data.extend(bits.bytes());
+        data
+    }
+
+    fn thd_stream() -> TSStreamInfo {
+        TSStreamInfo::new(0x1100, TSStreamType::AC3TrueHDAudio as u8)
+    }
+
+    #[test]
+    fn no_truehd_sync_parses_ac3_core() {
+        let data = ac3_core_frame();
+        let mut stream = thd_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        let core = stream.core.as_ref().expect("AC3 core created");
+        assert_eq!(core.stream_type, TSStreamType::AC3Audio as u8);
+        assert!(core.is_initialized);
+        assert_eq!(core.sample_rate, 48000);
+    }
+
+    #[test]
+    fn empty_buffer_creates_uninitialized_core() {
+        let data: Vec<u8> = Vec::new();
+        let mut stream = thd_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert!(stream.core.is_some());
+        assert!(!stream.is_initialized);
+    }
+
+    #[test]
+    fn truehd_sync_parses_sample_rate_channels_and_bit_depth() {
+        let mut bits = BitWriter::default();
+        bits.put(0, 4); // ratebits 0 -> 48000 Hz
+        bits.put(0, 15); // skip
+        bits.put(1, 1); // LFE present (+1)
+        bits.put(1, 1); // channel (+1)
+        for _ in 0..11 {
+            bits.put(0, 1); // remaining channel-present flags off
+        }
+        bits.put(0, 49); // skip
+        bits.put(480, 15); // peak bitrate -> peak bit depth 15 -> 24-bit
+        bits.put(0, 79); // skip
+        bits.put(0, 1); // has_extensions = false
+        bits.put(0, 4); // num_extensions field
+        bits.put(0, 4); // has_content field
+        bits.put(0, 16); // padding
+
+        let mut data = vec![0xF8, 0x72, 0x6F, 0xBA]; // TrueHD sync
+        data.extend(bits.bytes());
+
+        let mut stream = thd_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+
+        assert_eq!(stream.sample_rate, 48000);
+        assert_eq!(stream.channel_count, 1);
+        assert_eq!(stream.lfe, 1);
+        assert_eq!(stream.bit_depth, 24);
+        assert!(stream.is_vbr);
+        // Without an initialized core, the parent stays uninitialized (parity
+        // with BDInfo's two-call pattern).
+        assert!(!stream.is_initialized);
+    }
+
+    #[test]
+    fn does_not_panic_on_garbage() {
+        for len in 0..48usize {
+            let mut data = vec![0xF8, 0x72, 0x6F, 0xBA];
+            data.extend((0..len).map(|i| (i as u8).wrapping_mul(29) | 0x21));
+            let mut stream = thd_stream();
+            let mut buffer = TSStreamBuffer::new(&data);
+            scan(&mut stream, &mut buffer);
         }
     }
 }

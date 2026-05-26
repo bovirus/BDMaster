@@ -76,3 +76,66 @@ pub fn scan(stream: &mut TSStreamInfo, buffer: &mut TSStreamBuffer) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bdrom::types::TSStreamType;
+
+    fn avc_stream() -> TSStreamInfo {
+        TSStreamInfo::new(0x1011, TSStreamType::AVCVideo as u8)
+    }
+
+    /// Build an SPS NAL: start code (0x00000127), profile_idc, constraint byte,
+    /// level_idc.
+    fn sps(profile_idc: u8, constraint: u8, level_idc: u8) -> Vec<u8> {
+        vec![0x00, 0x00, 0x01, 0x27, profile_idc, constraint, level_idc]
+    }
+
+    #[test]
+    fn empty_buffer_leaves_stream_uninitialized() {
+        let mut stream = avc_stream();
+        let data: Vec<u8> = Vec::new();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert!(!stream.is_initialized);
+    }
+
+    #[test]
+    fn high_profile_level_4_0() {
+        let data = sps(100, 0x00, 40);
+        let mut stream = avc_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert!(stream.is_initialized);
+        assert!(stream.is_vbr);
+        assert_eq!(stream.encoding_profile, "High Profile 4.0");
+    }
+
+    #[test]
+    fn baseline_level_1b_uses_constraint_set3() {
+        // level_idc 11 with constraint_set3 set decodes as the special "1b" level.
+        let data = sps(66, 0x10, 11);
+        let mut stream = avc_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert_eq!(stream.encoding_profile, "Baseline Profile 1b");
+    }
+
+    #[test]
+    fn unknown_profile_idc_is_reported() {
+        let data = sps(200, 0x00, 31);
+        let mut stream = avc_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert_eq!(stream.encoding_profile, "Unknown Profile 3.1");
+    }
+
+    #[test]
+    fn does_not_panic_on_garbage() {
+        let mut stream = avc_stream();
+        let data: Vec<u8> = (0..512u32).map(|i| (i % 256) as u8).collect();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+    }
+}
