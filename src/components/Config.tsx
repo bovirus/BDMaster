@@ -14,6 +14,8 @@ import {
   Select,
   Stack,
   Switch,
+  Tab,
+  Tabs,
   TextField,
   ToggleButton,
   ToggleButtonGroup,
@@ -22,10 +24,12 @@ import {
 import {
   BrightnessAuto as AutoIcon,
   DarkMode as DarkIcon,
+  Extension as IntegrationIcon,
   LightMode as LightIcon,
   Palette as AppearanceIcon,
   Tune as ScanIcon,
   Numbers as FormatIcon,
+  Update as UpdateIcon,
 } from "@mui/icons-material";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
@@ -38,6 +42,14 @@ import {
 } from "../lib/service";
 import { useAppStore } from "../lib/store";
 import { changeLanguage } from "../i18n";
+
+enum ConfigTab {
+  Appearance = "Appearance",
+  Scan = "Scan",
+  Formatting = "Formatting",
+  Integration = "Integration",
+  Update = "Update",
+}
 
 function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
   return (
@@ -76,6 +88,7 @@ export default function Config() {
   const setConfigState = useAppStore((s) => s.setConfig);
   const setNotification = useAppStore((s) => s.setDialogNotification);
 
+  const [mainTab, setMainTab] = useState<ConfigTab>(ConfigTab.Appearance);
   const [draft, setDraft] = useState<Protocol.Config | null>(config);
   const [mkvtoolnixFound, setMkvtoolnixFound] = useState(false);
   const [betterMediaInfoFound, setBetterMediaInfoFound] = useState(false);
@@ -149,7 +162,7 @@ export default function Config() {
     if (!isInitializedRef.current || !draft) {
       return;
     }
-    const path = draft.mkv?.mkvToolNixPath ?? "";
+    const path = draft.integration?.mkv?.mkvToolNixPath ?? "";
     if (mkvToolNixCheckDebounceRef.current) {
       clearTimeout(mkvToolNixCheckDebounceRef.current);
     }
@@ -165,7 +178,15 @@ export default function Config() {
             status.mkvToolNixPath !== path
           ) {
             setDraft((d) =>
-              d ? { ...d, mkv: { mkvToolNixPath: status.mkvToolNixPath } } : d
+              d
+                ? {
+                    ...d,
+                    integration: {
+                      ...d.integration,
+                      mkv: { mkvToolNixPath: status.mkvToolNixPath },
+                    },
+                  }
+                : d
             );
           }
         }
@@ -181,14 +202,14 @@ export default function Config() {
         clearTimeout(mkvToolNixCheckDebounceRef.current);
       }
     };
-  }, [draft?.mkv?.mkvToolNixPath]);
+  }, [draft?.integration?.mkv?.mkvToolNixPath]);
 
   // Validate the configured MPC-HC path (Windows only).
   useEffect(() => {
     if (!isInitializedRef.current || !draft || !isWindows) {
       return;
     }
-    const path = draft.mpchc?.path ?? "";
+    const path = draft.integration?.mpchc?.path ?? "";
     if (mpcHcCheckDebounceRef.current) {
       clearTimeout(mpcHcCheckDebounceRef.current);
     }
@@ -199,7 +220,14 @@ export default function Config() {
         if (!isCancelled) {
           setMpcHcFound(status.found);
           if (status.found && status.path && status.path !== path) {
-            setDraft((d) => (d ? { ...d, mpchc: { path: status.path } } : d));
+            setDraft((d) =>
+              d
+                ? {
+                    ...d,
+                    integration: { ...d.integration, mpchc: { path: status.path } },
+                  }
+                : d
+            );
           }
         }
       } catch {
@@ -214,7 +242,7 @@ export default function Config() {
         clearTimeout(mpcHcCheckDebounceRef.current);
       }
     };
-  }, [draft?.mpchc?.path, isWindows]);
+  }, [draft?.integration?.mpchc?.path, isWindows]);
 
   // Validate the configured BetterMediaInfo path. Mirrors the same debounce +
   // auto-correct pattern used for MKVToolNix above.
@@ -222,7 +250,7 @@ export default function Config() {
     if (!isInitializedRef.current || !draft) {
       return;
     }
-    const path = draft.betterMediaInfo?.path ?? "";
+    const path = draft.integration?.betterMediaInfo?.path ?? "";
     if (betterMediaInfoCheckDebounceRef.current) {
       clearTimeout(betterMediaInfoCheckDebounceRef.current);
     }
@@ -234,7 +262,15 @@ export default function Config() {
           setBetterMediaInfoFound(status.found);
           if (status.found && status.path && status.path !== path) {
             setDraft((d) =>
-              d ? { ...d, betterMediaInfo: { path: status.path } } : d
+              d
+                ? {
+                    ...d,
+                    integration: {
+                      ...d.integration,
+                      betterMediaInfo: { path: status.path },
+                    },
+                  }
+                : d
             );
           }
         }
@@ -250,7 +286,7 @@ export default function Config() {
         clearTimeout(betterMediaInfoCheckDebounceRef.current);
       }
     };
-  }, [draft?.betterMediaInfo?.path]);
+  }, [draft?.integration?.betterMediaInfo?.path]);
 
   if (!draft) {
     return <Box sx={{ p: 2 }}>Loading…</Box>;
@@ -267,14 +303,39 @@ export default function Config() {
   const updateFormatting = (patch: Partial<Protocol.ConfigFormatting>) => {
     setDraft({ ...draft, formatting: { ...draft.formatting, ...patch } });
   };
+
+  const updateUpdate = (patch: Partial<Protocol.ConfigUpdate>) => {
+    setDraft({ ...draft, update: { ...draft.update, ...patch } });
+  };
+
   const updateMkv = (patch: Partial<Protocol.ConfigMkv>) => {
-    setDraft({ ...draft, mkv: { ...draft.mkv, ...patch } });
+    setDraft({
+      ...draft,
+      integration: { ...draft.integration, mkv: { ...draft.integration.mkv, ...patch } },
+    });
+  };
+
+  const updateBetterMediaInfo = (patch: Partial<Protocol.ConfigBetterMediaInfo>) => {
+    setDraft({
+      ...draft,
+      integration: {
+        ...draft.integration,
+        betterMediaInfo: { ...draft.integration.betterMediaInfo, ...patch },
+      },
+    });
+  };
+
+  const updateMpcHc = (patch: Partial<Protocol.ConfigMpcHc>) => {
+    setDraft({
+      ...draft,
+      integration: { ...draft.integration, mpchc: { ...draft.integration.mpchc, ...patch } },
+    });
   };
 
   const handleBrowseMkvToolNixPath = async () => {
     const directory = await openDialog({
       directory: true,
-      defaultPath: draft.mkv?.mkvToolNixPath?.trim() || undefined,
+      defaultPath: draft.integration.mkv?.mkvToolNixPath?.trim() || undefined,
     });
     if (typeof directory === "string" && directory.length > 0) {
       updateMkv({ mkvToolNixPath: directory });
@@ -284,14 +345,14 @@ export default function Config() {
   const handleDetectMkvToolNix = async () => {
     try {
       const status = await isMkvtoolnixFound(
-        draft.mkv?.mkvToolNixPath?.trim() ?? "",
+        draft.integration.mkv?.mkvToolNixPath?.trim() ?? "",
         true
       );
       setMkvtoolnixFound(status.found);
       if (
         status.found &&
         status.mkvToolNixPath &&
-        status.mkvToolNixPath !== draft.mkv?.mkvToolNixPath
+        status.mkvToolNixPath !== draft.integration.mkv?.mkvToolNixPath
       ) {
         updateMkv({ mkvToolNixPath: status.mkvToolNixPath });
       }
@@ -300,28 +361,39 @@ export default function Config() {
     }
   };
 
-  const updateBetterMediaInfo = (patch: Partial<Protocol.ConfigBetterMediaInfo>) => {
-    setDraft({ ...draft, betterMediaInfo: { ...draft.betterMediaInfo, ...patch } });
-  };
-
   const handleBrowseBetterMediaInfoPath = async () => {
     const directory = await openDialog({
       directory: true,
-      defaultPath: draft.betterMediaInfo?.path?.trim() || undefined,
+      defaultPath: draft.integration.betterMediaInfo?.path?.trim() || undefined,
     });
     if (typeof directory === "string" && directory.length > 0) {
       updateBetterMediaInfo({ path: directory });
     }
   };
 
-  const updateMpcHc = (patch: Partial<Protocol.ConfigMpcHc>) => {
-    setDraft({ ...draft, mpchc: { ...draft.mpchc, ...patch } });
+  const handleDetectBetterMediaInfo = async () => {
+    try {
+      const status = await isBetterMediaInfoFound(
+        draft.integration.betterMediaInfo?.path?.trim() ?? "",
+        true
+      );
+      setBetterMediaInfoFound(status.found);
+      if (
+        status.found &&
+        status.path &&
+        status.path !== draft.integration.betterMediaInfo?.path
+      ) {
+        updateBetterMediaInfo({ path: status.path });
+      }
+    } catch {
+      setBetterMediaInfoFound(false);
+    }
   };
 
   const handleBrowseMpcHcPath = async () => {
     const file = await openDialog({
       multiple: false,
-      defaultPath: draft.mpchc?.path?.trim() || undefined,
+      defaultPath: draft.integration.mpchc?.path?.trim() || undefined,
       filters: [{ name: "MPC-HC", extensions: ["exe"] }],
     });
     if (typeof file === "string" && file.length > 0) {
@@ -331,9 +403,9 @@ export default function Config() {
 
   const handleDetectMpcHc = async () => {
     try {
-      const status = await isMpcHcFound(draft.mpchc?.path?.trim() ?? "", true);
+      const status = await isMpcHcFound(draft.integration.mpchc?.path?.trim() ?? "", true);
       setMpcHcFound(status.found);
-      if (status.found && status.path && status.path !== draft.mpchc?.path) {
+      if (status.found && status.path && status.path !== draft.integration.mpchc?.path) {
         updateMpcHc({ path: status.path });
       }
     } catch {
@@ -341,24 +413,6 @@ export default function Config() {
     }
   };
 
-  const handleDetectBetterMediaInfo = async () => {
-    try {
-      const status = await isBetterMediaInfoFound(
-        draft.betterMediaInfo?.path?.trim() ?? "",
-        true
-      );
-      setBetterMediaInfoFound(status.found);
-      if (
-        status.found &&
-        status.path &&
-        status.path !== draft.betterMediaInfo?.path
-      ) {
-        updateBetterMediaInfo({ path: status.path });
-      }
-    } catch {
-      setBetterMediaInfoFound(false);
-    }
-  };
   const updateFormattingBitRate = (patch: Partial<Protocol.ConfigBitRate>) => {
     updateFormatting({ bitRate: { ...draft.formatting.bitRate, ...patch } });
   };
@@ -369,225 +423,287 @@ export default function Config() {
   const getThemeLabel = (theme: Protocol.Theme) =>
     t(`settings.themeNames.${theme}`, { defaultValue: theme });
 
-  return (
-    <Box sx={{ width: "100%", maxWidth: 640, mx: "auto", py: 2, px: 1, display: "flex", flexDirection: "column", gap: 2 }}>
-      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-        <SectionHeader icon={<AppearanceIcon />} title={t("settings.appearance")} />
-        <SettingRow label={t("settings.mode")}>
-          <ToggleButtonGroup
-            exclusive
-            size="small"
-            value={draft.displayMode}
-            onChange={(_, v) => v && updateDraft({ displayMode: v })}
-            sx={{ "& .MuiToggleButton-root": { textTransform: "none" } }}
+  const appearancePanel = (
+    <Box>
+      <SectionHeader icon={<AppearanceIcon fontSize="small" />} title={t("settings.appearance")} />
+      <SettingRow label={t("settings.mode")}>
+        <ToggleButtonGroup
+          exclusive
+          size="small"
+          value={draft.displayMode}
+          onChange={(_, v) => v && updateDraft({ displayMode: v })}
+          sx={{ "& .MuiToggleButton-root": { textTransform: "none" } }}
+        >
+          <ToggleButton value={Protocol.DisplayMode.Auto}>
+            <AutoIcon fontSize="small" sx={{ mr: 0.5 }} />
+            {t("settings.autoMode")}
+          </ToggleButton>
+          <ToggleButton value={Protocol.DisplayMode.Light}>
+            <LightIcon fontSize="small" sx={{ mr: 0.5 }} />
+            {t("settings.lightMode")}
+          </ToggleButton>
+          <ToggleButton value={Protocol.DisplayMode.Dark}>
+            <DarkIcon fontSize="small" sx={{ mr: 0.5 }} />
+            {t("settings.darkMode")}
+          </ToggleButton>
+        </ToggleButtonGroup>
+      </SettingRow>
+      <SettingRow label={t("settings.theme")}>
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <Select
+            value={draft.theme}
+            onChange={(e) => updateDraft({ theme: e.target.value as Protocol.Theme })}
           >
-            <ToggleButton value={Protocol.DisplayMode.Auto}>
-              <AutoIcon fontSize="small" sx={{ mr: 0.5 }} />
-              {t("settings.autoMode")}
-            </ToggleButton>
-            <ToggleButton value={Protocol.DisplayMode.Light}>
-              <LightIcon fontSize="small" sx={{ mr: 0.5 }} />
-              {t("settings.lightMode")}
-            </ToggleButton>
-            <ToggleButton value={Protocol.DisplayMode.Dark}>
-              <DarkIcon fontSize="small" sx={{ mr: 0.5 }} />
-              {t("settings.darkMode")}
-            </ToggleButton>
-          </ToggleButtonGroup>
-        </SettingRow>
-        <SettingRow label={t("settings.theme")}>
-          <FormControl size="small" sx={{ minWidth: 160 }}>
-            <Select
-              value={draft.theme}
-              onChange={(e) => updateDraft({ theme: e.target.value as Protocol.Theme })}
-            >
-              {Protocol.getThemes().map((th) => (
-                <MenuItem key={th} value={th}>
-                  {getThemeLabel(th)}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </SettingRow>
-        <SettingRow label={t("settings.language")}>
-          <FormControl size="small" sx={{ minWidth: 200 }}>
-            <Select
-              value={draft.language}
-              onChange={(e) => updateDraft({ language: e.target.value as Protocol.Language })}
-            >
-              {Protocol.getLanguages().map((lang) => (
-                <MenuItem key={lang} value={lang}>
-                  {Protocol.getLanguageLabel(lang)}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </SettingRow>
-      </Paper>
+            {Protocol.getThemes().map((th) => (
+              <MenuItem key={th} value={th}>
+                {getThemeLabel(th)}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </SettingRow>
+      <SettingRow label={t("settings.language")}>
+        <FormControl size="small" sx={{ minWidth: 200 }}>
+          <Select
+            value={draft.language}
+            onChange={(e) => updateDraft({ language: e.target.value as Protocol.Language })}
+          >
+            {Protocol.getLanguages().map((lang) => (
+              <MenuItem key={lang} value={lang}>
+                {Protocol.getLanguageLabel(lang)}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </SettingRow>
+    </Box>
+  );
 
-      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-        <SectionHeader icon={<ScanIcon />} title={t("settings.scan")} />
-        <Stack>
-          <SettingRow label={t("settings.enableSsifSupport")}>
+  const scanPanel = (
+    <Box>
+      <SectionHeader icon={<ScanIcon fontSize="small" />} title={t("settings.scan")} />
+      <Stack>
+        <SettingRow label={t("settings.enableSsifSupport")}>
+          <Switch
+            checked={draft.scan.enableSsifSupport}
+            onChange={(e) => updateScan({ enableSsifSupport: e.target.checked })}
+          />
+        </SettingRow>
+        <SettingRow label={t("settings.filterLoopingPlaylists")}>
+          <Switch
+            checked={draft.scan.filterLoopingPlaylists}
+            onChange={(e) => updateScan({ filterLoopingPlaylists: e.target.checked })}
+          />
+        </SettingRow>
+        <SettingRow label={t("settings.filterShortPlaylists")}>
+          <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
             <Switch
-              checked={draft.scan.enableSsifSupport}
-              onChange={(e) => updateScan({ enableSsifSupport: e.target.checked })}
+              checked={draft.scan.filterShortPlaylists}
+              onChange={(e) => updateScan({ filterShortPlaylists: e.target.checked })}
             />
-          </SettingRow>
-          <SettingRow label={t("settings.filterLoopingPlaylists")}>
-            <Switch
-              checked={draft.scan.filterLoopingPlaylists}
-              onChange={(e) => updateScan({ filterLoopingPlaylists: e.target.checked })}
+            <FormControlLabel
+              control={
+                <TextField
+                  size="small"
+                  type="number"
+                  sx={{ width: 80 }}
+                  value={draft.scan.filterShortPlaylistsValue}
+                  onChange={(e) =>
+                    updateScan({ filterShortPlaylistsValue: parseInt(e.target.value || "0", 10) })
+                  }
+                  disabled={!draft.scan.filterShortPlaylists}
+                />
+              }
+              label={t("settings.filterShortPlaylistsValue")}
+              labelPlacement="start"
+              sx={{ ml: 1 }}
             />
-          </SettingRow>
-          <SettingRow label={t("settings.filterShortPlaylists")}>
-            <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-              <Switch
-                checked={draft.scan.filterShortPlaylists}
-                onChange={(e) => updateScan({ filterShortPlaylists: e.target.checked })}
-              />
-              <FormControlLabel
-                control={
-                  <TextField
-                    size="small"
-                    type="number"
-                    sx={{ width: 80 }}
-                    value={draft.scan.filterShortPlaylistsValue}
-                    onChange={(e) =>
-                      updateScan({ filterShortPlaylistsValue: parseInt(e.target.value || "0", 10) })
-                    }
-                    disabled={!draft.scan.filterShortPlaylists}
-                  />
+          </Stack>
+        </SettingRow>
+      </Stack>
+    </Box>
+  );
+
+  const formattingPanel = (
+    <Box>
+      <SectionHeader icon={<FormatIcon fontSize="small" />} title={t("settings.formatting")} />
+      <Stack>
+        <Typography variant="body2" sx={{ fontWeight: 500, mb: 1 }}>
+          {t("settings.bitRate")}
+        </Typography>
+        <Box sx={{ display: "flex", gap: 2, mb: 2 }}>
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              {t("settings.precision")}
+            </Typography>
+            <FormControl size="small" fullWidth sx={{ mt: 0.5 }}>
+              <Select
+                value={draft.formatting.bitRate.precision}
+                onChange={(e) =>
+                  updateFormattingBitRate({ precision: e.target.value as Protocol.FormatPrecision })
                 }
-                label={t("settings.filterShortPlaylistsValue")}
-                labelPlacement="start"
-                sx={{ ml: 1 }}
-              />
-            </Stack>
-          </SettingRow>
-        </Stack>
-      </Paper>
-
-      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-        <SectionHeader icon={<FormatIcon />} title={t("settings.formatting")} />
-        <Stack>
-          <Typography variant="body2" sx={{ fontWeight: 500, mb: 1 }}>
-            {t("settings.bitRate")}
-          </Typography>
-          <Box sx={{ display: "flex", gap: 2, mb: 2 }}>
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="caption" color="text.secondary">
-                {t("settings.precision")}
-              </Typography>
-              <FormControl size="small" fullWidth sx={{ mt: 0.5 }}>
-                <Select
-                  value={draft.formatting.bitRate.precision}
-                  onChange={(e) =>
-                    updateFormattingBitRate({ precision: e.target.value as Protocol.FormatPrecision })
-                  }
-                >
-                  {Protocol.getFormatPrecisions().map((p) => (
-                    <MenuItem key={p} value={p}>
-                      {Protocol.getFormatPrecisionLabel(p)}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Box>
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="caption" color="text.secondary">
-                {t("settings.unit")}
-              </Typography>
-              <FormControl size="small" fullWidth sx={{ mt: 0.5 }}>
-                <Select
-                  value={draft.formatting.bitRate.unit}
-                  onChange={(e) =>
-                    updateFormattingBitRate({ unit: e.target.value as Protocol.FormatUnit })
-                  }
-                >
-                  {Protocol.getFormatUnits().map((u) => (
-                    <MenuItem key={u} value={u}>
-                      {Protocol.getFormatUnitLabel(u)}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Box>
+              >
+                {Protocol.getFormatPrecisions().map((p) => (
+                  <MenuItem key={p} value={p}>
+                    {Protocol.getFormatPrecisionLabel(p)}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
           </Box>
-          <Typography variant="body2" sx={{ fontWeight: 500, mb: 1 }}>
-            {t("settings.size")}
-          </Typography>
-          <Box sx={{ display: "flex", gap: 2 }}>
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="caption" color="text.secondary">
-                {t("settings.precision")}
-              </Typography>
-              <FormControl size="small" fullWidth sx={{ mt: 0.5 }}>
-                <Select
-                  value={draft.formatting.size.precision}
-                  onChange={(e) =>
-                    updateFormattingSize({ precision: e.target.value as Protocol.FormatPrecision })
-                  }
-                >
-                  {Protocol.getFormatPrecisions().map((p) => (
-                    <MenuItem key={p} value={p}>
-                      {Protocol.getFormatPrecisionLabel(p)}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Box>
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="caption" color="text.secondary">
-                {t("settings.unit")}
-              </Typography>
-              <FormControl size="small" fullWidth sx={{ mt: 0.5 }}>
-                <Select
-                  value={draft.formatting.size.unit}
-                  onChange={(e) =>
-                    updateFormattingSize({ unit: e.target.value as Protocol.FormatUnit })
-                  }
-                >
-                  {Protocol.getFormatUnits().map((u) => (
-                    <MenuItem key={u} value={u}>
-                      {Protocol.getFormatUnitLabel(u)}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Box>
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              {t("settings.unit")}
+            </Typography>
+            <FormControl size="small" fullWidth sx={{ mt: 0.5 }}>
+              <Select
+                value={draft.formatting.bitRate.unit}
+                onChange={(e) =>
+                  updateFormattingBitRate({ unit: e.target.value as Protocol.FormatUnit })
+                }
+              >
+                {Protocol.getFormatUnits().map((u) => (
+                  <MenuItem key={u} value={u}>
+                    {Protocol.getFormatUnitLabel(u)}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
           </Box>
-        </Stack>
-      </Paper>
+        </Box>
+        <Typography variant="body2" sx={{ fontWeight: 500, mb: 1 }}>
+          {t("settings.size")}
+        </Typography>
+        <Box sx={{ display: "flex", gap: 2 }}>
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              {t("settings.precision")}
+            </Typography>
+            <FormControl size="small" fullWidth sx={{ mt: 0.5 }}>
+              <Select
+                value={draft.formatting.size.precision}
+                onChange={(e) =>
+                  updateFormattingSize({ precision: e.target.value as Protocol.FormatPrecision })
+                }
+              >
+                {Protocol.getFormatPrecisions().map((p) => (
+                  <MenuItem key={p} value={p}>
+                    {Protocol.getFormatPrecisionLabel(p)}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              {t("settings.unit")}
+            </Typography>
+            <FormControl size="small" fullWidth sx={{ mt: 0.5 }}>
+              <Select
+                value={draft.formatting.size.unit}
+                onChange={(e) =>
+                  updateFormattingSize({ unit: e.target.value as Protocol.FormatUnit })
+                }
+              >
+                {Protocol.getFormatUnits().map((u) => (
+                  <MenuItem key={u} value={u}>
+                    {Protocol.getFormatUnitLabel(u)}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
+        </Box>
+      </Stack>
+    </Box>
+  );
 
-      {isWindows && (
+  const integrationPanel = (
+    <Box>
+      <SectionHeader icon={<IntegrationIcon fontSize="small" />} title={t("settings.integration")} />
+      <Stack spacing={2}>
+        {isWindows && (
+          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+            <SectionHeader
+              icon={
+                <Box
+                  component="img"
+                  src="images/mpchc64.png"
+                  alt="MPC-HC"
+                  sx={{ width: 20, height: 20, objectFit: "contain" }}
+                />
+              }
+              title={t("settings.mpchc")}
+            />
+            <Box sx={{ py: 1 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                {t("settings.mpchcPath")}
+              </Typography>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <TextField
+                  value={draft.integration.mpchc?.path ?? ""}
+                  onChange={(e) => updateMpcHc({ path: e.target.value })}
+                  size="small"
+                  fullWidth
+                />
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={handleBrowseMpcHcPath}
+                  sx={{ minWidth: 90, height: 36, textTransform: "none" }}
+                >
+                  {t("settings.browse")}
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={handleDetectMpcHc}
+                  sx={{ minWidth: 90, height: 36, textTransform: "none" }}
+                >
+                  {t("settings.detect")}
+                </Button>
+              </Box>
+              <Typography
+                variant="caption"
+                sx={{
+                  mt: 0.75,
+                  display: "block",
+                  color: mpcHcFound ? "success.main" : "error.main",
+                }}
+              >
+                {mpcHcFound ? t("settings.mpchcFound") : t("settings.mpchcNotFound")}
+              </Typography>
+            </Box>
+          </Paper>
+        )}
+
         <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
           <SectionHeader
             icon={
               <Box
                 component="img"
-                src="images/mpchc64.png"
-                alt="MPC-HC"
+                src="images/mkvmerge.png"
+                alt="MKVToolNix"
                 sx={{ width: 20, height: 20, objectFit: "contain" }}
               />
             }
-            title={t("settings.mpchc")}
+            title={t("settings.mkv")}
           />
           <Box sx={{ py: 1 }}>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              {t("settings.mpchcPath")}
+              {t("settings.mkvToolNixPath")}
             </Typography>
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
               <TextField
-                value={draft.mpchc?.path ?? ""}
-                onChange={(e) => updateMpcHc({ path: e.target.value })}
+                value={draft.integration.mkv?.mkvToolNixPath ?? ""}
+                onChange={(e) => updateMkv({ mkvToolNixPath: e.target.value })}
                 size="small"
                 fullWidth
               />
               <Button
                 variant="outlined"
                 size="small"
-                onClick={handleBrowseMpcHcPath}
+                onClick={handleBrowseMkvToolNixPath}
                 sx={{ minWidth: 90, height: 36, textTransform: "none" }}
               >
                 {t("settings.browse")}
@@ -595,7 +711,7 @@ export default function Config() {
               <Button
                 variant="outlined"
                 size="small"
-                onClick={handleDetectMpcHc}
+                onClick={handleDetectMkvToolNix}
                 sx={{ minWidth: 90, height: 36, textTransform: "none" }}
               >
                 {t("settings.detect")}
@@ -606,125 +722,172 @@ export default function Config() {
               sx={{
                 mt: 0.75,
                 display: "block",
-                color: mpcHcFound ? "success.main" : "error.main",
+                color: mkvtoolnixFound ? "success.main" : "error.main",
               }}
             >
-              {mpcHcFound ? t("settings.mpchcFound") : t("settings.mpchcNotFound")}
+              {mkvtoolnixFound
+                ? t("settings.mkvtoolnixFound")
+                : t("settings.mkvtoolnixNotFound")}
             </Typography>
           </Box>
         </Paper>
-      )}
 
-      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-        <SectionHeader
-          icon={
-            <Box
-              component="img"
-              src="images/mkvmerge.png"
-              alt="MKVToolNix"
-              sx={{ width: 20, height: 20, objectFit: "contain" }}
-            />
-          }
-          title={t("settings.mkv")}
-        />
-        <Box sx={{ py: 1 }}>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            {t("settings.mkvToolNixPath")}
-          </Typography>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <TextField
-              value={draft.mkv?.mkvToolNixPath ?? ""}
-              onChange={(e) => updateMkv({ mkvToolNixPath: e.target.value })}
-              size="small"
-              fullWidth
-            />
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={handleBrowseMkvToolNixPath}
-              sx={{ minWidth: 90, height: 36, textTransform: "none" }}
+        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+          <SectionHeader
+            icon={
+              <Box
+                component="img"
+                src="images/bettermediainfo.png"
+                alt="BetterMediaInfo"
+                sx={{ width: 20, height: 20, objectFit: "contain" }}
+              />
+            }
+            title={t("settings.betterMediaInfo")}
+          />
+          <Box sx={{ py: 1 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              {t("settings.betterMediaInfoPath")}
+            </Typography>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <TextField
+                value={draft.integration.betterMediaInfo?.path ?? ""}
+                onChange={(e) => updateBetterMediaInfo({ path: e.target.value })}
+                size="small"
+                fullWidth
+              />
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={handleBrowseBetterMediaInfoPath}
+                sx={{ minWidth: 90, height: 36, textTransform: "none" }}
+              >
+                {t("settings.browse")}
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={handleDetectBetterMediaInfo}
+                sx={{ minWidth: 90, height: 36, textTransform: "none" }}
+              >
+                {t("settings.detect")}
+              </Button>
+            </Box>
+            <Typography
+              variant="caption"
+              sx={{
+                mt: 0.75,
+                display: "block",
+                color: betterMediaInfoFound ? "success.main" : "error.main",
+              }}
             >
-              {t("settings.browse")}
-            </Button>
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={handleDetectMkvToolNix}
-              sx={{ minWidth: 90, height: 36, textTransform: "none" }}
-            >
-              {t("settings.detect")}
-            </Button>
+              {betterMediaInfoFound
+                ? t("settings.betterMediaInfoFound")
+                : t("settings.betterMediaInfoNotFound")}
+            </Typography>
           </Box>
-          <Typography
-            variant="caption"
-            sx={{
-              mt: 0.75,
-              display: "block",
-              color: mkvtoolnixFound ? "success.main" : "error.main",
-            }}
-          >
-            {mkvtoolnixFound
-              ? t("settings.mkvtoolnixFound")
-              : t("settings.mkvtoolnixNotFound")}
-          </Typography>
-        </Box>
-      </Paper>
+        </Paper>
+      </Stack>
+    </Box>
+  );
 
-      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-        <SectionHeader
-          icon={
-            <Box
-              component="img"
-              src="images/bettermediainfo.png"
-              alt="BetterMediaInfo"
-              sx={{ width: 20, height: 20, objectFit: "contain" }}
-            />
-          }
-          title={t("settings.betterMediaInfo")}
+  const updatePanel = (
+    <Box>
+      <SectionHeader icon={<UpdateIcon fontSize="small" />} title={t("settings.update")} />
+      <SettingRow label={t("settings.checkNewVersion")}>
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <Select
+            value={draft.update.checkInterval}
+            onChange={(e) =>
+              updateUpdate({ checkInterval: e.target.value as Protocol.UpdateCheckInterval })
+            }
+          >
+            <MenuItem value={Protocol.UpdateCheckInterval.Daily}>{t("settings.daily")}</MenuItem>
+            <MenuItem value={Protocol.UpdateCheckInterval.Weekly}>{t("settings.weekly")}</MenuItem>
+            <MenuItem value={Protocol.UpdateCheckInterval.Monthly}>{t("settings.monthly")}</MenuItem>
+          </Select>
+        </FormControl>
+      </SettingRow>
+    </Box>
+  );
+
+  return (
+    <Box
+      sx={{
+        width: "100%",
+        maxWidth: 900,
+        mx: "auto",
+        py: 2,
+        px: 1,
+        display: "flex",
+        gap: 2,
+        height: "100%",
+        minHeight: 0,
+      }}
+    >
+      <Tabs
+        orientation="vertical"
+        value={mainTab}
+        onChange={(_e, v: ConfigTab) => setMainTab(v)}
+        sx={{
+          borderRight: 1,
+          borderColor: "divider",
+          minWidth: 180,
+          "& .MuiTab-root": {
+            minHeight: 40,
+            alignItems: "center",
+            justifyContent: "flex-start",
+            textAlign: "left",
+            textTransform: "none",
+          },
+        }}
+      >
+        <Tab
+          value={ConfigTab.Appearance}
+          icon={<AppearanceIcon sx={{ fontSize: 18 }} />}
+          iconPosition="start"
+          label={t("settings.appearance")}
         />
-        <Box sx={{ py: 1 }}>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            {t("settings.betterMediaInfoPath")}
-          </Typography>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <TextField
-              value={draft.betterMediaInfo?.path ?? ""}
-              onChange={(e) => updateBetterMediaInfo({ path: e.target.value })}
-              size="small"
-              fullWidth
-            />
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={handleBrowseBetterMediaInfoPath}
-              sx={{ minWidth: 90, height: 36, textTransform: "none" }}
-            >
-              {t("settings.browse")}
-            </Button>
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={handleDetectBetterMediaInfo}
-              sx={{ minWidth: 90, height: 36, textTransform: "none" }}
-            >
-              {t("settings.detect")}
-            </Button>
-          </Box>
-          <Typography
-            variant="caption"
-            sx={{
-              mt: 0.75,
-              display: "block",
-              color: betterMediaInfoFound ? "success.main" : "error.main",
-            }}
-          >
-            {betterMediaInfoFound
-              ? t("settings.betterMediaInfoFound")
-              : t("settings.betterMediaInfoNotFound")}
-          </Typography>
-        </Box>
-      </Paper>
-
+        <Tab
+          value={ConfigTab.Scan}
+          icon={<ScanIcon sx={{ fontSize: 18 }} />}
+          iconPosition="start"
+          label={t("settings.scan")}
+        />
+        <Tab
+          value={ConfigTab.Formatting}
+          icon={<FormatIcon sx={{ fontSize: 18 }} />}
+          iconPosition="start"
+          label={t("settings.formatting")}
+        />
+        <Tab
+          value={ConfigTab.Integration}
+          icon={<IntegrationIcon sx={{ fontSize: 18 }} />}
+          iconPosition="start"
+          label={t("settings.integration")}
+        />
+        <Tab
+          value={ConfigTab.Update}
+          icon={<UpdateIcon sx={{ fontSize: 18 }} />}
+          iconPosition="start"
+          label={t("settings.update")}
+        />
+      </Tabs>
+      <Box
+        sx={{
+          flex: 1,
+          minWidth: 0,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "auto",
+        }}
+      >
+        {mainTab === ConfigTab.Appearance && appearancePanel}
+        {mainTab === ConfigTab.Scan && scanPanel}
+        {mainTab === ConfigTab.Formatting && formattingPanel}
+        {mainTab === ConfigTab.Integration && integrationPanel}
+        {mainTab === ConfigTab.Update && updatePanel}
+      </Box>
     </Box>
   );
 }

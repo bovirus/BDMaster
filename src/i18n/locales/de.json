@@ -182,7 +182,13 @@
     "mpchc": "MPC-HC",
     "mpchcPath": "MPC-HC-Pfad",
     "mpchcFound": "MPC-HC ist verfügbar.",
-    "mpchcNotFound": "MPC-HC wurde im angegebenen Pfad nicht gefunden."
+    "mpchcNotFound": "MPC-HC wurde im angegebenen Pfad nicht gefunden.",
+    "integration": "Integration",
+    "update": "Aktualisierung",
+    "checkNewVersion": "Neue Version prüfen",
+    "daily": "Täglich",
+    "weekly": "Wöchentlich",
+    "monthly": "Monatlich"
   },
   "about": {
     "tagline": "Eine moderne Desktop-Oberfläche zum Untersuchen von Blu-ray-Discs",

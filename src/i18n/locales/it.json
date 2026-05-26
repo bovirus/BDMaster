@@ -182,7 +182,13 @@
     "mpchc": "MPC-HC",
     "mpchcPath": "Percorso MPC-HC",
     "mpchcFound": "MPC-HC disponibile.",
-    "mpchcNotFound": "MPC-HC non è stato trovato nel percorso indicato."
+    "mpchcNotFound": "MPC-HC non è stato trovato nel percorso indicato.",
+    "integration": "Integrazione",
+    "update": "Aggiorna",
+    "checkNewVersion": "Verifica aggiornamenti",
+    "daily": "Ogni giorno",
+    "weekly": "Ogni settimana",
+    "monthly": "Ogni mese"
   },
   "about": {
     "tagline": "Una GUI desktop moderna per analizzare i dischi Blu-ray",

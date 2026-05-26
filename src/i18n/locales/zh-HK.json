@@ -182,7 +182,13 @@
     "mpchc": "MPC-HC",
     "mpchcPath": "MPC-HC 路徑",
     "mpchcFound": "MPC-HC 可用。",
-    "mpchcNotFound": "在指定路徑下找不到 MPC-HC。"
+    "mpchcNotFound": "在指定路徑下找不到 MPC-HC。",
+    "integration": "整合",
+    "update": "更新",
+    "checkNewVersion": "檢查新版本",
+    "daily": "每天",
+    "weekly": "每週",
+    "monthly": "每月"
   },
   "about": {
     "tagline": "用於檢查藍光光碟的現代桌面介面",

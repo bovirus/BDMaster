@@ -182,7 +182,13 @@
     "mpchc": "MPC-HC",
     "mpchcPath": "MPC-HC パス",
     "mpchcFound": "MPC-HC が利用可能です。",
-    "mpchcNotFound": "指定されたパスに MPC-HC が見つかりません。"
+    "mpchcNotFound": "指定されたパスに MPC-HC が見つかりません。",
+    "integration": "統合",
+    "update": "更新",
+    "checkNewVersion": "新バージョンを確認",
+    "daily": "毎日",
+    "weekly": "毎週",
+    "monthly": "毎月"
   },
   "about": {
     "tagline": "Blu-ray ディスクを検査するためのモダンなデスクトップ GUI",

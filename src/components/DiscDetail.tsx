@@ -218,7 +218,7 @@ export default function DiscDetail() {
   // Settings. Disc-source check (ISO vs folder) gates the column further down.
   useEffect(() => {
     let cancelled = false;
-    const path = config?.mkv?.mkvToolNixPath ?? "";
+    const path = config?.integration?.mkv?.mkvToolNixPath ?? "";
     isMkvtoolnixFound(path.trim())
       .then((status) => {
         if (!cancelled) {
@@ -233,7 +233,7 @@ export default function DiscDetail() {
     return () => {
       cancelled = true;
     };
-  }, [config?.mkv?.mkvToolNixPath]);
+  }, [config?.integration?.mkv?.mkvToolNixPath]);
 
   useEffect(() => {
     setMkvToolNixToPath(disc?.path ?? "");
@@ -242,7 +242,7 @@ export default function DiscDetail() {
   // Same probe for BetterMediaInfo. Both feed into the Actions column gating.
   useEffect(() => {
     let cancelled = false;
-    const path = config?.betterMediaInfo?.path ?? "";
+    const path = config?.integration?.betterMediaInfo?.path ?? "";
     isBetterMediaInfoFound(path.trim())
       .then((status) => {
         if (!cancelled) {
@@ -257,12 +257,12 @@ export default function DiscDetail() {
     return () => {
       cancelled = true;
     };
-  }, [config?.betterMediaInfo?.path]);
+  }, [config?.integration?.betterMediaInfo?.path]);
 
   // Same probe for MPC-HC (Windows-only). Returns found=false on other OSes.
   useEffect(() => {
     let cancelled = false;
-    const path = config?.mpchc?.path ?? "";
+    const path = config?.integration?.mpchc?.path ?? "";
     isMpcHcFound(path.trim())
       .then((status) => {
         if (!cancelled) {
@@ -277,7 +277,7 @@ export default function DiscDetail() {
     return () => {
       cancelled = true;
     };
-  }, [config?.mpchc?.path]);
+  }, [config?.integration?.mpchc?.path]);
 
   const isIsoDisc = (disc?.path ?? "").toLowerCase().endsWith(".iso");
   const showMkvToolNixButton = mkvtoolnixAvailable && !isIsoDisc;

@@ -182,7 +182,13 @@
     "mpchc": "MPC-HC",
     "mpchcPath": "MPC-HC Path",
     "mpchcFound": "MPC-HC is available.",
-    "mpchcNotFound": "MPC-HC was not found at the given path."
+    "mpchcNotFound": "MPC-HC was not found at the given path.",
+    "integration": "Integration",
+    "update": "Update",
+    "checkNewVersion": "Check New Version",
+    "daily": "Daily",
+    "weekly": "Weekly",
+    "monthly": "Monthly"
   },
   "about": {
     "tagline": "A modern desktop GUI for inspecting Blu-ray discs",

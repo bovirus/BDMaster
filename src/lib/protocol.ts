@@ -94,6 +94,12 @@ export interface MpcHcStatus {
   path: string;
 }
 
+export interface ConfigIntegration {
+  mkv: ConfigMkv;
+  betterMediaInfo: ConfigBetterMediaInfo;
+  mpchc: ConfigMpcHc;
+}
+
 export interface ConfigWindowPosition {
   x: number;
   y: number;
@@ -126,9 +132,7 @@ export interface Config {
   discInfoSplit: number;
   infoPanelSplit: number;
   update: ConfigUpdate;
-  mkv: ConfigMkv;
-  betterMediaInfo: ConfigBetterMediaInfo;
-  mpchc: ConfigMpcHc;
+  integration: ConfigIntegration;
   window: ConfigWindow;
 }
 

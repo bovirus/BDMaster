@@ -182,7 +182,13 @@
     "mpchc": "MPC-HC",
     "mpchcPath": "Ruta de MPC-HC",
     "mpchcFound": "MPC-HC está disponible.",
-    "mpchcNotFound": "No se encontró MPC-HC en la ruta indicada."
+    "mpchcNotFound": "No se encontró MPC-HC en la ruta indicada.",
+    "integration": "Integración",
+    "update": "Actualización",
+    "checkNewVersion": "Comprobar nueva versión",
+    "daily": "Diario",
+    "weekly": "Semanal",
+    "monthly": "Mensual"
   },
   "about": {
     "tagline": "Una interfaz de escritorio moderna para inspeccionar discos Blu-ray",

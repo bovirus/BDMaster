@@ -173,10 +173,10 @@ fn persist_mkvtoolnix_path_if_auto_detected(resolution: &MkvToolNixResolution) -
     }
     let path = resolution.path.to_string_lossy().to_string();
     let mut cfg = config::get_config();
-    if cfg.mkv.mkv_toolnix_path == path {
+    if cfg.integration.mkv.mkv_toolnix_path == path {
         return Ok(());
     }
-    cfg.mkv.mkv_toolnix_path = path;
+    cfg.integration.mkv.mkv_toolnix_path = path;
     config::set_config(cfg)?;
     Ok(())
 }
@@ -300,8 +300,8 @@ pub async fn is_mkvtoolnix_found(path: String, check_running: bool) -> Result<Mk
             if has_tool(&dir, "mkvtoolnix-gui") {
                 let path_string = dir.to_string_lossy().to_string();
                 let mut cfg = config::get_config();
-                if cfg.mkv.mkv_toolnix_path != path_string {
-                    cfg.mkv.mkv_toolnix_path = path_string.clone();
+                if cfg.integration.mkv.mkv_toolnix_path != path_string {
+                    cfg.integration.mkv.mkv_toolnix_path = path_string.clone();
                     config::set_config(cfg)?;
                 }
                 return Ok(MkvToolNixStatus {
@@ -340,7 +340,7 @@ pub fn spawn_mkvtoolnix_gui(
         ));
     }
     let cfg = config::get_config();
-    let resolution = resolve_mkvtoolnix(&cfg.mkv.mkv_toolnix_path, &["mkvtoolnix-gui"]);
+    let resolution = resolve_mkvtoolnix(&cfg.integration.mkv.mkv_toolnix_path, &["mkvtoolnix-gui"]);
     if !resolution.found {
         return Err(anyhow::anyhow!(
             "MKVTOOLNIX_GUI_NOT_AVAILABLE:{}",

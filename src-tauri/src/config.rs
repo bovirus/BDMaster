@@ -36,13 +36,18 @@ pub struct Config {
     #[serde(default)]
     pub update: ConfigUpdate,
     #[serde(default)]
-    pub mkv: ConfigMkv,
-    #[serde(rename = "betterMediaInfo", default)]
-    pub better_media_info: ConfigBetterMediaInfo,
-    #[serde(default)]
-    pub mpchc: ConfigMpcHc,
+    pub integration: ConfigIntegration,
     #[serde(default)]
     pub window: ConfigWindow,
+    // Legacy top-level external-tool keys, kept only to migrate configs written
+    // before the tools were grouped under `integration`. They are read in but
+    // never serialized; `migrate_legacy` folds them into `integration`.
+    #[serde(rename = "mkv", default, skip_serializing)]
+    legacy_mkv: Option<ConfigMkv>,
+    #[serde(rename = "betterMediaInfo", default, skip_serializing)]
+    legacy_better_media_info: Option<ConfigBetterMediaInfo>,
+    #[serde(rename = "mpchc", default, skip_serializing)]
+    legacy_mpchc: Option<ConfigMpcHc>,
 }
 
 fn default_disc_info_split() -> f32 {
@@ -149,10 +154,32 @@ impl Default for Config {
             disc_info_split: 0.5,
             info_panel_split: 0.4,
             update: Default::default(),
+            integration: Default::default(),
+            window: Default::default(),
+            legacy_mkv: None,
+            legacy_better_media_info: None,
+            legacy_mpchc: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ConfigIntegration {
+    #[serde(default)]
+    pub mkv: ConfigMkv,
+    #[serde(rename = "betterMediaInfo", default)]
+    pub better_media_info: ConfigBetterMediaInfo,
+    #[serde(default)]
+    pub mpchc: ConfigMpcHc,
+}
+
+impl Default for ConfigIntegration {
+    fn default() -> Self {
+        Self {
             mkv: Default::default(),
             better_media_info: Default::default(),
             mpchc: Default::default(),
-            window: Default::default(),
         }
     }
 }
@@ -491,7 +518,24 @@ impl Config {
     fn load(path: PathBuf) -> Result<Self> {
         let file = File::open(&path)?;
         let buf = BufReader::new(file);
-        Ok(serde_json::from_reader(buf)?)
+        let mut config: Self = serde_json::from_reader(buf)?;
+        config.migrate_legacy();
+        Ok(config)
+    }
+
+    /// Fold the pre-`integration` top-level tool keys into `integration` so a
+    /// config written by an older build doesn't silently reset the user's
+    /// configured tool paths. Once migrated, `save` drops the legacy keys.
+    fn migrate_legacy(&mut self) {
+        if let Some(mkv) = self.legacy_mkv.take() {
+            self.integration.mkv = mkv;
+        }
+        if let Some(better_media_info) = self.legacy_better_media_info.take() {
+            self.integration.better_media_info = better_media_info;
+        }
+        if let Some(mpchc) = self.legacy_mpchc.take() {
+            self.integration.mpchc = mpchc;
+        }
     }
 
     fn save(&self, path: PathBuf) -> Result<()> {
@@ -551,6 +595,15 @@ mod tests {
             config.update.check_interval,
             UpdateCheckInterval::Weekly
         ));
+        assert_eq!(
+            config.integration.mkv.mkv_toolnix_path,
+            ConfigMkv::default().mkv_toolnix_path
+        );
+        assert_eq!(
+            config.integration.better_media_info.path,
+            ConfigBetterMediaInfo::default().path
+        );
+        assert_eq!(config.integration.mpchc.path, ConfigMpcHc::default().path);
     }
 
     #[test]
@@ -575,9 +628,11 @@ mod tests {
                 "update": {
                     "lastVersion": "1.2.3"
                 },
-                "mkv": {},
-                "betterMediaInfo": {},
-                "mpchc": {}
+                "integration": {
+                    "mkv": {},
+                    "betterMediaInfo": {},
+                    "mpchc": {}
+                }
             }"#,
         )
         .unwrap();
@@ -603,13 +658,37 @@ mod tests {
             UpdateCheckInterval::Weekly
         ));
         assert_eq!(
-            config.mkv.mkv_toolnix_path,
+            config.integration.mkv.mkv_toolnix_path,
             ConfigMkv::default().mkv_toolnix_path
         );
         assert_eq!(
-            config.better_media_info.path,
+            config.integration.better_media_info.path,
             ConfigBetterMediaInfo::default().path
         );
-        assert_eq!(config.mpchc.path, ConfigMpcHc::default().path);
+        assert_eq!(config.integration.mpchc.path, ConfigMpcHc::default().path);
+    }
+
+    #[test]
+    fn legacy_top_level_tool_keys_migrate_into_integration() {
+        let mut config: Config = serde_json::from_str(
+            r#"{
+                "mkv": { "mkvToolNixPath": "/custom/mkv" },
+                "betterMediaInfo": { "path": "/custom/bmi" },
+                "mpchc": { "path": "/custom/mpc" }
+            }"#,
+        )
+        .unwrap();
+        config.migrate_legacy();
+
+        assert_eq!(config.integration.mkv.mkv_toolnix_path, "/custom/mkv");
+        assert_eq!(config.integration.better_media_info.path, "/custom/bmi");
+        assert_eq!(config.integration.mpchc.path, "/custom/mpc");
+
+        // Migrated configs must not re-emit the legacy top-level keys.
+        let json = serde_json::to_value(&config).unwrap();
+        assert!(json.get("mkv").is_none());
+        assert!(json.get("betterMediaInfo").is_none());
+        assert!(json.get("mpchc").is_none());
+        assert!(json.get("integration").is_some());
     }
 }

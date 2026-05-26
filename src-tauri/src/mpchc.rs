@@ -32,10 +32,10 @@ fn is_valid_exe(path: &Path) -> bool {
 fn persist_path(path: &Path) -> Result<()> {
     let new_path = path.to_string_lossy().to_string();
     let mut cfg = config::get_config();
-    if cfg.mpchc.path == new_path {
+    if cfg.integration.mpchc.path == new_path {
         return Ok(());
     }
-    cfg.mpchc.path = new_path;
+    cfg.integration.mpchc.path = new_path;
     config::set_config(cfg)?;
     Ok(())
 }
@@ -76,7 +76,7 @@ pub fn spawn_mpchc(file: &str) -> Result<()> {
         return Err(anyhow::anyhow!("File {} does not exist.", file));
     }
     let cfg = config::get_config();
-    let exe = PathBuf::from(&cfg.mpchc.path);
+    let exe = PathBuf::from(&cfg.integration.mpchc.path);
     if !is_valid_exe(&exe) {
         return Err(anyhow::anyhow!("MPCHC_NOT_AVAILABLE:{}", exe.display()));
     }

@@ -182,7 +182,13 @@
     "mpchc": "MPC-HC",
     "mpchcPath": "MPC-HC 路径",
     "mpchcFound": "MPC-HC 可用。",
-    "mpchcNotFound": "在指定路径下未找到 MPC-HC。"
+    "mpchcNotFound": "在指定路径下未找到 MPC-HC。",
+    "integration": "集成",
+    "update": "更新",
+    "checkNewVersion": "检查新版本",
+    "daily": "每天",
+    "weekly": "每周",
+    "monthly": "每月"
   },
   "about": {
     "tagline": "现代化的蓝光光盘检查工具",

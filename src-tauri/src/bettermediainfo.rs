@@ -67,10 +67,10 @@ fn resolve(path: &str) -> (PathBuf, bool) {
 fn persist_path(path: &Path) -> Result<()> {
     let new_path = path.to_string_lossy().to_string();
     let mut cfg = config::get_config();
-    if cfg.better_media_info.path == new_path {
+    if cfg.integration.better_media_info.path == new_path {
         return Ok(());
     }
-    cfg.better_media_info.path = new_path;
+    cfg.integration.better_media_info.path = new_path;
     config::set_config(cfg)?;
     Ok(())
 }
@@ -130,7 +130,7 @@ pub fn spawn_bettermediainfo(file: &str) -> Result<()> {
         return Err(anyhow::anyhow!("File {} does not exist.", file));
     }
     let cfg = config::get_config();
-    let dir = PathBuf::from(&cfg.better_media_info.path);
+    let dir = PathBuf::from(&cfg.integration.better_media_info.path);
     let bin = binary_path(&dir).ok_or_else(|| {
         anyhow::anyhow!(
             "BETTERMEDIAINFO_NOT_AVAILABLE:{}",
