@@ -152,7 +152,10 @@ mod tests {
     impl BitWriter {
         fn put(&mut self, val: u32, n: u32) {
             for i in (0..n).rev() {
-                self.bits.push((val >> i) & 1 == 1);
+                // `i` may exceed 31 for the wide zero-fill skips below; a shift
+                // of >= 32 panics in debug builds, so treat those bits as 0.
+                let bit = i < 32 && (val >> i) & 1 == 1;
+                self.bits.push(bit);
             }
         }
         fn bytes(&self) -> Vec<u8> {

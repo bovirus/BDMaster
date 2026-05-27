@@ -698,6 +698,117 @@ mod tests {
         p
     }
 
+    /// Wrap a TS packet in the 192-byte M2TS frame with an explicit 30-bit
+    /// arrival timecode (used to drive duration / bitrate-window logic).
+    fn m2ts_atc(ts: &[u8], atc: u32) -> Vec<u8> {
+        let mut p = vec![
+            ((atc >> 24) as u8) & 0x3F,
+            (atc >> 16) as u8,
+            (atc >> 8) as u8,
+            atc as u8,
+        ];
+        p.extend_from_slice(ts);
+        p
+    }
+
+    /// Build a 188-byte TS packet that carries a PCR in its adaptation field.
+    /// `with_payload` controls whether the adaptation_field_control also
+    /// announces a payload (0x30) or is adaptation-only (0x20). The optional
+    /// `payload` bytes are appended after the adaptation field.
+    fn ts_packet_pcr(pid: u16, pcr_base: u64, pcr_ext: u16, with_payload: bool, payload: &[u8]) -> Vec<u8> {
+        ts_packet_pcr_pusi(false, pid, pcr_base, pcr_ext, with_payload, payload)
+    }
+
+    fn ts_packet_pcr_pusi(
+        pusi: bool,
+        pid: u16,
+        pcr_base: u64,
+        pcr_ext: u16,
+        with_payload: bool,
+        payload: &[u8],
+    ) -> Vec<u8> {
+        let mut ts = vec![0xFFu8; TS_PACKET_SIZE];
+        ts[0] = SYNC_BYTE;
+        ts[1] = ((pid >> 8) as u8 & 0x1F) | if pusi { 0x40 } else { 0 };
+        ts[2] = (pid & 0xFF) as u8;
+        // adaptation_field_control: 0x20 = adaptation only, 0x30 = adaptation + payload.
+        ts[3] = if with_payload { 0x30 } else { 0x20 };
+        // Adaptation field length covers the flags byte + 6 PCR bytes = 7.
+        let af_len = 7usize;
+        ts[4] = af_len as u8;
+        ts[5] = 0x10; // PCR_flag set
+        ts[6] = (pcr_base >> 25) as u8;
+        ts[7] = (pcr_base >> 17) as u8;
+        ts[8] = (pcr_base >> 9) as u8;
+        ts[9] = (pcr_base >> 1) as u8;
+        ts[10] = (((pcr_base & 0x1) as u8) << 7) | ((pcr_ext >> 8) as u8 & 0x01);
+        ts[11] = (pcr_ext & 0xFF) as u8;
+        if with_payload {
+            // Payload begins after the 4-byte TS header + 1 length byte + af_len.
+            let payload_offset = 5 + af_len;
+            let n = payload.len().min(TS_PACKET_SIZE - payload_offset);
+            ts[payload_offset..payload_offset + n].copy_from_slice(&payload[..n]);
+        }
+        ts
+    }
+
+    /// Build a 188-byte TS packet with an empty adaptation field (af_len = 0)
+    /// followed by a payload. Exercises the `af_len < 1` branch.
+    fn ts_packet_empty_af(pusi: bool, pid: u16, payload: &[u8]) -> Vec<u8> {
+        let mut ts = vec![0xFFu8; TS_PACKET_SIZE];
+        ts[0] = SYNC_BYTE;
+        ts[1] = ((pid >> 8) as u8 & 0x1F) | if pusi { 0x40 } else { 0 };
+        ts[2] = (pid & 0xFF) as u8;
+        ts[3] = 0x30; // adaptation + payload
+        ts[4] = 0x00; // af_len = 0
+        let payload_offset = 5usize;
+        let n = payload.len().min(TS_PACKET_SIZE - payload_offset);
+        ts[payload_offset..payload_offset + n].copy_from_slice(&payload[..n]);
+        ts
+    }
+
+    /// A PES header carrying `header_data_length` filler bytes after the 9-byte
+    /// fixed header, so the scanner has to skip them before the ES payload.
+    fn pes_payload_with_header(header_data_length: u8, es: &[u8]) -> Vec<u8> {
+        let mut v = vec![
+            0x00, 0x00, 0x01, // PES start code
+            0xE0, // stream id (video)
+            0x00, 0x00, // PES packet length
+            0x80, 0x00, // flags
+            header_data_length, // header data length
+        ];
+        v.extend(std::iter::repeat(0x55).take(header_data_length as usize));
+        v.extend_from_slice(es);
+        v
+    }
+
+    /// RAII guard that removes a temp file on drop.
+    struct TempFile {
+        path: std::path::PathBuf,
+    }
+    impl TempFile {
+        fn new(name: &str, bytes: &[u8]) -> Self {
+            let mut path = std::env::temp_dir();
+            let unique = format!(
+                "{}-{}-{}",
+                name,
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            );
+            path.push(unique);
+            std::fs::write(&path, bytes).expect("write temp file");
+            TempFile { path }
+        }
+    }
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
     fn pat_payload(program: u16, pmt_pid: u16) -> Vec<u8> {
         vec![
             0x00, // pointer
@@ -792,5 +903,651 @@ mod tests {
         bad[4] = 0x00; // not 0x47
         let result = scan_m2ts_from_reader(bad.as_slice()).expect("scan succeeds");
         assert!(result.streams.is_empty());
+    }
+
+    #[test]
+    fn truncated_final_frame_is_ignored() {
+        // A complete packet followed by a partial (< 192 byte) frame: the
+        // partial bytes are carried but never form a packet.
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0000, &pat_payload(1, 0x0100))));
+        data.extend_from_slice(&[0u8; 50]); // short trailing frame
+        let result = scan_m2ts_from_reader(data.as_slice()).expect("scan succeeds");
+        // Only the one complete 192-byte frame was counted.
+        assert_eq!(result.bytes, M2TS_PACKET_SIZE as u64);
+        assert_eq!(result.program_pmt_pids, vec![0x0100]);
+    }
+
+    #[test]
+    fn pcr_in_adaptation_field_sets_pcr_pid_and_duration() {
+        // Two PCR samples one second apart (27 MHz) on the same PID. The PCR
+        // PID should be recorded and the duration derived from the delta.
+        let pid = 0x1011u16;
+        let base0 = 1_000u64;
+        // 1 second at 90 kHz = 90_000 ticks on the base clock.
+        let base1 = base0 + 90_000;
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts(&ts_packet_pcr(pid, base0, 0, false, &[])));
+        data.extend_from_slice(&m2ts(&ts_packet_pcr(pid, base1, 0, false, &[])));
+        let result = scan_m2ts_from_reader(data.as_slice()).expect("scan succeeds");
+        assert_eq!(result.pcr_pid, Some(pid));
+        assert!(
+            (result.duration_seconds - 1.0).abs() < 1e-3,
+            "expected ~1s, got {}",
+            result.duration_seconds
+        );
+    }
+
+    #[test]
+    fn adaptation_plus_payload_carries_pes_after_adaptation_field() {
+        // adaptation_field_control = 0x30: adaptation field (with PCR) AND a
+        // PES payload in the same packet.
+        let pid = 0x1011u16;
+        let pes = pes_payload(&[0xDE, 0xAD, 0xBE, 0xEF]);
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0000, &pat_payload(1, 0x0100))));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0100, &pmt_payload())));
+        data.extend_from_slice(&m2ts(&ts_packet_pcr_pusi(true, pid, 5_000, 100, true, &pes)));
+
+        let mut dispatched: Vec<u8> = Vec::new();
+        let result = scan_m2ts_streaming_from_reader(data.as_slice(), |p, _st, payload, _pmt| {
+            if p == pid {
+                dispatched = payload.to_vec();
+            }
+            PesAction::Continue
+        })
+        .expect("scan succeeds");
+        assert_eq!(result.pcr_pid, Some(pid));
+        // ts_packet pads with 0xFF, so the PES payload begins with the ES bytes.
+        assert_eq!(&dispatched[..4], &[0xDE, 0xAD, 0xBE, 0xEF]);
+    }
+
+    #[test]
+    fn empty_adaptation_field_then_payload() {
+        // af_len = 0 packet still has a payload (the PAT here). Hits the
+        // `af_len < 1` branch where no PCR is read.
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts(&ts_packet_empty_af(true, 0x0000, &pat_payload(1, 0x0100))));
+        let result = scan_m2ts_from_reader(data.as_slice()).expect("scan succeeds");
+        assert_eq!(result.program_pmt_pids, vec![0x0100]);
+        assert!(result.pcr_pid.is_none());
+    }
+
+    #[test]
+    fn pes_spans_multiple_ts_packets_via_continuation() {
+        // A PES that starts in one packet (PUSI set) and continues in the next
+        // (PUSI clear) must be reassembled across both.
+        let pid = 0x1011u16;
+        let pes = pes_payload(&[0x01, 0x02, 0x03]);
+        // A distinctive continuation payload (no PES start code, PUSI clear).
+        let continuation = vec![0x04u8; 184];
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0000, &pat_payload(1, 0x0100))));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0100, &pmt_payload())));
+        data.extend_from_slice(&m2ts(&ts_packet(true, pid, &pes)));
+        // Continuation packet: PUSI clear.
+        data.extend_from_slice(&m2ts(&ts_packet(false, pid, &continuation)));
+
+        let mut dispatched: Vec<u8> = Vec::new();
+        scan_m2ts_streaming_from_reader(data.as_slice(), |p, _st, payload, _pmt| {
+            if p == pid {
+                dispatched = payload.to_vec();
+            }
+            PesAction::Continue
+        })
+        .expect("scan succeeds");
+        // First three ES bytes from the PUSI packet (ts_packet pads the rest
+        // with 0xFF), then the continuation bytes were appended, so the total
+        // length exceeds a single TS payload and the 0x04 run is present.
+        assert_eq!(&dispatched[..3], &[0x01, 0x02, 0x03]);
+        assert!(dispatched.len() > TS_PACKET_SIZE, "continuation appended bytes");
+        assert!(dispatched.windows(4).any(|w| w == [0x04, 0x04, 0x04, 0x04]));
+    }
+
+    #[test]
+    fn second_pes_flushes_first_and_callback_can_stop() {
+        // Two PES on the same PID: the second PUSI flushes the first, which is
+        // dispatched. Returning Stop must abort the scan immediately.
+        let pid = 0x1011u16;
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0000, &pat_payload(1, 0x0100))));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0100, &pmt_payload())));
+        data.extend_from_slice(&m2ts(&ts_packet(true, pid, &pes_payload(&[0x11]))));
+        data.extend_from_slice(&m2ts(&ts_packet(true, pid, &pes_payload(&[0x22]))));
+        // This packet must never be reached because the callback stops first.
+        data.extend_from_slice(&m2ts(&ts_packet(true, pid, &pes_payload(&[0x33]))));
+
+        let mut payloads: Vec<Vec<u8>> = Vec::new();
+        scan_m2ts_streaming_from_reader(data.as_slice(), |p, _st, payload, _pmt| {
+            if p == pid {
+                payloads.push(payload.to_vec());
+            }
+            PesAction::Stop
+        })
+        .expect("scan succeeds");
+        // Only the first PES got flushed before Stop aborted the loop. The
+        // ts_packet payload is padded with 0xFF, so check the leading ES byte.
+        assert_eq!(payloads.len(), 1);
+        assert_eq!(payloads[0][0], 0x11);
+    }
+
+    #[test]
+    fn skip_pid_stops_reassembly_but_keeps_byte_accounting() {
+        // SkipPid: after the first PES dispatch the PID is skipped, so later
+        // PES are not dispatched, but per-PID byte accounting continues.
+        let pid = 0x1011u16;
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0000, &pat_payload(1, 0x0100))));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0100, &pmt_payload())));
+        // First PES, then a second PUSI which flushes the first and triggers
+        // SkipPid, then more packets that must still be byte-counted.
+        data.extend_from_slice(&m2ts(&ts_packet(true, pid, &pes_payload(&[0xA0]))));
+        data.extend_from_slice(&m2ts(&ts_packet(true, pid, &pes_payload(&[0xB0]))));
+        data.extend_from_slice(&m2ts(&ts_packet(true, pid, &pes_payload(&[0xC0]))));
+
+        let mut count = 0u32;
+        let result = scan_m2ts_streaming_from_reader(data.as_slice(), |p, _st, _payload, _pmt| {
+            if p == pid {
+                count += 1;
+                PesAction::SkipPid
+            } else {
+                PesAction::Continue
+            }
+        })
+        .expect("scan succeeds");
+        // Exactly one dispatch happened (the flush of the first PES); after
+        // SkipPid no further dispatch occurs.
+        assert_eq!(count, 1);
+        let stats = result.streams.get(&pid).expect("PID seen");
+        // All three PES packets were byte-counted regardless of skipping.
+        assert_eq!(stats.packet_count, 3);
+        assert!(stats.total_bytes > 0);
+    }
+
+    #[test]
+    fn bitrate_samples_roll_with_arrival_timecode() {
+        // Feed packets across more than one second of arrival time so the
+        // one-second bitrate window rolls and emits samples.
+        let mut data = Vec::new();
+        let ticks_per_sec = 27_000_000u32;
+        // 0s, 0.5s, 1.0s, 1.5s, 2.1s
+        for (i, frac) in [0.0f64, 0.5, 1.0, 1.5, 2.1].iter().enumerate() {
+            let atc = (frac * ticks_per_sec as f64) as u32;
+            let pkt = ts_packet(true, 0x1011, &pes_payload(&[i as u8]));
+            data.extend_from_slice(&m2ts_atc(&pkt, atc));
+        }
+        let result = scan_m2ts_from_reader(data.as_slice()).expect("scan succeeds");
+        // Crossing 1s and 2s boundaries yields at least two rolled windows.
+        assert!(
+            result.bitrate_samples.len() >= 2,
+            "expected rolled windows, got {:?}",
+            result.bitrate_samples
+        );
+        assert!(result.duration_seconds >= 2.0);
+    }
+
+    #[test]
+    fn pes_header_data_length_bytes_are_skipped() {
+        // A PES with a non-zero PES_header_data_length must have those filler
+        // bytes skipped before the ES payload reaches the callback.
+        let pid = 0x1011u16;
+        let pes = pes_payload_with_header(5, &[0xCA, 0xFE]);
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0000, &pat_payload(1, 0x0100))));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0100, &pmt_payload())));
+        data.extend_from_slice(&m2ts(&ts_packet(true, pid, &pes)));
+
+        let mut dispatched: Vec<u8> = Vec::new();
+        scan_m2ts_streaming_from_reader(data.as_slice(), |p, _st, payload, _pmt| {
+            if p == pid {
+                dispatched = payload.to_vec();
+            }
+            PesAction::Continue
+        })
+        .expect("scan succeeds");
+        // The 5 header filler bytes (0x55) are gone; only the ES payload remains.
+        assert_eq!(&dispatched[..2], &[0xCA, 0xFE]);
+        assert!(!dispatched.contains(&0x55));
+    }
+
+    #[test]
+    fn multiple_elementary_streams_video_audio_and_pgs() {
+        // A PMT with video + audio + PGS, each on its own PID, must map all
+        // three stream types and dispatch PES for each elementary PID.
+        let pmt = vec![
+            0x00, // pointer
+            0x02, // table_id (PMT)
+            0xB0, 0x1C, // section_length = 28
+            0x00, 0x01, // program_number
+            0x01, 0x00, 0x00, // version / section / last
+            0xE0, 0x00, // PCR PID
+            0xF0, 0x00, // program_info_length = 0
+            // video AVC (0x1b) PID 0x1011
+            0x1b, 0xF0, 0x11, 0xF0, 0x00,
+            // audio AC3 (0x81) PID 0x1100
+            0x81, 0xF1, 0x00, 0xF0, 0x00,
+            // PGS subtitle (0x90) PID 0x1200
+            0x90, 0xF2, 0x00, 0xF0, 0x00,
+            0x00, 0x00, 0x00, 0x00, // CRC
+        ];
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0000, &pat_payload(1, 0x0100))));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0100, &pmt)));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x1011, &pes_payload(&[0x10]))));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x1100, &pes_payload(&[0x20]))));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x1200, &pes_payload(&[0x30]))));
+
+        let mut seen: HashMap<u16, u8> = HashMap::new();
+        let result = scan_m2ts_streaming_from_reader(data.as_slice(), |p, st, _payload, _pmt| {
+            seen.insert(p, st);
+            PesAction::Continue
+        })
+        .expect("scan succeeds");
+
+        assert_eq!(result.streams.get(&0x1011).unwrap().stream_type, 0x1b);
+        assert_eq!(result.streams.get(&0x1100).unwrap().stream_type, 0x81);
+        assert_eq!(result.streams.get(&0x1200).unwrap().stream_type, 0x90);
+        // PES dispatched for all three elementary PIDs.
+        assert_eq!(seen.get(&0x1011), Some(&0x1b));
+        assert_eq!(seen.get(&0x1100), Some(&0x81));
+        assert_eq!(seen.get(&0x1200), Some(&0x90));
+    }
+
+    #[test]
+    fn streaming_with_progress_callback_builds_snapshot() {
+        // The with-progress entry point wires a progress callback; even if the
+        // 1-second throttle never fires, the path and snapshot helpers compile
+        // and run, and the final result is correct.
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0000, &pat_payload(1, 0x0100))));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0100, &pmt_payload())));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x1011, &pes_payload(&[0x77]))));
+
+        let mut progress_snapshots = 0u32;
+        let result = scan_m2ts_streaming_from_reader_with_progress(
+            data.as_slice(),
+            |_p, _st, _payload, _pmt| PesAction::Continue,
+            |_progress| progress_snapshots += 1,
+        )
+        .expect("scan succeeds");
+        assert_eq!(result.program_pmt_pids, vec![0x0100]);
+        // The snapshot builder is also exercised directly to assert its shape.
+        let mut stbp = [0u8; MAX_PID];
+        stbp[0x1011] = 0x1b;
+        let mut tbbp = [0u64; MAX_PID];
+        tbbp[0x1011] = 123;
+        let mut pcbp = [0u64; MAX_PID];
+        pcbp[0x1011] = 4;
+        let snap = build_progress_snapshot(
+            456,
+            &[0x1011u16],
+            &stbp,
+            &tbbp,
+            &pcbp,
+            Some(0),
+            Some(27_000_000),
+            None,
+            None,
+        );
+        assert_eq!(snap.bytes, 456);
+        assert!((snap.duration_seconds - 1.0).abs() < 1e-9);
+        let s = snap.streams.get(&0x1011).unwrap();
+        assert_eq!(s.stream_type, 0x1b);
+        assert_eq!(s.total_bytes, 123);
+        assert_eq!(s.packet_count, 4);
+        // Snapshots may or may not have fired depending on timing; the counter
+        // is only referenced so the closure has an observable effect.
+        let _ = progress_snapshots;
+    }
+
+    #[test]
+    fn streaming_from_path_reads_a_temp_file() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0000, &pat_payload(1, 0x0100))));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0100, &pmt_payload())));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x1011, &pes_payload(&[0x9A]))));
+        let file = TempFile::new("bdmaster-m2ts-streaming", &data);
+
+        let mut dispatched = 0u32;
+        let result = scan_m2ts_streaming(&file.path, |_p, _st, _payload, _pmt| {
+            dispatched += 1;
+            PesAction::Continue
+        })
+        .expect("scan succeeds");
+        assert_eq!(result.program_pmt_pids, vec![0x0100]);
+        assert!(dispatched >= 1);
+    }
+
+    #[test]
+    fn scan_m2ts_path_variant_full_pipeline() {
+        // Exercises the separate path-based scan_m2ts function end to end:
+        // PAT/PMT discovery, PCR-driven duration, PES sample capture, and
+        // bitrate windows from the arrival timecode.
+        let pid = 0x1011u16;
+        let ticks_per_sec = 27_000_000u32;
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0000, &pat_payload(1, 0x0100))));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0100, &pmt_payload())));
+        // First PCR sample (adaptation + payload so it also reaches the
+        // bitrate window) at t=0; PUSI begins a PES for sample capture.
+        data.extend_from_slice(&m2ts_atc(
+            &ts_packet_pcr_pusi(true, pid, 1_000, 0, true, &pes_payload(&[0xEE, 0xFF])),
+            0,
+        ));
+        // A payload-bearing packet at t=0.5s keeps the window fed.
+        data.extend_from_slice(&m2ts_atc(
+            &ts_packet(false, pid, &[0x00u8; 184]),
+            ticks_per_sec / 2,
+        ));
+        // Second PCR sample 1s after the first (for duration) on a packet that
+        // also carries a payload so it advances the bitrate window past 1s.
+        data.extend_from_slice(&m2ts_atc(
+            &ts_packet_pcr(pid, 1_000 + 90_000, 0, true, &[0x00u8; 100]),
+            ticks_per_sec + ticks_per_sec / 2,
+        ));
+
+        let file = TempFile::new("bdmaster-m2ts-path", &data);
+        let result = scan_m2ts(&file.path).expect("scan succeeds");
+
+        assert_eq!(result.program_pmt_pids, vec![0x0100]);
+        assert_eq!(result.pcr_pid, Some(pid));
+        assert!(
+            (result.duration_seconds - 1.0).abs() < 1e-3,
+            "expected ~1s, got {}",
+            result.duration_seconds
+        );
+        let stats = result.streams.get(&pid).expect("PID seen");
+        assert_eq!(stats.stream_type, 0x1b);
+        // The flushed PES sample carries the ES payload.
+        assert_eq!(&stats.pes_sample[..2], &[0xEE, 0xFF]);
+        assert!(!result.bitrate_samples.is_empty());
+    }
+
+    #[test]
+    fn scan_m2ts_path_continuation_and_64k_sample_flush() {
+        // Path variant: a PES spanning many continuation packets accumulates
+        // past the 64KB threshold so pes_sample is taken mid-stream and the
+        // `pes_started` reset branch runs.
+        let pid = 0x1011u16;
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0000, &pat_payload(1, 0x0100))));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0100, &pmt_payload())));
+        // Start a PES with a small ES chunk.
+        data.extend_from_slice(&m2ts(&ts_packet(true, pid, &pes_payload(&[0x01; 100]))));
+        // ~64KB / ~184 bytes per packet => well over 360 continuation packets.
+        for _ in 0..400 {
+            data.extend_from_slice(&m2ts(&ts_packet(false, pid, &[0x02u8; 184])));
+        }
+        let file = TempFile::new("bdmaster-m2ts-64k", &data);
+        let result = scan_m2ts(&file.path).expect("scan succeeds");
+        let stats = result.streams.get(&pid).expect("PID seen");
+        assert!(
+            stats.pes_sample.len() >= 64 * 1024,
+            "expected >=64KB sample, got {}",
+            stats.pes_sample.len()
+        );
+    }
+
+    #[test]
+    fn scan_m2ts_path_empty_file_falls_back_to_metadata_size() {
+        // An empty file: total_bytes stays 0, so scan_m2ts substitutes the
+        // file's metadata length (also 0 here) and returns no streams.
+        let file = TempFile::new("bdmaster-m2ts-empty", &[]);
+        let result = scan_m2ts(&file.path).expect("scan succeeds");
+        assert_eq!(result.bytes, 0);
+        assert!(result.streams.is_empty());
+        assert!(result.program_pmt_pids.is_empty());
+        assert_eq!(result.duration_seconds, 0.0);
+    }
+
+    #[test]
+    fn scan_m2ts_path_short_trailing_frame_is_dropped() {
+        // Path variant: a full packet then a partial frame. The partial frame
+        // is read but `filled < M2TS_PACKET_SIZE`, so the loop breaks.
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0000, &pat_payload(1, 0x0100))));
+        data.extend_from_slice(&[0u8; 30]);
+        let file = TempFile::new("bdmaster-m2ts-short", &data);
+        let result = scan_m2ts(&file.path).expect("scan succeeds");
+        assert_eq!(result.bytes, M2TS_PACKET_SIZE as u64);
+        assert_eq!(result.program_pmt_pids, vec![0x0100]);
+    }
+
+    #[test]
+    fn scan_m2ts_path_skips_non_sync_packet() {
+        // Path variant resync branch: a frame with the wrong sync byte is
+        // counted but skipped, then a good PAT frame still parses.
+        let mut bad = vec![0u8; M2TS_PACKET_SIZE];
+        bad[4] = 0x00; // not the sync byte
+        let mut data = Vec::new();
+        data.extend_from_slice(&bad);
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0000, &pat_payload(1, 0x0100))));
+        let file = TempFile::new("bdmaster-m2ts-nosync", &data);
+        let result = scan_m2ts(&file.path).expect("scan succeeds");
+        assert_eq!(result.program_pmt_pids, vec![0x0100]);
+        assert_eq!(result.bytes, 2 * M2TS_PACKET_SIZE as u64);
+    }
+
+    /// A reader that sleeps before serving its bytes so that, by the time the
+    /// scanner finishes processing that first chunk, the 1-second progress
+    /// throttle has elapsed and the progress snapshot is emitted.
+    struct SlowReader {
+        data: Vec<u8>,
+        served: bool,
+    }
+    impl Read for SlowReader {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.served {
+                return Ok(0);
+            }
+            // Sleep so `last_progress_at.elapsed()` exceeds one second once this
+            // chunk is processed, then hand over all the bytes at once.
+            std::thread::sleep(Duration::from_millis(1100));
+            let n = self.data.len().min(buf.len());
+            buf[..n].copy_from_slice(&self.data[..n]);
+            self.served = true;
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn slow_reader_triggers_progress_snapshot() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0000, &pat_payload(1, 0x0100))));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0100, &pmt_payload())));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x1011, &pes_payload(&[0x42]))));
+        let reader = SlowReader { data, served: false };
+
+        let mut progress_count = 0u32;
+        let result = scan_m2ts_streaming_from_reader_with_progress(
+            reader,
+            |_p, _st, _payload, _pmt| PesAction::Continue,
+            |progress| {
+                progress_count += 1;
+                // The snapshot carries cumulative bytes (zero on the first,
+                // pre-data tick) and a stream table.
+                let _ = progress.bytes;
+                let _ = progress.duration_seconds;
+            },
+        )
+        .expect("scan succeeds");
+        assert!(progress_count >= 1, "progress callback should have fired");
+        assert_eq!(result.program_pmt_pids, vec![0x0100]);
+    }
+
+    #[test]
+    fn slow_reader_drives_no_progress_entry_point() {
+        // Same slow reader, but through scan_m2ts_streaming_from_reader, whose
+        // internal `|_| {}` progress closure must be exercised when the 1s
+        // throttle fires.
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0000, &pat_payload(1, 0x0100))));
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0100, &pmt_payload())));
+        let reader = SlowReader { data, served: false };
+        let result = scan_m2ts_streaming_from_reader(reader, |_p, _st, _payload, _pmt| {
+            PesAction::Continue
+        })
+        .expect("scan succeeds");
+        assert_eq!(result.program_pmt_pids, vec![0x0100]);
+    }
+
+    /// A reader that returns an I/O error so the scanner propagates it. Used to
+    /// cover the `Err(e) => return Err(e.into())` arm in scan_m2ts_from_reader.
+    struct ErrReader;
+    impl Read for ErrReader {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(std::io::ErrorKind::Other, "boom"))
+        }
+    }
+
+    #[test]
+    fn reader_io_error_is_propagated() {
+        let err = scan_m2ts_from_reader(ErrReader);
+        assert!(err.is_err(), "I/O error should propagate");
+    }
+
+    #[test]
+    fn scan_m2ts_path_adaptation_only_packet_has_no_payload() {
+        // Path variant: an adaptation-only packet (control 0x20, no payload)
+        // hits the `!has_payload` continue branch.
+        let pid = 0x1011u16;
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts(&ts_packet(true, 0x0000, &pat_payload(1, 0x0100))));
+        // Adaptation-only PCR packet: no payload byte to inspect.
+        data.extend_from_slice(&m2ts(&ts_packet_pcr(pid, 1_000, 0, false, &[])));
+        let file = TempFile::new("bdmaster-m2ts-afonly", &data);
+        let result = scan_m2ts(&file.path).expect("scan succeeds");
+        assert_eq!(result.pcr_pid, Some(pid));
+        // The adaptation-only packet contributed no per-PID payload bytes.
+        assert!(result.streams.get(&pid).is_none());
+    }
+
+    #[test]
+    fn scan_m2ts_path_unwraps_atc_wraparound() {
+        // Path variant ATC wraparound: a high then low arrival timecode.
+        let high = (1u32 << 30) - 1;
+        let low = 5u32;
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts_atc(&ts_packet(true, 0x1011, &pes_payload(&[0x01])), high));
+        data.extend_from_slice(&m2ts_atc(&ts_packet(true, 0x1011, &pes_payload(&[0x02])), low));
+        let file = TempFile::new("bdmaster-m2ts-wrap", &data);
+        let result = scan_m2ts(&file.path).expect("scan succeeds");
+        assert!(result.duration_seconds > 0.0);
+    }
+
+    #[test]
+    fn parse_pat_rejects_malformed_sections() {
+        let mut pmt_pids = Vec::new();
+        let mut set = std::collections::HashSet::new();
+        let mut flags = [false; MAX_PID];
+
+        // Empty payload.
+        parse_pat(&[], &mut pmt_pids, &mut set, &mut flags);
+        assert!(pmt_pids.is_empty());
+
+        // Wrong table_id (not 0x00).
+        let mut wrong = pat_payload(1, 0x0100);
+        wrong[1] = 0x42;
+        parse_pat(&wrong, &mut pmt_pids, &mut set, &mut flags);
+        assert!(pmt_pids.is_empty());
+
+        // Section header claims more bytes than the payload holds.
+        let mut truncated = pat_payload(1, 0x0100);
+        truncated[3] = 0x7F; // huge section_length
+        parse_pat(&truncated, &mut pmt_pids, &mut set, &mut flags);
+        assert!(pmt_pids.is_empty());
+
+        // program_number == 0 entries (the NIT) are ignored.
+        let nit = vec![
+            0x00, 0x00, 0xB0, 0x0D, 0x00, 0x01, 0x01, 0x00, 0x00,
+            0x00, 0x00, // program_number = 0
+            0xE0, 0x10, // pid
+            0x00, 0x00, 0x00, 0x00,
+        ];
+        parse_pat(&nit, &mut pmt_pids, &mut set, &mut flags);
+        assert!(pmt_pids.is_empty());
+
+        // A too-short payload (header start beyond available bytes).
+        parse_pat(&[0x05, 0x00], &mut pmt_pids, &mut set, &mut flags);
+        assert!(pmt_pids.is_empty());
+    }
+
+    #[test]
+    fn parse_pmt_rejects_malformed_sections() {
+        let mut map = HashMap::new();
+        let mut by_pid = [0u8; MAX_PID];
+
+        // Empty payload.
+        parse_pmt(&[], &mut map, &mut by_pid);
+        assert!(map.is_empty());
+
+        // Wrong table_id.
+        let mut wrong = pmt_payload();
+        wrong[1] = 0x10;
+        parse_pmt(&wrong, &mut map, &mut by_pid);
+        assert!(map.is_empty());
+
+        // Section claims more bytes than present.
+        let mut truncated = pmt_payload();
+        truncated[3] = 0x7F;
+        parse_pmt(&truncated, &mut map, &mut by_pid);
+        assert!(map.is_empty());
+
+        // Too short to even hold the 12-byte fixed header.
+        parse_pmt(&[0x00, 0x02, 0xB0], &mut map, &mut by_pid);
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn pmt_with_program_info_length_skips_descriptors() {
+        // A PMT whose program_info_length is non-zero must skip those
+        // descriptor bytes before reading the ES loop.
+        let pmt = vec![
+            0x00, // pointer
+            0x02, // table_id
+            0xB0, 0x15, // section_length = 21
+            0x00, 0x01, // program_number
+            0x01, 0x00, 0x00, // version / section / last
+            0xE0, 0x00, // PCR PID
+            0xF0, 0x03, // program_info_length = 3
+            0xAA, 0xBB, 0xCC, // 3 descriptor bytes
+            // ES: AVC PID 0x1011
+            0x1b, 0xF0, 0x11, 0xF0, 0x00,
+            0x00, 0x00, 0x00, 0x00, // CRC
+        ];
+        let mut map = HashMap::new();
+        let mut by_pid = [0u8; MAX_PID];
+        parse_pmt(&pmt, &mut map, &mut by_pid);
+        assert_eq!(map.get(&0x1011), Some(&0x1b));
+    }
+
+    #[test]
+    fn atc_wraparound_is_unwrapped_monotonically() {
+        // Two packets where the second ATC is smaller than the first (a 30-bit
+        // wraparound). The unwrap keeps the duration positive.
+        let high = (1u32 << 30) - 1; // near the 30-bit max
+        let low = 10u32; // wrapped value
+        let mut data = Vec::new();
+        data.extend_from_slice(&m2ts_atc(&ts_packet(true, 0x1011, &pes_payload(&[0x01])), high));
+        data.extend_from_slice(&m2ts_atc(&ts_packet(true, 0x1011, &pes_payload(&[0x02])), low));
+        let result = scan_m2ts_from_reader(data.as_slice()).expect("scan succeeds");
+        // After unwrap the second timecode is greater than the first.
+        assert!(result.duration_seconds > 0.0);
+    }
+
+    #[test]
+    fn pcr_present_but_adaptation_field_too_short_is_ignored() {
+        // PCR_flag set but af_len < 7: the PCR must not be read.
+        let pid = 0x1011u16;
+        let mut ts = vec![0xFFu8; TS_PACKET_SIZE];
+        ts[0] = SYNC_BYTE;
+        ts[1] = (pid >> 8) as u8 & 0x1F;
+        ts[2] = (pid & 0xFF) as u8;
+        ts[3] = 0x20; // adaptation only
+        ts[4] = 0x01; // af_len = 1 (only the flags byte fits)
+        ts[5] = 0x10; // PCR_flag set, but no room for PCR bytes
+        let data = m2ts(&ts);
+        let result = scan_m2ts_from_reader(data.as_slice()).expect("scan succeeds");
+        assert!(result.pcr_pid.is_none());
     }
 }

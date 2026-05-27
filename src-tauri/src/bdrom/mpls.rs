@@ -206,32 +206,39 @@ pub fn parse_mpls_bytes(name: String, data: &[u8]) -> Result<PlaylistFile> {
         r.pos += 5;
 
         for _ in 0..stream_count_video {
-            if let Some(s) = create_stream(data, &mut r.pos, 0)? {
+            if let Some(s) = create_stream(data, &mut r.pos)? {
                 add_unique(&mut playlist_streams, s);
             }
         }
         for _ in 0..stream_count_audio {
-            if let Some(s) = create_stream(data, &mut r.pos, 0)? {
+            if let Some(s) = create_stream(data, &mut r.pos)? {
                 add_unique(&mut playlist_streams, s);
             }
         }
         for _ in 0..stream_count_pg {
-            if let Some(s) = create_stream(data, &mut r.pos, 0)? {
+            if let Some(s) = create_stream(data, &mut r.pos)? {
                 add_unique(&mut playlist_streams, s);
             }
         }
         for _ in 0..stream_count_ig {
-            if let Some(s) = create_stream(data, &mut r.pos, 0)? {
+            if let Some(s) = create_stream(data, &mut r.pos)? {
                 add_unique(&mut playlist_streams, s);
             }
         }
         for _ in 0..stream_count_secondary_audio {
-            if let Some(s) = create_stream(data, &mut r.pos, 2)? {
+            let s = create_stream(data, &mut r.pos)?;
+            // BDInfo skips the secondary-audio extension (pos += 2) after every
+            // entry, whether or not a stream was produced.
+            r.pos += 2;
+            if let Some(s) = s {
                 add_unique(&mut playlist_streams, s);
             }
         }
         for _ in 0..stream_count_secondary_video {
-            if let Some(s) = create_stream(data, &mut r.pos, 6)? {
+            let s = create_stream(data, &mut r.pos)?;
+            // Likewise the secondary-video extension is always skipped (pos += 6).
+            r.pos += 6;
+            if let Some(s) = s {
                 add_unique(&mut playlist_streams, s);
             }
         }
@@ -284,7 +291,7 @@ fn add_unique(list: &mut Vec<PlaylistStream>, s: PlaylistStream) {
     }
 }
 
-fn create_stream(data: &[u8], pos: &mut usize, post_extra: usize) -> Result<Option<PlaylistStream>> {
+fn create_stream(data: &[u8], pos: &mut usize) -> Result<Option<PlaylistStream>> {
     if *pos >= data.len() {
         return Ok(None);
     }
@@ -408,7 +415,6 @@ fn create_stream(data: &[u8], pos: &mut usize, post_extra: usize) -> Result<Opti
     }
 
     *pos = stream_pos + stream_length;
-    *pos += post_extra;
 
     Ok(Some(stream))
 }
@@ -495,10 +501,203 @@ mod tests {
         d
     }
 
+    /// Build one STN stream entry: `[header_length][header...][stream_length][coding...]`.
+    /// `header_type` selects how the PID is located (matching `create_stream`).
+    fn stream_entry(header_type: u8, pid: u16, coding: &[u8]) -> Vec<u8> {
+        let mut header = vec![header_type];
+        match header_type {
+            1 => header.extend_from_slice(&pid.to_be_bytes()),
+            2 | 4 => {
+                header.extend_from_slice(&[0u8, 0u8]);
+                header.extend_from_slice(&pid.to_be_bytes());
+            }
+            3 => {
+                header.push(0);
+                header.extend_from_slice(&pid.to_be_bytes());
+            }
+            _ => {}
+        }
+        let mut out = vec![header.len() as u8];
+        out.extend_from_slice(&header);
+        out.push(coding.len() as u8);
+        out.extend_from_slice(coding);
+        out
+    }
+
+    fn mpls_header(signature: &[u8], misc_flags: u8) -> Vec<u8> {
+        let mut d: Vec<u8> = Vec::new();
+        d.extend_from_slice(signature);
+        d.extend_from_slice(&[0u8; 4]); // playlist_offset @8 (patched later)
+        d.extend_from_slice(&[0u8; 4]); // chapters_offset @12 (patched later)
+        d.extend_from_slice(&[0u8; 4]); // extensions_offset @16
+        while d.len() < 0x38 {
+            d.push(0);
+        }
+        d.push(misc_flags); // @0x38
+        d
+    }
+
+    /// MPLS exercising every stream category and header-entry type, plus the
+    /// secondary-audio (+2) and secondary-video (+6) skip bytes.
+    fn build_rich_mpls() -> Vec<u8> {
+        let mut d = mpls_header(b"MPLS0100", 0x00);
+
+        let playlist_offset = d.len() as u32;
+        d[8..12].copy_from_slice(&playlist_offset.to_be_bytes());
+        d.extend_from_slice(&0u32.to_be_bytes()); // playlist_length
+        d.extend_from_slice(&0u16.to_be_bytes()); // reserved
+        d.extend_from_slice(&1u16.to_be_bytes()); // item_count
+        d.extend_from_slice(&0u16.to_be_bytes()); // subitem_count
+
+        let item_start = d.len();
+        d.extend_from_slice(&0u16.to_be_bytes()); // item_length placeholder
+        d.extend_from_slice(b"00002"); // item name
+        d.extend_from_slice(b"M2TS");
+        d.push(0x00); // skip 1
+        d.push(0x00); // multiangle = 0
+        d.push(0x00); // +1
+        d.extend_from_slice(&0u32.to_be_bytes()); // in_time
+        d.extend_from_slice(&9_000_000u32.to_be_bytes()); // out_time
+        d.extend_from_slice(&[0u8; 12]); // reserved skip
+
+        // STN table.
+        d.extend_from_slice(&0u16.to_be_bytes()); // stn_length
+        d.extend_from_slice(&0u16.to_be_bytes()); // reserved
+        d.push(1); // video
+        d.push(1); // audio
+        d.push(2); // pg (PG + subtitle)
+        d.push(1); // ig
+        d.push(1); // secondary audio
+        d.push(1); // secondary video
+        d.push(0); // pip
+        d.extend_from_slice(&[0u8; 5]); // reserved skip
+
+        d.extend(stream_entry(1, 0x1011, &[0x1b, (6 << 4) | 1, 3 << 4])); // AVC video
+        d.extend(stream_entry(1, 0x1100, &[0x82, (6 << 4) | 1, b's', b'p', b'a'])); // DTS audio
+        d.extend(stream_entry(2, 0x1200, &[0x90, b'e', b'n', b'g'])); // PG (header type 2)
+        d.extend(stream_entry(3, 0x1201, &[0x92, 0x00, b'f', b'r', b'a'])); // subtitle (type 3)
+        d.extend(stream_entry(4, 0x1400, &[0x91, b'j', b'p', b'n'])); // IG (type 4)
+        d.extend(stream_entry(1, 0x1A00, &[0x81, (1 << 4) | 1, b'd', b'e', b'u'])); // secondary audio
+        d.extend_from_slice(&[0u8, 0u8]); // secondary-audio extension (+2)
+        d.extend(stream_entry(1, 0x1B00, &[0x20, (6 << 4) | 1, 3 << 4])); // secondary video (MVC)
+        d.extend_from_slice(&[0u8; 6]); // secondary-video extension (+6)
+
+        let item_len = (d.len() - item_start - 2) as u16;
+        d[item_start..item_start + 2].copy_from_slice(&item_len.to_be_bytes());
+
+        // Two chapters: one type-1 (kept) and one type-2 (ignored).
+        let chapters_offset = d.len() as u32;
+        d[12..16].copy_from_slice(&chapters_offset.to_be_bytes());
+        d.extend_from_slice(&0u32.to_be_bytes()); // length
+        d.extend_from_slice(&2u16.to_be_bytes()); // chapter count
+        let mut ch1 = vec![0u8; 14];
+        ch1[1] = 1;
+        ch1[4..8].copy_from_slice(&(45000u32 * 5).to_be_bytes());
+        d.extend_from_slice(&ch1);
+        let mut ch2 = vec![0u8; 14];
+        ch2[1] = 2; // non-type-1 -> skipped
+        d.extend_from_slice(&ch2);
+        d
+    }
+
     #[test]
     fn rejects_unknown_signature() {
         let data = b"XXXX0000".to_vec();
         assert!(parse_mpls_bytes("00000.MPLS".into(), &data).is_err());
+    }
+
+    #[test]
+    fn parses_all_stream_categories_and_header_types() {
+        let pl = parse_mpls_bytes("00002.MPLS".into(), &build_rich_mpls()).expect("parses");
+        assert_eq!(pl.file_type, "MPLS0100");
+        assert!(!pl.mvc_base_view_r);
+        assert_eq!(pl.angle_count, 0);
+
+        assert_eq!(pl.stream_clips.len(), 1);
+        assert_eq!(pl.stream_clips[0].name, "00002.M2TS");
+        assert_eq!(pl.stream_clips[0].time_out, 9_000_000);
+
+        // video, audio, PG, subtitle, IG, secondary audio, secondary video.
+        assert_eq!(pl.playlist_streams.len(), 7);
+        let by_pid = |pid: u16| pl.playlist_streams.iter().find(|s| s.pid == pid).unwrap();
+        assert_eq!(by_pid(0x1011).stream_type, TSStreamType::AVCVideo);
+        let dts = by_pid(0x1100);
+        assert_eq!(dts.stream_type, TSStreamType::DTSAudio);
+        assert_eq!(dts.channel_layout, TSChannelLayout::Multi);
+        assert_eq!(dts.sample_rate_hz, 48000);
+        assert_eq!(dts.language_code, "spa");
+        assert_eq!(by_pid(0x1200).stream_type, TSStreamType::PresentationGraphics);
+        assert_eq!(by_pid(0x1200).language_code, "eng");
+        assert_eq!(by_pid(0x1201).stream_type, TSStreamType::Subtitle);
+        assert_eq!(by_pid(0x1201).language_code, "fra");
+        assert_eq!(by_pid(0x1400).stream_type, TSStreamType::InteractiveGraphics);
+        assert_eq!(by_pid(0x1400).language_code, "jpn");
+        assert_eq!(by_pid(0x1A00).stream_type, TSStreamType::AC3Audio);
+        assert_eq!(by_pid(0x1A00).channel_layout, TSChannelLayout::Mono);
+        assert_eq!(by_pid(0x1B00).stream_type, TSStreamType::MVCVideo);
+
+        // Only the type-1 chapter survives.
+        assert_eq!(pl.chapters.len(), 1);
+        assert!((pl.chapters[0] - 5.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parses_multiangle_clips() {
+        let mut d = mpls_header(b"MPLS0300", 0x00);
+        let playlist_offset = d.len() as u32;
+        d[8..12].copy_from_slice(&playlist_offset.to_be_bytes());
+        d.extend_from_slice(&0u32.to_be_bytes());
+        d.extend_from_slice(&0u16.to_be_bytes());
+        d.extend_from_slice(&1u16.to_be_bytes()); // item_count
+        d.extend_from_slice(&0u16.to_be_bytes());
+
+        let item_start = d.len();
+        d.extend_from_slice(&0u16.to_be_bytes()); // item_length
+        d.extend_from_slice(b"00100");
+        d.extend_from_slice(b"M2TS");
+        d.push(0x00); // skip 1
+        d.push(0x10); // multiangle flag set (bit4)
+        d.push(0x00); // +1
+        d.extend_from_slice(&0u32.to_be_bytes()); // in_time
+        d.extend_from_slice(&4_500_000u32.to_be_bytes()); // out_time
+        d.extend_from_slice(&[0u8; 12]); // reserved
+        // multi-angle: 3 angles -> 2 extra angle clips.
+        d.push(3); // angle count
+        d.push(0x00); // +1 (r.pos += 2)
+        for name in ["00101", "00102"] {
+            d.extend_from_slice(name.as_bytes());
+            d.extend_from_slice(b"M2TS");
+            d.push(0x00); // +1
+        }
+        // STN table with no streams.
+        d.extend_from_slice(&0u16.to_be_bytes()); // stn_length
+        d.extend_from_slice(&0u16.to_be_bytes()); // reserved
+        d.extend_from_slice(&[0u8; 7]); // counts (all zero)
+        d.extend_from_slice(&[0u8; 5]); // reserved
+        let item_len = (d.len() - item_start - 2) as u16;
+        d[item_start..item_start + 2].copy_from_slice(&item_len.to_be_bytes());
+
+        // Empty chapter section.
+        let chapters_offset = d.len() as u32;
+        d[12..16].copy_from_slice(&chapters_offset.to_be_bytes());
+        d.extend_from_slice(&0u32.to_be_bytes());
+        d.extend_from_slice(&0u16.to_be_bytes()); // chapter count 0
+
+        let pl = parse_mpls_bytes("00100.MPLS".into(), &d).expect("parses");
+        assert_eq!(pl.angle_count, 2);
+        assert_eq!(pl.stream_clips.len(), 3);
+        assert_eq!(pl.stream_clips[0].angle_index, 0);
+        assert_eq!(pl.stream_clips[1].angle_index, 1);
+        assert_eq!(pl.stream_clips[1].name, "00101.M2TS");
+        assert_eq!(pl.stream_clips[2].angle_index, 2);
+        assert_eq!(pl.playlist_streams.len(), 0);
+    }
+
+    #[test]
+    fn truncated_input_is_rejected_gracefully() {
+        // Valid signature but no room for the offset fields -> Err, not panic.
+        let data = b"MPLS0200".to_vec();
+        assert!(parse_mpls_bytes("x.MPLS".into(), &data).is_err());
     }
 
     #[test]

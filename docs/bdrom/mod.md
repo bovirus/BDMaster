@@ -21,6 +21,7 @@ Top-level Blu-ray scanner for native folders and `.iso` images. This module corr
 - Adds hidden streams from PMT PIDs that are not declared in MPLS.
 - Implements SSIF source selection, MVC extension recomputation, estimated stream-size caching, and native file path resolution helpers.
 - ISO/UDF locking uses `lock().unwrap_or_else(|e| e.into_inner())` throughout, so the scan cannot cascade-panic on a poisoned mutex.
+- Tested by a fixture-disc harness that writes a synthetic `BDMV` tree (index.bdmv, MPLS, CLPI, M2TS, META/bdmt_eng.xml, BDJO, SSIF, SNP, FilmIndex) to a temp dir and drives the full `scan()` pipeline, plus unit tests for `extract_title_from_xml`, `estimate_stream_size`, `playlist_has_loops`/validity, `recompute_mvc_extension`, `refresh_ssif_derived_metadata`, `clpi_language_for`, the `resolve_*_path` helpers, and the disc-flag/error branches. (~92% line coverage.)
 
 ## Design Notes (intentional differences from BDInfo)
 

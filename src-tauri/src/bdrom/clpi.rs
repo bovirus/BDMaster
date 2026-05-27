@@ -276,4 +276,45 @@ mod tests {
         // No panic; whatever parsed cleanly is valid.
         assert!(scf.is_valid);
     }
+
+    #[test]
+    fn subtitle_and_unknown_stream_types() {
+        // Subtitle (0x92): a character-code byte precedes the 3-byte language.
+        let subtitle = stream_entry(0x1201, 0x92, &[0x00, b'd', b'e', b'u']);
+        // Unknown coding type (0xEE) is not registered, but the offset advances.
+        let unknown = stream_entry(0x1FFF, 0xEE, &[0x00, 0x00]);
+        let audio = stream_entry(0x1100, 0x81, &[(3 << 4) | 1, b'i', b't', b'a']);
+        let data = build_clpi("HDMV0200", &[subtitle, unknown, audio]);
+        let scf = parse_clpi_bytes("x.CLPI".into(), data.len() as u64, &data);
+        assert!(scf.is_valid);
+        // The subtitle and audio register; the unknown type is skipped.
+        assert_eq!(scf.streams.len(), 2);
+        assert_eq!(scf.streams[0].stream_type, 0x92);
+        assert_eq!(scf.streams[0].language_code, "deu");
+        assert_eq!(scf.streams[1].pid, 0x1100);
+        assert_eq!(scf.streams[1].language_code, "ita");
+    }
+
+    #[test]
+    fn malformed_clip_length_is_invalid() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"HDMV0200");
+        data.extend_from_slice(&[0, 0, 0, 0]); // bytes 8..12
+        data.extend_from_slice(&16u32.to_be_bytes()); // clip_index = 16
+        data.extend_from_slice(&5u32.to_be_bytes()); // clip_length = 5 (< 10)
+        data.extend_from_slice(&[0u8; 8]);
+        let scf = parse_clpi_bytes("x.CLPI".into(), data.len() as u64, &data);
+        assert!(!scf.is_valid);
+    }
+
+    #[test]
+    fn clip_index_out_of_range_is_invalid() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"HDMV0200");
+        data.extend_from_slice(&[0, 0, 0, 0]);
+        data.extend_from_slice(&9999u32.to_be_bytes()); // clip_index beyond the buffer
+        data.extend_from_slice(&[0u8; 4]);
+        let scf = parse_clpi_bytes("x.CLPI".into(), data.len() as u64, &data);
+        assert!(!scf.is_valid);
+    }
 }

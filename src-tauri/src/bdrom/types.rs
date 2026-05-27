@@ -249,6 +249,54 @@ impl TSStreamType {
             _ => self.codec_short_name(),
         }
     }
+
+    /// BDInfo's `TSStream.CodecAltName`, used for the quick-summary report lines.
+    /// Like `CodecName`/`CodecShortName`, the Atmos / DTS:X variants depend on
+    /// the parsed extension flag (`has_extensions`).
+    pub fn codec_alt_name(self, has_extensions: bool) -> &'static str {
+        match self {
+            Self::MPEG1Video => "MPEG-1",
+            Self::MPEG2Video => "MPEG-2",
+            Self::AVCVideo => "AVC",
+            Self::MVCVideo => "MVC",
+            Self::HEVCVideo => "HEVC",
+            Self::VC1Video => "VC-1",
+            Self::MPEG1Audio => "MP1",
+            Self::MPEG2Audio => "MP2",
+            Self::MPEG2AacAudio => "MPEG-2 AAC",
+            Self::MPEG4AacAudio => "MPEG-4 AAC",
+            Self::LpcmAudio => "LPCM",
+            Self::AC3Audio => "DD AC3",
+            Self::AC3PlusAudio | Self::AC3PlusSecondaryAudio => "DD AC3+",
+            Self::AC3TrueHDAudio => {
+                if has_extensions {
+                    "Dolby Atmos"
+                } else {
+                    "Dolby TrueHD"
+                }
+            }
+            Self::DTSAudio => "DTS",
+            Self::DTSHDAudio => {
+                if has_extensions {
+                    "DTS:X Hi-Res"
+                } else {
+                    "DTS-HD Hi-Res"
+                }
+            }
+            Self::DTSHDSecondaryAudio => "DTS Express",
+            Self::DTSHDMasterAudio => {
+                if has_extensions {
+                    "DTS:X Master"
+                } else {
+                    "DTS-HD Master"
+                }
+            }
+            Self::PresentationGraphics => "PGS",
+            Self::InteractiveGraphics => "IGS",
+            Self::Subtitle => "SUB",
+            Self::Unknown => "UNKNOWN",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -581,5 +629,141 @@ mod tests {
         assert_eq!(convert_sample_rate(5), 192000);
         assert_eq!(convert_sample_rate(12), 192000);
         assert_eq!(convert_sample_rate(0), 0);
+    }
+
+    const ALL_STREAM_TYPES: [TSStreamType; 23] = [
+        TSStreamType::Unknown,
+        TSStreamType::MPEG1Video,
+        TSStreamType::MPEG2Video,
+        TSStreamType::AVCVideo,
+        TSStreamType::MVCVideo,
+        TSStreamType::HEVCVideo,
+        TSStreamType::VC1Video,
+        TSStreamType::MPEG1Audio,
+        TSStreamType::MPEG2Audio,
+        TSStreamType::MPEG2AacAudio,
+        TSStreamType::MPEG4AacAudio,
+        TSStreamType::LpcmAudio,
+        TSStreamType::AC3Audio,
+        TSStreamType::AC3PlusAudio,
+        TSStreamType::AC3PlusSecondaryAudio,
+        TSStreamType::AC3TrueHDAudio,
+        TSStreamType::DTSAudio,
+        TSStreamType::DTSHDAudio,
+        TSStreamType::DTSHDSecondaryAudio,
+        TSStreamType::DTSHDMasterAudio,
+        TSStreamType::PresentationGraphics,
+        TSStreamType::InteractiveGraphics,
+        TSStreamType::Subtitle,
+    ];
+
+    #[test]
+    fn every_name_accessor_is_total_over_all_stream_types() {
+        // Exercise every match arm of all name accessors and the category
+        // predicates for every stream type, with both extension flags.
+        for t in ALL_STREAM_TYPES {
+            for has_ext in [false, true] {
+                for ext_mode in [false, true] {
+                    assert!(!t.codec_name_dynamic(has_ext, ext_mode).is_empty());
+                    assert!(!t.codec_short_name_dynamic(has_ext, ext_mode).is_empty());
+                }
+                assert!(!t.codec_alt_name(has_ext).is_empty());
+            }
+            assert!(!t.codec_name().is_empty());
+            assert!(!t.codec_short_name().is_empty());
+            assert!(!t.type_text().is_empty());
+            // Exactly one category predicate is true for known media types.
+            let cats = [t.is_video(), t.is_audio(), t.is_graphics(), t.is_text()];
+            let count = cats.iter().filter(|b| **b).count();
+            assert!(count <= 1, "{:?} matched multiple categories", t);
+        }
+    }
+
+    #[test]
+    fn codec_alt_name_matches_bdinfo() {
+        use TSStreamType::*;
+        assert_eq!(MPEG1Video.codec_alt_name(false), "MPEG-1");
+        assert_eq!(MPEG2Video.codec_alt_name(false), "MPEG-2");
+        assert_eq!(AVCVideo.codec_alt_name(false), "AVC");
+        assert_eq!(MVCVideo.codec_alt_name(false), "MVC");
+        assert_eq!(HEVCVideo.codec_alt_name(false), "HEVC");
+        assert_eq!(VC1Video.codec_alt_name(false), "VC-1");
+        assert_eq!(MPEG1Audio.codec_alt_name(false), "MP1");
+        assert_eq!(MPEG2Audio.codec_alt_name(false), "MP2");
+        assert_eq!(MPEG2AacAudio.codec_alt_name(false), "MPEG-2 AAC");
+        assert_eq!(MPEG4AacAudio.codec_alt_name(false), "MPEG-4 AAC");
+        assert_eq!(LpcmAudio.codec_alt_name(false), "LPCM");
+        assert_eq!(AC3Audio.codec_alt_name(false), "DD AC3");
+        assert_eq!(AC3PlusAudio.codec_alt_name(false), "DD AC3+");
+        assert_eq!(AC3PlusSecondaryAudio.codec_alt_name(false), "DD AC3+");
+        assert_eq!(AC3TrueHDAudio.codec_alt_name(false), "Dolby TrueHD");
+        assert_eq!(AC3TrueHDAudio.codec_alt_name(true), "Dolby Atmos");
+        assert_eq!(DTSAudio.codec_alt_name(false), "DTS");
+        assert_eq!(DTSHDAudio.codec_alt_name(false), "DTS-HD Hi-Res");
+        assert_eq!(DTSHDAudio.codec_alt_name(true), "DTS:X Hi-Res");
+        assert_eq!(DTSHDSecondaryAudio.codec_alt_name(false), "DTS Express");
+        assert_eq!(DTSHDMasterAudio.codec_alt_name(false), "DTS-HD Master");
+        assert_eq!(DTSHDMasterAudio.codec_alt_name(true), "DTS:X Master");
+        assert_eq!(PresentationGraphics.codec_alt_name(false), "PGS");
+        assert_eq!(InteractiveGraphics.codec_alt_name(false), "IGS");
+        assert_eq!(Subtitle.codec_alt_name(false), "SUB");
+        assert_eq!(Unknown.codec_alt_name(false), "UNKNOWN");
+    }
+
+    #[test]
+    fn all_enum_labels_and_conversions_are_total() {
+        // TSVideoFormat: every code 0..=8 plus an out-of-range value.
+        for v in 0u8..=9 {
+            let f = TSVideoFormat::from_u8(v);
+            let _ = f.height();
+            let _ = f.is_interlaced();
+        }
+        assert_eq!(TSVideoFormat::Video480i.height(), 480);
+        assert_eq!(TSVideoFormat::Video576p.height(), 576);
+        assert_eq!(TSVideoFormat::Video720p.height(), 720);
+        assert!(TSVideoFormat::Video576i.is_interlaced());
+        assert!(!TSVideoFormat::Unknown.is_interlaced());
+
+        // TSFrameRate: every code and its label.
+        for v in 0u8..=8 {
+            let _ = TSFrameRate::from_u8(v).label();
+        }
+        assert_eq!(TSFrameRate::F24.label(), "24");
+        assert_eq!(TSFrameRate::F29_97.label(), "29.97");
+        assert_eq!(TSFrameRate::F50.label(), "50");
+        assert_eq!(TSFrameRate::Unknown.label(), "");
+        assert!(TSFrameRate::F50.is_50_hz());
+
+        // TSAspectRatio.
+        for v in 0u8..=5 {
+            let _ = TSAspectRatio::from_u8(v).label();
+        }
+        assert_eq!(TSAspectRatio::Aspect4_3.label(), "4:3");
+        assert_eq!(TSAspectRatio::Unknown.label(), "");
+
+        // TSChannelLayout including the Combo (code 12) variant.
+        for v in 0u8..=13 {
+            let _ = TSChannelLayout::from_u8(v).label();
+        }
+        assert_eq!(TSChannelLayout::from_u8(12), TSChannelLayout::Combo);
+        assert_eq!(TSChannelLayout::Combo.label(), "Combo");
+        assert_eq!(TSChannelLayout::Stereo.label(), "2.0");
+        assert_eq!(TSChannelLayout::Unknown.label(), "");
+
+        // TSAudioMode labels.
+        for m in [
+            TSAudioMode::Unknown,
+            TSAudioMode::DualMono,
+            TSAudioMode::Stereo,
+            TSAudioMode::Surround,
+            TSAudioMode::Extended,
+            TSAudioMode::JointStereo,
+            TSAudioMode::Mono,
+        ] {
+            let _ = m.label();
+        }
+        assert_eq!(TSAudioMode::JointStereo.label(), "JointStereo");
+        assert_eq!(TSAudioMode::Mono.label(), "Mono");
+        assert_eq!(TSAudioMode::Unknown.label(), "");
     }
 }

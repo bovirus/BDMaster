@@ -178,4 +178,72 @@ mod tests {
         let mut buffer = TSStreamBuffer::new(&data);
         scan(&mut stream, &mut buffer);
     }
+
+    #[test]
+    fn frame_rate_and_aspect_codes() {
+        // These elementary-stream fields are only populated in debug builds
+        // (mirroring BDInfo's `#undef DEBUG`); skip the assertions in release.
+        if !cfg!(debug_assertions) {
+            return;
+        }
+        let cases = [
+            (1u8, 24000u32, 1001u32),
+            (2, 24000, 1000),
+            (3, 25000, 1000),
+            (4, 30000, 1001),
+            (5, 30000, 1000),
+            (6, 50000, 1000),
+            (7, 60000, 1001),
+            (8, 60000, 1000),
+        ];
+        for (code, num, den) in cases {
+            // 4th byte after B3 carries aspect (high nibble) + frame-rate (low).
+            let data = vec![
+                0x00, 0x00, 0x01, 0xB3, 0x78, 0x04, 0x38, (3 << 4) | code, 0x12, 0x34, 0x56,
+            ];
+            let mut stream = mpeg2_stream();
+            let mut buffer = TSStreamBuffer::new(&data);
+            scan(&mut stream, &mut buffer);
+            assert_eq!(stream.frame_rate_enumerator, num, "code {code}");
+            assert_eq!(stream.frame_rate_denominator, den, "code {code}");
+            assert_eq!(stream.aspect_ratio, "16:9");
+            assert!(stream.bit_rate > 0);
+        }
+        // Codes 0 and >8 leave the frame rate unset.
+        for code in [0u8, 9, 15] {
+            let data = vec![
+                0x00, 0x00, 0x01, 0xB3, 0x78, 0x04, 0x38, code, 0x00, 0x00, 0x00,
+            ];
+            let mut stream = mpeg2_stream();
+            let mut buffer = TSStreamBuffer::new(&data);
+            scan(&mut stream, &mut buffer);
+            assert_eq!(stream.frame_rate_enumerator, 0);
+        }
+    }
+
+    #[test]
+    fn sequence_extension_picture_and_interlace() {
+        // Sequence header (inits), then a sequence extension carrying the
+        // interlace flag, then a picture start code that triggers the
+        // already-initialized early return.
+        let mut data = vec![
+            0x00, 0x00, 0x01, 0xB3, 0x78, 0x04, 0x38, 0x31, 0x12, 0x34, 0x56,
+        ];
+        // Sequence extension: 0x000001B5, extension id nibble 0x1, then a byte
+        // whose bit 3 clear => interlaced source.
+        data.extend_from_slice(&[0x00, 0x00, 0x01, 0xB5, 0x10, 0x00]);
+        // Picture start code + 2 bytes => picture_coding read, init => return.
+        data.extend_from_slice(&[0x00, 0x00, 0x01, 0x00, 0x00, 0x00]);
+
+        let mut stream = mpeg2_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert!(stream.is_initialized);
+        assert!(stream.is_vbr);
+        if cfg!(debug_assertions) {
+            assert_eq!(stream.width, 1920);
+            assert_eq!(stream.height, 1080);
+            assert!(stream.is_interlaced);
+        }
+    }
 }

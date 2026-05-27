@@ -16,9 +16,12 @@ Codec dispatcher and description finalizer for PES payload parsing. This corresp
 - Supports full-scan behavior for PGS so captions are counted only during deep scans.
 - Handles LPCM bit-rate calculation from parsed header fields.
 - Marks unknown stream types initialized to avoid infinite scan loops.
-- Builds display descriptions for video, audio, and graphics streams after codec fields are populated.
+- Builds display descriptions for video, audio, and graphics streams after codec fields are populated. The builders mirror the exact `TSStream` getters, including:
+  - **Graphics**: forced captions render as `( + N Forced Caption)` when normal captions are also present, and as `/ N Forced Caption` otherwise — matching BDInfo's "Fix PGS Caption count reporting" commit (`2581e58`).
+  - **Audio channel description**: the `-EX` (Dolby Digital EX) / `-ES` (DTS-ES) suffix is appended for Extended `audio_mode`.
+  - **Audio bitrate**: the embedded core's bitrate is subtracted from the displayed kbps **only** for TrueHD (`AC3_TRUE_HD_AUDIO`); DTS-HD HR/MA and DD+ display the full measured rate, as BDInfo does.
 - Provides `refine_from_pes` for one-shot enrichment from a single PES sample.
-- Tests cover the LPCM dispatch + bit-rate, the unknown-type and quick-init PGS paths, the video/audio/graphics description builders, and `refine_from_pes`.
+- Tests cover the LPCM dispatch + bit-rate, dispatch over every codec arm, the unknown-type and quick-init/full-scan PGS paths, the video/audio/graphics description builders (including the forced-caption forms, `-EX`/`-ES` suffix, embedded-core labels, TrueHD-only core-bitrate subtraction, base-view eyes, and stereo audio modes), and `refine_from_pes`.
 
 ## Parity Notes (mirrors BDInfo by design)
 

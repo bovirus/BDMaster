@@ -338,7 +338,10 @@ mod tests {
     impl BitWriter {
         fn put(&mut self, val: u32, n: u32) {
             for i in (0..n).rev() {
-                self.bits.push((val >> i) & 1 == 1);
+                // `n` may exceed 32 for wide zero-fill padding; a u32 shift of
+                // >= 32 panics in debug builds, so treat those bits as 0.
+                let bit = i < 32 && (val >> i) & 1 == 1;
+                self.bits.push(bit);
             }
         }
         fn bytes(&self) -> Vec<u8> {
@@ -421,5 +424,138 @@ mod tests {
             let mut buffer = TSStreamBuffer::new(&data);
             scan(&mut stream, &mut buffer);
         }
+    }
+
+    fn eac3_stream() -> TSStreamInfo {
+        TSStreamInfo::new(0x1100, TSStreamType::AC3PlusAudio as u8)
+    }
+
+    /// Build an E-AC3 (bsid 16) bitstream after the 0x0B77 sync. The bsid field
+    /// occupies the same top-5 bits of the 4th header byte that the parser uses
+    /// to pick the bsid>10 branch, so a value of 16 routes through the E-AC3 path.
+    #[test]
+    fn eac3_independent_frame_parses_channels_rate_and_bitrate() {
+        let mut b = BitWriter::default();
+        b.put(0, 2); // frame_type = 0 (independent)
+        b.put(0, 3); // substreamid
+        b.put(100, 11); // frame_size field -> (100+1)<<1 = 202
+        b.put(0, 2); // sr_code = 0 (48 kHz)
+        b.put(3, 2); // num_blocks = 3
+        b.put(7, 3); // channel_mode = 7 -> 5 channels
+        b.put(1, 1); // lfe_on
+        b.put(16, 5); // bsid = 16 (also bsid_initial -> E-AC3 branch)
+        b.put(27, 5); // dial_norm_ext
+        b.put(0, 1); // compre flag absent
+        b.put(0, 64); // trailing zeros: EMDF search finds no 0x5838 sync
+
+        let mut data = vec![0x0B, 0x77];
+        data.extend(b.bytes());
+
+        let mut stream = eac3_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+
+        assert!(stream.is_initialized);
+        assert!(!stream.is_vbr);
+        assert_eq!(stream.sample_rate, 48000);
+        assert_eq!(stream.channel_count, 5);
+        assert_eq!(stream.lfe, 1);
+        assert!(stream.bit_rate > 0);
+    }
+
+    #[test]
+    fn eac3_dependent_frame_creates_core_and_maps_channels() {
+        let mut b = BitWriter::default();
+        b.put(1, 2); // frame_type = 1 (dependent substream)
+        b.put(0, 3); // substreamid
+        b.put(50, 11); // frame_size field
+        b.put(0, 2); // sr_code = 0
+        b.put(2, 2); // num_blocks
+        b.put(1, 3); // channel_mode = 1
+        b.put(0, 1); // lfe_on
+        b.put(16, 5); // bsid = 16
+        b.put(0, 5); // dial_norm_ext
+        b.put(0, 1); // compre absent
+        b.put(1, 1); // chanmape present
+        b.put(1 << 10, 16); // chanmap: bit contributing +2 (i==5)
+        b.put(0, 64); // padding, no EMDF sync
+
+        let mut data = vec![0x0B, 0x77];
+        data.extend(b.bytes());
+
+        let mut stream = eac3_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+
+        let core = stream.core.as_ref().expect("dependent stream creates a core");
+        assert_eq!(core.stream_type, TSStreamType::AC3Audio as u8);
+        assert_eq!(stream.channel_count, 2); // ac3_chan_map(1<<10) == 2
+        assert!(stream.is_initialized);
+    }
+
+    #[test]
+    fn eac3_with_emdf_container_version_skips_payload() {
+        let mut b = BitWriter::default();
+        b.put(0, 2); // frame_type
+        b.put(0, 3); // substreamid
+        b.put(20, 11); // frame_size field
+        b.put(0, 2); // sr_code
+        b.put(1, 2); // num_blocks
+        b.put(2, 3); // channel_mode = 2 (stereo)
+        b.put(0, 1); // lfe_on
+        b.put(16, 5); // bsid = 16
+        b.put(0, 5); // dial_norm_ext
+        b.put(0, 1); // compre absent
+        // channel_mode 2 != 0 -> no extra block; frame_type 0 -> no dependent.
+        b.put(0x5838, 16); // EMDF sync word -> emdf_found
+        b.put(2, 16); // emdf_container_size
+        b.put(1, 2); // emdf_version = 1 (>0 -> skip-container branch)
+        b.put(0, 64); // bits to skip into
+
+        let mut data = vec![0x0B, 0x77];
+        data.extend(b.bytes());
+
+        let mut stream = eac3_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+
+        assert!(stream.is_initialized);
+        assert_eq!(stream.channel_count, 2);
+    }
+
+    #[test]
+    fn legacy_ac3_dolby_surround_mode_detected() {
+        // acmod 2 (2/0) with dsurmod == 2 sets Dolby Surround audio mode.
+        let mut bits = BitWriter::default();
+        bits.put(2, 3); // acmod = 2 (stereo)
+        bits.put(2, 2); // dsurmod = 2 -> Surround
+        bits.put(0, 1); // lfeon
+        bits.put(20, 5); // dialnorm
+        bits.put(0, 1); // compre
+        bits.put(0, 1); // langcode
+        bits.put(0, 1); // audprodie
+        bits.put(0, 2); // copyright + original
+        bits.put(0, 16); // padding
+
+        let mut data = vec![0x0B, 0x77, 0x00, 0x00, 0x00, 0x40];
+        data.extend(bits.bytes());
+
+        let mut stream = ac3_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert!(stream.is_initialized);
+        assert_eq!(stream.audio_mode, "Surround");
+        assert_eq!(stream.channel_count, 2);
+    }
+
+    #[test]
+    fn already_initialized_stream_is_skipped() {
+        let mut stream = ac3_stream();
+        stream.is_initialized = true;
+        let data = vec![0x0B, 0x77, 0, 0, 0, 0x40, 0, 0, 0, 0];
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        // Nothing parsed because it returned early.
+        assert_eq!(stream.channel_count, 0);
     }
 }

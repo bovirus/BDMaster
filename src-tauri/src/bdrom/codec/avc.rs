@@ -138,4 +138,46 @@ mod tests {
         let mut buffer = TSStreamBuffer::new(&data);
         scan(&mut stream, &mut buffer);
     }
+
+    #[test]
+    fn all_profile_idc_labels() {
+        for (idc, name) in [
+            (66u8, "Baseline Profile"),
+            (77, "Main Profile"),
+            (88, "Extended Profile"),
+            (100, "High Profile"),
+            (110, "High 10 Profile"),
+            (122, "High 4:2:2 Profile"),
+            (144, "High 4:4:4 Profile"),
+        ] {
+            let data = sps(idc, 0x00, 40);
+            let mut stream = avc_stream();
+            let mut buffer = TSStreamBuffer::new(&data);
+            scan(&mut stream, &mut buffer);
+            assert!(stream.encoding_profile.starts_with(name), "{}", stream.encoding_profile);
+        }
+    }
+
+    #[test]
+    fn sps_alternate_start_code_0x67() {
+        // 0x00000167 is the other accepted SPS NAL start code.
+        let data = vec![0x00, 0x00, 0x01, 0x67, 77, 0x00, 41];
+        let mut stream = avc_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert_eq!(stream.encoding_profile, "Main Profile 4.1");
+    }
+
+    #[test]
+    fn aud_after_init_returns_early() {
+        // SPS initializes the stream, then an access-unit delimiter (0x00000109)
+        // triggers the initialized early-return branch.
+        let mut data = sps(100, 0x00, 40);
+        data.extend_from_slice(&[0x00, 0x00, 0x01, 0x09, 0x10, 0x00, 0x00]);
+        let mut stream = avc_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert!(stream.is_initialized);
+        assert_eq!(stream.encoding_profile, "High Profile 4.0");
+    }
 }

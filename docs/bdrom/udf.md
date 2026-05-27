@@ -20,7 +20,7 @@ Minimal UDF 2.x image reader used for Blu-ray ISO support. BDInfo uses DiscUtils
 - Computes directory sizes while skipping `.ssif` files to match BDInfo disc-size behavior, with explicit loop protection: a visited set of `(block, partition)` ICB locations breaks cycles and a depth cap (100) bounds nesting.
 - All shared-image locking uses `lock().unwrap_or_else(|e| e.into_inner())`, so a panic elsewhere cannot poison the mutex into a cascading panic.
 - Provides `UdfFileReader`, a streaming `Read` implementation over allocation extents for M2TS scanning without loading whole files.
-- Tests cover d-string parsing (compression 8 / 16 / empty / unknown) and short/long allocation-descriptor length masking.
+- Tests cover the reader end-to-end against a real UDF image generated at test time (`hdiutil makehybrid -udf`) — `open`, volume label, directory listing, path resolution (case-insensitive, backslash, missing-component, descend-through-file), `read_file`/extent reads, and the higher-level `open_bdrom`/`scan` ISO path — plus hand-built images for the Type-2 Metadata-partition maps, multi-PD/LVD sequence-number selection, FSD/PD/LVD error paths, embedded data, multi-extent long ADs, directory cycle-breaking, and the descriptor/d-string/AD helpers. (~97% line coverage.)
 
 ## Design Notes (intentional simplifications vs DiscUtils/BDInfo)
 

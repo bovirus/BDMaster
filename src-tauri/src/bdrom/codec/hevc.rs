@@ -1586,4 +1586,437 @@ mod tests {
         assert!(stream.is_initialized);
         assert!(stream.extended_format_info.iter().any(|s| s == "HDR10"));
     }
+
+    // ====================================================================
+    // Pre-seeded SPS application-logic coverage (no bitstream needed).
+    // ====================================================================
+
+    fn apply_sps(sps: SeqParameterSet, pid: u16, diag: bool) -> TSStreamInfo {
+        let mut persistent = PersistentHevc::default();
+        persistent.extended.seq_parameter_sets.push(sps);
+        let mut stream = hevc_stream(pid);
+        let payload: Vec<u8> = vec![0u8; 8];
+        let mut b = TSStreamBuffer::new(&payload);
+        scan(&mut stream, &mut b, diag, &mut persistent);
+        stream
+    }
+
+    fn base_sps() -> SeqParameterSet {
+        SeqParameterSet {
+            profile_idc: 1,
+            level_idc: 120,
+            chroma_format_idc: 1,
+            bit_depth_luma_minus8: 0,
+            bit_depth_chroma_minus8: 0,
+            valid: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn profile_and_level_label_variants() {
+        // Each profile_idc maps to its label; profile 0 emits no label text.
+        for (idc, label) in [(0u32, ""), (1, "Main"), (2, "Main 10"), (3, "Main Still")] {
+            let mut sps = base_sps();
+            sps.profile_idc = idc;
+            let s = apply_sps(sps, 0x1011, false);
+            assert!(s.is_initialized);
+            if !label.is_empty() {
+                assert!(s.encoding_profile.contains(label), "{} / {}", idc, s.encoding_profile);
+            }
+        }
+        // Decimal level (123 -> 4.1) vs integer (120 -> 4); High tier label.
+        let mut sps = base_sps();
+        sps.level_idc = 123;
+        sps.tier_flag = true;
+        let s = apply_sps(sps, 0x1011, false);
+        assert!(s.encoding_profile.contains("Level 4.1"));
+        assert!(s.encoding_profile.contains("High"));
+
+        let mut sps = base_sps();
+        sps.level_idc = 120;
+        let s = apply_sps(sps, 0x1011, false);
+        assert!(s.encoding_profile.contains("Level 4 "));
+        assert!(s.encoding_profile.contains("Main"));
+    }
+
+    #[test]
+    fn bit_depth_label_only_when_luma_equals_chroma() {
+        let mut sps = base_sps();
+        sps.bit_depth_luma_minus8 = 2;
+        sps.bit_depth_chroma_minus8 = 2;
+        let s = apply_sps(sps, 0x1011, false);
+        assert!(s.extended_format_info.iter().any(|x| x == "10 bits"));
+
+        let mut sps = base_sps();
+        sps.bit_depth_luma_minus8 = 2;
+        sps.bit_depth_chroma_minus8 = 0; // mismatch -> no bit-depth line
+        let s = apply_sps(sps, 0x1011, false);
+        assert!(!s.extended_format_info.iter().any(|x| x.ends_with("bits")));
+    }
+
+    fn hdr_sps() -> SeqParameterSet {
+        let mut vui = VUIParameters::default();
+        vui.video_signal_type_present_flag = true;
+        vui.colour_description_present_flag = true;
+        vui.colour_primaries = 9; // BT.2020
+        vui.transfer_characteristics = 16; // PQ
+        vui.matrix_coefficients = 9;
+        SeqParameterSet {
+            profile_idc: 2,
+            level_idc: 153,
+            chroma_format_idc: 1,
+            bit_depth_luma_minus8: 2,
+            bit_depth_chroma_minus8: 2,
+            vui_parameters: vui,
+            valid: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn hdr10_plus_and_dolby_vision_labels() {
+        // HDR10+ when the persistent flag is set (pid < 4117).
+        let mut persistent = PersistentHevc::default();
+        persistent.extended.seq_parameter_sets.push(hdr_sps());
+        persistent.extended.mastering_display_color_primaries = "BT.2020".to_string();
+        persistent.is_hdr10_plus = true;
+        let mut stream = hevc_stream(0x1011);
+        let mut b = TSStreamBuffer::new(&[0u8; 8]);
+        scan(&mut stream, &mut b, false, &mut persistent);
+        assert!(stream.extended_format_info.iter().any(|s| s == "HDR10+"));
+
+        // Dolby Vision when pid >= 4117.
+        let mut persistent = PersistentHevc::default();
+        persistent.extended.seq_parameter_sets.push(hdr_sps());
+        persistent.extended.mastering_display_color_primaries = "BT.2020".to_string();
+        let mut stream = hevc_stream(4117);
+        let mut b = TSStreamBuffer::new(&[0u8; 8]);
+        scan(&mut stream, &mut b, false, &mut persistent);
+        assert!(stream.extended_format_info.iter().any(|s| s == "Dolby Vision"));
+    }
+
+    #[test]
+    fn extended_diagnostics_emits_chroma_range_and_colour_detail() {
+        let mut sps = hdr_sps();
+        sps.chroma_format_idc = 2; // 4:2:2
+        sps.vui_parameters.video_full_range_flag = 1;
+        let s = apply_sps(sps, 0x1011, true);
+        assert!(s.extended_format_info.iter().any(|x| x == "4:2:2"));
+        assert!(s.extended_format_info.iter().any(|x| x == "Full Range"));
+        assert!(s.extended_format_info.iter().any(|x| x == "BT.2020"));
+        assert!(s.extended_format_info.iter().any(|x| x == "PQ"));
+        assert!(s.extended_format_info.iter().any(|x| x == "BT.2020 non-constant"));
+    }
+
+    #[test]
+    fn extended_diagnostics_emits_mastering_and_light_level() {
+        let mut persistent = PersistentHevc::default();
+        persistent.extended.seq_parameter_sets.push(base_sps());
+        persistent.extended.mastering_display_color_primaries = "BT.2020".to_string();
+        persistent.extended.mastering_display_luminance =
+            "min: 0.0050 cd/m2, max: 1000 cd/m2".to_string();
+        persistent.extended.light_level_available = true;
+        persistent.extended.maximum_content_light_level = 1000;
+        persistent.extended.maximum_frame_average_light_level = 400;
+        let mut stream = hevc_stream(0x1011);
+        let mut b = TSStreamBuffer::new(&[0u8; 8]);
+        scan(&mut stream, &mut b, true, &mut persistent);
+        assert!(stream
+            .extended_format_info
+            .iter()
+            .any(|x| x.contains("Mastering display color primaries")));
+        assert!(stream
+            .extended_format_info
+            .iter()
+            .any(|x| x.contains("Maximum Content Light Level: 1000")));
+    }
+
+    // ====================================================================
+    // Synthesized NAL bitstreams to drive the actual parser functions.
+    // ====================================================================
+
+    struct Bits {
+        v: Vec<u8>,
+    }
+    impl Bits {
+        fn new() -> Self {
+            Self { v: Vec::new() }
+        }
+        fn u(&mut self, val: u64, n: u32) {
+            for i in (0..n).rev() {
+                self.v.push(((val >> i) & 1) as u8);
+            }
+        }
+        fn ue(&mut self, val: u32) {
+            let code = val as u64 + 1;
+            let m = 63 - code.leading_zeros();
+            for _ in 0..m {
+                self.v.push(0);
+            }
+            self.u(code, m + 1);
+        }
+        fn bytes(&self) -> Vec<u8> {
+            let mut out = vec![0u8; (self.v.len() + 7) / 8];
+            for (i, b) in self.v.iter().enumerate() {
+                if *b == 1 {
+                    out[i / 8] |= 1 << (7 - (i % 8));
+                }
+            }
+            out
+        }
+    }
+
+    /// Insert H.26x emulation-prevention bytes (00 00 03) so the parser's
+    /// EP-removing reader decodes the RBSP back to our intended bits.
+    fn ep_encode(data: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut zeros = 0;
+        for &b in data {
+            if zeros >= 2 && b <= 3 {
+                out.push(3);
+                zeros = 0;
+            }
+            out.push(b);
+            if b == 0 {
+                zeros += 1;
+            } else {
+                zeros = 0;
+            }
+        }
+        out
+    }
+
+    /// Build a NAL: 4-byte start code + 2-byte NAL header + EP-encoded RBSP.
+    fn nal(nal_type: u8, rbsp: &[u8]) -> Vec<u8> {
+        let header = ((nal_type as u16) << 9) | 1; // forbidden=0, layer=0, tid+1=1
+        let mut body = vec![(header >> 8) as u8, (header & 0xFF) as u8];
+        body.extend_from_slice(rbsp);
+        let mut out = vec![0u8, 0, 0, 1];
+        out.extend(ep_encode(&body));
+        out
+    }
+
+    fn ptl_bits(b: &mut Bits, profile_idc: u64, level_idc: u64) {
+        b.u(0, 2); // general_profile_space
+        b.u(0, 1); // general_tier_flag (Main)
+        b.u(profile_idc, 5); // general_profile_idc
+        b.u(0xFFFF_FFFF, 32); // compatibility flags (skipped)
+        b.u(1, 1); // progressive_source_flag
+        b.u(0, 1); // interlaced_source_flag
+        b.u(0, 1); // non_packed_constraint_flag (skipped)
+        b.u(1, 1); // frame_only_constraint_flag
+        b.u((1u64 << 44) - 1, 44); // reserved (skipped)
+        b.u(level_idc, 8); // general_level_idc
+    }
+
+    fn vps_rbsp() -> Vec<u8> {
+        let mut b = Bits::new();
+        b.u(0, 4); // vps_video_parameter_set_id = 0
+        b.u(0xFF, 8); // reserved (skipped)
+        b.u(0, 3); // vps_max_sub_layers_minus1 = 0
+        b.u(0x1FFFF, 17); // reserved (skipped)
+        ptl_bits(&mut b, 1, 120);
+        b.u(1, 1); // vps_sub_layer_ordering_info_present_flag = 1
+        for _ in 0..3 {
+            b.ue(0);
+        }
+        b.u(0, 6); // vps_max_layer_id = 0
+        b.ue(0); // vps_num_layer_sets_minus1 = 0
+        b.u(0, 1); // vps_timing_info_present_flag = 0
+        b.u(0, 1); // vps_extension_flag = 0
+        b.bytes()
+    }
+
+    fn sps_rbsp(profile_idc: u64, level_idc: u64, chroma: u32, depth_minus8: u32) -> Vec<u8> {
+        let mut b = Bits::new();
+        b.u(0, 4); // sps_video_parameter_set_id = 0
+        b.u(0, 3); // sps_max_sub_layers_minus1 = 0
+        b.u(1, 1); // sps_temporal_id_nesting (skipped)
+        ptl_bits(&mut b, profile_idc, level_idc);
+        b.ue(0); // sps_seq_parameter_set_id = 0
+        b.ue(chroma); // chroma_format_idc
+        b.ue(1920); // pic_width_in_luma_samples
+        b.ue(1080); // pic_height_in_luma_samples
+        b.u(0, 1); // conformance_window_flag = 0
+        b.ue(depth_minus8); // bit_depth_luma_minus8
+        b.ue(depth_minus8); // bit_depth_chroma_minus8
+        b.ue(4); // log2_max_pic_order_cnt_lsb_minus4
+        b.u(1, 1); // sps_sub_layer_ordering_info_present_flag = 1
+        for _ in 0..3 {
+            b.ue(0);
+        }
+        for _ in 0..6 {
+            b.ue(0);
+        }
+        b.u(0, 1); // scaling_list_enabled_flag = 0
+        b.u(0, 2); // amp_enabled + sao
+        b.u(0, 1); // pcm_enabled_flag = 0
+        b.ue(0); // num_short_term_ref_pic_sets = 0
+        b.u(0, 1); // long_term_ref_pics_present_flag = 0
+        b.u(0, 2); // temporal_mvp + strong_intra_smoothing
+        b.u(1, 1); // vui_parameters_present_flag = 1
+        // VUI
+        b.u(1, 1); // aspect_ratio_info_present_flag = 1
+        b.u(1, 8); // aspect_ratio_idc = 1
+        b.u(0, 1); // overscan_info_present_flag = 0
+        b.u(1, 1); // video_signal_type_present_flag = 1
+        b.u(5, 3); // video_format
+        b.u(0, 1); // video_full_range_flag
+        b.u(1, 1); // colour_description_present_flag = 1
+        b.u(9, 8); // colour_primaries = BT.2020
+        b.u(16, 8); // transfer_characteristics = PQ
+        b.u(9, 8); // matrix_coefficients
+        b.u(0, 1); // chroma_loc_info_present_flag = 0
+        b.u(0, 2); // skip 2
+        b.u(0, 1); // frame_field_info_present_flag = 0
+        b.u(0, 1); // default_display_window_flag = 0
+        b.u(0, 1); // vui_timing_info_present_flag = 0
+        b.u(0, 1); // bitstream_restriction_flag = 0
+        b.u(1, 1); // rbsp trailing
+        b.bytes()
+    }
+
+    #[test]
+    fn synthesized_vps_sps_is_parsed() {
+        let mut payload = nal(32, &vps_rbsp());
+        payload.extend(nal(33, &sps_rbsp(2, 123, 1, 2)));
+
+        let mut persistent = PersistentHevc::default();
+        let mut stream = hevc_stream(0x1011);
+        let mut b = TSStreamBuffer::new(&payload);
+        scan(&mut stream, &mut b, false, &mut persistent);
+
+        assert!(stream.is_initialized, "SPS should initialize the stream");
+        assert!(stream.encoding_profile.contains("Main 10"), "{}", stream.encoding_profile);
+        assert!(stream.encoding_profile.contains("Level 4.1"), "{}", stream.encoding_profile);
+        assert!(stream.extended_format_info.iter().any(|x| x == "10 bits"));
+        assert!(stream.extended_format_info.iter().any(|x| x == "BT.2020"));
+        // The parser captured one VPS and one SPS.
+        assert_eq!(persistent.extended.video_param_sets.len(), 1);
+        assert!(!persistent.extended.seq_parameter_sets.is_empty());
+    }
+
+    #[test]
+    fn synthesized_vps_sps_extended_diagnostics() {
+        let mut payload = nal(32, &vps_rbsp());
+        payload.extend(nal(33, &sps_rbsp(1, 120, 2, 0))); // Main, 4:2:2, 8-bit
+
+        let mut persistent = PersistentHevc::default();
+        let mut stream = hevc_stream(0x1011);
+        let mut b = TSStreamBuffer::new(&payload);
+        scan(&mut stream, &mut b, true, &mut persistent);
+
+        assert!(stream.is_initialized);
+        assert!(stream.encoding_profile.contains("Main"));
+        // extended diagnostics surfaces the chroma sub-sampling and colour detail.
+        assert!(stream.extended_format_info.iter().any(|x| x == "4:2:2"));
+        assert!(stream.extended_format_info.iter().any(|x| x == "BT.2020"));
+    }
+
+    #[test]
+    fn synthesized_sps_without_vps_is_ignored() {
+        // An SPS referencing VPS id 0 with no VPS present must not initialize.
+        let payload = nal(33, &sps_rbsp(2, 120, 1, 2));
+        let mut persistent = PersistentHevc::default();
+        let mut stream = hevc_stream(0x1011);
+        let mut b = TSStreamBuffer::new(&payload);
+        scan(&mut stream, &mut b, false, &mut persistent);
+        assert!(!stream.is_initialized);
+    }
+
+    fn pps_rbsp() -> Vec<u8> {
+        let mut b = Bits::new();
+        b.ue(0); // pps_pic_parameter_set_id = 0
+        b.ue(0); // pps_seq_parameter_set_id = 0
+        b.u(0, 1); // dependent_slice_segments_enabled_flag = 0
+        b.u(0, 1); // output_flag_present (skip)
+        b.u(0, 3); // num_extra_slice_header_bits = 0
+        b.u(0, 2); // sign_data_hiding + cabac_init (skip)
+        b.ue(0); // num_ref_idx_l0_default_active_minus1
+        b.ue(0); // num_ref_idx_l1_default_active_minus1
+        b.ue(0); // init_qp_minus26
+        b.u(0, 2); // constrained_intra_pred + transform_skip (skip)
+        b.u(0, 1); // cu_qp_delta_enabled_flag = 0
+        b.ue(0); // pps_cb_qp_offset
+        b.ue(0); // pps_cr_qp_offset
+        b.u(0, 4); // chroma-qp/weighted/transquant (skip)
+        b.u(0, 1); // tiles_enabled_flag = 0
+        b.u(0, 1); // entropy_coding_sync_enabled (skip)
+        b.u(0, 1); // loop_filter_across_slices (skip)
+        b.u(0, 1); // deblocking_filter_control_present_flag = 0
+        b.u(0, 1); // pps_scaling_list_data_present_flag = 0
+        b.u(0, 1); // lists_modification_present (skip)
+        b.ue(0); // log2_parallel_merge_level_minus2
+        b.u(0, 1); // slice_segment_header_extension (skip)
+        b.u(0, 1); // pps_extension_present_flag = 0
+        b.u(1, 1); // rbsp trailing
+        b.bytes()
+    }
+
+    fn slice_rbsp() -> Vec<u8> {
+        let mut b = Bits::new();
+        b.u(1, 1); // first_slice_segment_in_pic_flag = 1
+        b.ue(0); // slice_pic_parameter_set_id = 0
+        b.ue(2); // slice_type = 2 (I) -> frame_type_read
+        b.u(1, 1); // trailing
+        b.bytes()
+    }
+
+    #[test]
+    fn synthesized_pps_slice_and_aud_are_parsed() {
+        // VPS + SPS + PPS + AUD + slice in one PES exercises pic_parameter_set,
+        // access_unit_delimiter and slice_segment_layer.
+        let mut payload = nal(32, &vps_rbsp());
+        payload.extend(nal(33, &sps_rbsp(1, 120, 1, 0)));
+        payload.extend(nal(34, &pps_rbsp()));
+        payload.extend(nal(35, &[0x50, 0x00, 0x00])); // AUD
+        payload.extend(nal(1, &slice_rbsp())); // TRAIL_R slice
+
+        let mut persistent = PersistentHevc::default();
+        let mut stream = hevc_stream(0x1011);
+        let mut b = TSStreamBuffer::new(&payload);
+        scan(&mut stream, &mut b, false, &mut persistent);
+
+        assert!(stream.is_initialized);
+        assert!(!persistent.extended.pic_parameter_sets.is_empty(), "PPS parsed");
+    }
+
+    #[test]
+    fn synthesized_sei_mastering_and_light_level_drive_hdr10() {
+        // VPS + SPS (BT.2020/PQ 10-bit) + an SEI carrying mastering-display
+        // (137) and content-light-level (144) payloads. All payload bytes are
+        // non-zero so no emulation-prevention/start-code aliasing occurs.
+        let mut sei = Vec::new();
+        sei.push(0x89); // payload_type = 137 (mastering display)
+        sei.push(24); // payload_size
+        for v in [8500u16, 39850, 6550, 2300, 35400, 14600, 15635, 16450] {
+            sei.extend_from_slice(&v.to_be_bytes());
+        }
+        sei.extend_from_slice(&0x0098_9680u32.to_be_bytes()); // max luminance
+        sei.extend_from_slice(&0x0001_0032u32.to_be_bytes()); // min luminance
+        sei.push(0x90); // payload_type = 144 (content light level)
+        sei.push(4); // payload_size
+        sei.extend_from_slice(&1000u16.to_be_bytes()); // MaxCLL
+        sei.extend_from_slice(&400u16.to_be_bytes()); // MaxFALL
+        sei.push(0x80); // rbsp trailing (absorbed by the element-size - 1)
+
+        let mut payload = nal(32, &vps_rbsp());
+        payload.extend(nal(33, &sps_rbsp(2, 120, 1, 2))); // Main 10, BT.2020/PQ
+        payload.extend(nal(39, &sei)); // SEI prefix
+
+        let mut persistent = PersistentHevc::default();
+        let mut stream = hevc_stream(0x1011);
+        let mut b = TSStreamBuffer::new(&payload);
+        scan(&mut stream, &mut b, true, &mut persistent);
+
+        assert!(stream.is_initialized);
+        assert!(
+            !persistent.extended.mastering_display_color_primaries.is_empty(),
+            "mastering display parsed"
+        );
+        assert_eq!(persistent.extended.maximum_content_light_level, 1000);
+        assert_eq!(persistent.extended.maximum_frame_average_light_level, 400);
+        assert!(stream.extended_format_info.iter().any(|s| s == "HDR10"));
+    }
 }

@@ -50,8 +50,10 @@ pub fn scan(stream: &mut TSStreamInfo, buffer: &mut TSStreamBuffer) {
                     };
                 }
                 0 => {
+                    // Decoded only for the local picture-type branch above;
+                    // BDInfo never propagates this to the stream (IsInterlaced
+                    // comes from the MPLS video format), so we don't either.
                     is_interlaced = ((parse & 0x40) >> 6) > 0;
-                    stream.is_interlaced = is_interlaced;
                 }
                 _ => {}
             }
@@ -81,10 +83,12 @@ mod tests {
     }
 
     #[test]
-    fn sequence_header_sets_advanced_profile_and_interlace() {
+    fn sequence_header_sets_advanced_profile() {
         // 0x0000010F = sequence header start code. The byte after it carries the
         // profile (top two bits == 3 -> Advanced) and level (bits 0x38).
-        // The sixth byte after the start code carries the interlace flag (0x40).
+        // The sixth byte after the start code carries the interlace flag (0x40),
+        // which the parser decodes locally but never writes to the stream
+        // (matching BDInfo: IsInterlaced comes from the MPLS video format).
         let data = vec![
             0x00, 0x00, 0x01, 0x0F, // sequence header start code
             0xC8, // profile_kind=3 (Advanced), profile_level=1
@@ -97,13 +101,13 @@ mod tests {
         assert!(stream.is_initialized);
         assert!(stream.is_vbr);
         assert_eq!(stream.encoding_profile, "Advanced Profile 1");
-        assert!(stream.is_interlaced);
+        // The codec must not overwrite the MPLS-derived interlace flag.
+        assert!(!stream.is_interlaced);
     }
 
     #[test]
-    fn sequence_header_sets_main_profile_progressive() {
-        // Profile byte 0x00 -> profile_kind=0 (Main), profile_level=0; no
-        // interlace bit set in the trailing bytes -> progressive.
+    fn sequence_header_sets_main_profile() {
+        // Profile byte 0x00 -> profile_kind=0 (Main), profile_level=0.
         let data = vec![
             0x00, 0x00, 0x01, 0x0F, // sequence header start code
             0x00, // profile_kind=0 (Main), level=0
@@ -123,5 +127,38 @@ mod tests {
         let data: Vec<u8> = (0..256u32).map(|i| (i % 256) as u8).collect();
         let mut buffer = TSStreamBuffer::new(&data);
         scan(&mut stream, &mut buffer);
+    }
+
+    #[test]
+    fn frame_header_after_sequence_decodes_picture_type() {
+        // A sequence header (Advanced profile, interlace bit set) initializes the
+        // stream; a following frame start code (0x0000010D) then exercises the
+        // interlaced picture-type decode branch and the initialized early return.
+        let mut data = vec![
+            0x00, 0x00, 0x01, 0x0F, // sequence header start code
+            0xC8, // Advanced profile, level 1
+            0x00, 0x00, 0x00, 0x00, // padding
+            0x40, // interlace flag set
+        ];
+        data.extend_from_slice(&[0x00, 0x00, 0x01, 0x0D, 0x80, 0x00, 0x00, 0x00]); // frame header
+        let mut stream = vc1_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert!(stream.is_initialized);
+        assert_eq!(stream.encoding_profile, "Advanced Profile 1");
+        // The frame-header decode must not overwrite the MPLS-derived flag.
+        assert!(!stream.is_interlaced);
+    }
+
+    #[test]
+    fn frame_header_progressive_picture_type() {
+        // Main profile (progressive) sequence header + frame header exercises the
+        // non-interlaced picture-type branch.
+        let mut data = vec![0x00, 0x00, 0x01, 0x0F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        data.extend_from_slice(&[0x00, 0x00, 0x01, 0x0D, 0xF0, 0x00, 0x00, 0x00]);
+        let mut stream = vc1_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer);
+        assert!(stream.is_initialized);
     }
 }

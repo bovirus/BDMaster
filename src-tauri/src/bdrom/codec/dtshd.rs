@@ -268,4 +268,109 @@ mod tests {
         // Unchanged because the early-return guard fired.
         assert_eq!(stream.sample_rate, 48000);
     }
+
+    #[derive(Default)]
+    struct BitWriter {
+        bits: Vec<bool>,
+    }
+    impl BitWriter {
+        fn put(&mut self, val: u32, n: u32) {
+            for i in (0..n).rev() {
+                self.bits.push((val >> i) & 1 == 1);
+            }
+        }
+        fn bytes(&self) -> Vec<u8> {
+            let mut out = vec![0u8; (self.bits.len() + 7) / 8];
+            for (i, b) in self.bits.iter().enumerate() {
+                if *b {
+                    out[i / 8] |= 1 << (7 - (i % 8));
+                }
+            }
+            out
+        }
+    }
+
+    /// DTS-HD frame with the static-fields header + one asset describing 6
+    /// channels (5.1), 48 kHz, 24-bit.
+    fn build_static_fields_frame() -> Vec<u8> {
+        let mut b = BitWriter::default();
+        b.put(0xFF, 8); // skip 8
+        b.put(0, 2); // nu_sub_stream_index = 0
+        b.put(0, 1); // b_blown_up_header = 0
+        b.put(0xFFFFFF, 24); // skip 24
+        b.put(1, 1); // b_static_fields_present = 1
+        b.put(0, 5); // skip 5
+        b.put(0, 1); // (no 36-bit timestamp skip)
+        b.put(0, 3); // nu_num_audio_present field -> 1
+        b.put(0, 3); // nu_num_assets field -> 1
+        b.put(0, 1); // nu_active_ex_ss_mask[0] (sub_stream_index+1 bits)
+        b.put(0xFF, 8); // (j+1)%2==1 skip 8
+        b.put(0, 1); // mixer metadata absent
+        b.put(100, 16); // asset_sizes[0] field
+        // asset 0:
+        b.put(0xFFF, 12); // skip 12
+        b.put(0, 1); // (no 4-bit skip)
+        b.put(0, 1); // (no 24-bit skip)
+        b.put(0, 1); // info text absent
+        b.put(23, 5); // nu_bit_resolution -> 24
+        b.put(12, 4); // nu_max_sample_rate -> 48000
+        b.put(5, 8); // nu_total_num_chs -> 6
+        b.put(1, 1); // speaker-activity present
+        b.put(0, 1); // (>2 chs) skip 1
+        b.put(1, 1); // sa-mask present
+        b.put(0, 2); // nu_num_bits4_sa_mask -> 4-bit mask
+        b.put(0x8, 4); // speaker mask: LFE bit set
+        let mut data = vec![0x64, 0x58, 0x20, 0x25];
+        data.extend(b.bytes());
+        data.extend(std::iter::repeat(0u8).take(8)); // no extension sync
+        data
+    }
+
+    #[test]
+    fn static_fields_extract_channels_rate_and_depth() {
+        let data = build_static_fields_frame();
+        let mut stream = ma_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer, 0);
+        assert!(stream.is_initialized);
+        assert!(stream.is_vbr); // MA is VBR
+        assert_eq!(stream.sample_rate, 48000);
+        assert_eq!(stream.bit_depth, 24);
+        assert_eq!(stream.lfe, 1);
+        assert_eq!(stream.channel_count, 5);
+    }
+
+    #[test]
+    fn hd_hr_with_bitrate_hint_sets_cbr_bitrate() {
+        // A non-MA HD stream with a bitrate hint reports CBR at that bitrate.
+        let data = build_static_fields_frame();
+        let mut stream = TSStreamInfo::new(0x1100, TSStreamType::DTSHDAudio as u8);
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer, 1_500_000);
+        assert!(stream.is_initialized);
+        assert!(!stream.is_vbr);
+        assert_eq!(stream.bit_rate, 1_500_000);
+    }
+
+    #[test]
+    fn dtsx_extension_marker_sets_has_extensions() {
+        // Static fields absent so the header ends byte-aligned at 8 bytes; the
+        // DTS:X extension sync (0x41A29547 ... 0x02000850) then follows.
+        let mut b = BitWriter::default();
+        b.put(0xFF, 8); // skip 8
+        b.put(0, 2); // nu_sub_stream_index = 0
+        b.put(0, 1); // b_blown_up_header = 0
+        b.put(0xFFFFFF, 24); // skip 24
+        b.put(0, 1); // b_static_fields_present = 0
+        b.put(100, 16); // asset_sizes[0]
+        b.put(0xFFF, 12); // asset skip 12
+        let mut data = vec![0x64, 0x58, 0x20, 0x25];
+        data.extend(b.bytes()); // exactly 8 bytes -> byte aligned
+        data.extend_from_slice(&[0x41, 0xA2, 0x95, 0x47, 0x02, 0x00, 0x08, 0x50]);
+
+        let mut stream = ma_stream();
+        let mut buffer = TSStreamBuffer::new(&data);
+        scan(&mut stream, &mut buffer, 0);
+        assert!(stream.has_extensions, "DTS:X extension marker detected");
+    }
 }

@@ -16,7 +16,7 @@ H.265/HEVC parser for profile, level, HDR, and selected SEI/VUI metadata. This c
 - Adds extended format strings such as bit depth, HDR10/HDR10+/Dolby Vision, BT.2020, range, and optional diagnostics.
 - Marks HEVC streams VBR and initialized after an SPS is found.
 - **Parameter-set state now persists across PES payloads** via `PersistentHevc` in `CodecScanState` (keyed per PID). This mirrors BDInfo storing `ExtendedData` on the stream, so a VPS in one PES and an SPS/SEI in a later PES resolve correctly instead of being dropped.
-- Tests cover the colour-primaries / transfer-characteristics / matrix-coefficients tables, empty/garbage robustness, the cross-PES persistence path (an SPS carried from a prior payload still initializes the stream), and HDR10 labeling driven by persisted SPS + mastering metadata.
+- Tests cover the colour-primaries / transfer-characteristics / matrix-coefficients tables; empty/garbage robustness; the cross-PES persistence path; HDR10 / HDR10+ / Dolby-Vision labeling and the profile/level/bit-depth/colour application logic (driven by pre-seeded `SeqParameterSet` structs across profile, level, tier, chroma and extended-diagnostics variants); and **synthesized VPS+SPS+VUI NAL bitstreams** (a bit-writer with Exp-Golomb encoding and emulation-prevention insertion) that drive the real `video_parameter_set` / `seq_parameter_set` / `profile_tier_level` / `vui_parameters` parsers end-to-end, including the SPS-without-VPS rejection.
 
 ## Parity Notes (mirrors BDInfo exactly)
 
