@@ -25,3 +25,9 @@ M2TS/MPEG-TS packet scanner for Blu-ray 192-byte BDAV packets. This is a pragmat
 - This scanner deliberately works at the container level: it does not implement BDInfo's full PTS/DTS tracking, per-stream `PacketSeconds`, or PTS-window bitrate. One-second samples are based on M2TS packet bytes rather than per-video-PID presentation intervals — the lighter model the rest of the pipeline (chart + chapter metrics) is built around.
 - PAT/PMT parsing assumes the table section fits in one payload (true for Blu-ray PSI); multi-section/fragmented PSI is not reassembled, and continuity counters, table CRCs, transport-error/scrambling bits, and descriptor payloads are not validated.
 - Resynchronization is minimal (packets with a missing sync byte are skipped), variable packet sizes / non-BDAV inputs are not modeled, and `scan_inner` streaming results intentionally do not retain PES samples — only the callback sees full PES payloads. There is no `TSStreamDiagnostics`-style log.
+
+## Open Issues
+
+- BDInfo's PTS/DTS parser, per-stream `PacketSeconds`, PTS-window bitrate accounting, and `TSStreamDiagnostics` output are still absent. This is the largest remaining M2TS/full-scan parity gap.
+- PAT/PMT PSI is not reassembled across TS packets and table CRCs, continuity counters, transport-error/scrambling flags, and descriptor payloads are not validated or interpreted. Streams with unusual but legal PSI layout can diverge from BDInfo.
+- `scan_m2ts` and `scan_m2ts_streaming_from_reader` duplicate packet parsing logic. Future parity fixes must be applied to both paths or the quick-scan/sample path and streaming/full-scan path can drift.

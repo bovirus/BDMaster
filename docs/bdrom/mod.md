@@ -30,3 +30,13 @@ Top-level Blu-ray scanner for native folders and `.iso` images. This module corr
 - `codec_init` scans angle-0 clips with an 8 MB per-clip budget. This is sufficient for retail streams; the deep `full_scan` pass covers anything the quick pass leaves uninitialized.
 - Playlist grouping is by shared clip names, simpler than BDInfo's UI grouping/validity logic, and SSIF support trusts name matching plus the fixed MVC PID convention.
 - `codec_init` shares codec-parser mutations across playlist collections via contained raw pointers (pointers are dropped before any vector mutation); this avoids a second keyed pass and is exercised by the codec/types/clpi/lang unit tests it orchestrates.
+
+## Open Issues
+
+- Unfiltered `cargo llvm-cov --release --lib` currently does not complete: `bdrom::tests::locate_bdmv_via_index_at_root` spins in native `directory_size`. With that test skipped, `src/bdrom` line coverage is only 90.08% (10782/11970), leaving very little margin above the 90% target.
+- When `locate_bdmv` returns the input folder itself (a folder that contains `index.bdmv` at its root), `open_bdrom_native` still sets `directory_root` to the parent. That makes volume label, disc flags, title/SNP lookups, and size calculation read the parent folder rather than the disc root; on a parent with recursive links this can hang.
+- Native `directory_size` and `read_disc_title_native` recurse through directories without visited-set/depth protection or symlink handling. UDF sizing has loop protection, but native-folder scans can still recurse outside the disc tree or indefinitely.
+- ISO scans do not enforce the BDInfo/native parity check for missing `BDMV/PLAYLIST` or `BDMV/CLIPINF`; they can return an empty/incomplete disc instead of rejecting the image.
+- Hidden tracks are synthesized from PMT/PES during codec init instead of from the reference CLPI stream table as BDInfo does. Hidden streams can miss CLPI language/video/audio attributes, and hidden PIDs with no PES inside the quick-scan budget can be absent.
+- CLPI fallback metadata uses the first angle-0 clip for a playlist, while BDInfo chooses a reference clip by stream richness/length. Multi-clip playlists can therefore inherit different language or hidden-track metadata.
+- Disc-title parsing is a string search for `:name>` instead of BDInfo's namespace-aware XML selection, so malformed XML, alternate namespaces, or unrelated tags can produce different titles.

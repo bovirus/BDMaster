@@ -23,3 +23,8 @@ Dolby Digital and Dolby Digital Plus parser, including partial Atmos/JOC detecti
 - The `dheadphonmod` branch is BDInfo's own `// TODO`, preserved here.
 - Dependent-stream handling clones the current state into a core stream, EMDF/JOC detection follows BDInfo's heuristic payload path, bit reads default to zero on under-run, and there is no CRC / frame-size / bsid validation — all matching `TSCodecAC3.cs`.
 - The two-frame E-AC3 initialization (first frame leaves the stream uninitialized) mirrors BDInfo; whether the second frame falls inside the codec-init byte budget is governed by `codec_init` in `mod.rs`, exactly as BDInfo depends on its frame reader.
+
+## Open Issues
+
+- Release line coverage is 78.50%, below the 90% target. Missing coverage is concentrated in optional legacy AC3 skip fields, bsid-6 EX/headphone branches, dual-mono dependent paths, and the deeper EMDF/JOC payload configuration loop.
+- The current tests validate representative AC3 and E-AC3 frames, but they do not yet exercise enough of BDInfo's malformed/optional bitstream branches to make the "mirrors exactly" claim durable.

@@ -27,3 +27,9 @@ Minimal UDF 2.x image reader used for Blu-ray ISO support. BDInfo uses DiscUtils
 - Descriptor checksums, tag CRCs, descriptor versions, and logical-volume integrity data are not validated — the reader trusts well-formed retail discs and degrades to errors (never panics) on malformed input.
 - Unsupported Type 2 maps (sparable/virtual partitions) fall back to direct mapping, metadata mirror/bitmap/sparing/defect structures are not modeled, and allocation-descriptor type bits beyond short/long/embedded are ignored. These cover every practical Blu-ray layout.
 - `UdfFileReader` does not stream `embedded_data` (only relevant to tiny files, never M2TS); D-strings cover OSTA compression IDs 8 and 16; symlinks, file versions, permissions, timestamps, and extended attributes are intentionally ignored.
+
+## Open Issues
+
+- The reader is not DiscUtils-complete: descriptor tag CRC/checksum validation, descriptor version checks, logical-volume integrity data, sparable/virtual partitions, metadata mirror/bitmap/sparing structures, and defect handling are still absent.
+- Unsupported partition maps currently fall back to direct mapping. That is practical for known Blu-ray/UHD images, but malformed or non-retail UDF images can resolve paths differently from DiscUtils/BDInfo.
+- `UdfFileReader` does not stream embedded allocation data, and symlinks, file versions, permissions, timestamps, and extended attributes are ignored. These are low-risk for M2TS scanning but remain UDF parity gaps.

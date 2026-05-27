@@ -24,3 +24,9 @@ H.265/HEVC parser for profile, level, HDR, and selected SEI/VUI metadata. This c
 - Dolby Vision labeling uses BDInfo's `PID >= 4117` heuristic, not a full RPU/profile parser.
 - Extended data is flattened into strings (BDInfo's `ExtendedData` model); structured HDR metadata is not exposed through the protocol DTO.
 - The `TODO: profile to string` area and the early-return-without-diagnostics paths for malformed bitstreams are preserved from `TSCodecHEVC.cs`.
+
+## Open Issues
+
+- Release line coverage is 66.05% and function coverage is 85.90%, both below the 90% target. The untested surface is mostly the real VPS/SPS/PPS/VUI/HRD/SEI parser branches rather than the pre-seeded application logic.
+- Coverage is especially thin around short-term reference picture sets, scaling lists, HRD/sub-layer HRD parsing, buffering-period and picture-timing SEI, alternate T.35 user-data payload shapes, VUI aspect/timing branches, and malformed NAL recovery paths.
+- The doc says the module mirrors BDInfo exactly, but the low parser coverage means parity is not well protected against regressions in unusual HEVC/HDR streams.

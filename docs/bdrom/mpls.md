@@ -26,3 +26,11 @@ MPLS movie playlist parser. This corresponds to the parsing portions of BDInfo's
 - Stream order follows the MPLS STN-table order. This matches BDInfo's **default** behavior: `BDInfoSettings.KeepStreamOrder` defaults to `True`, so `SortStreams` (the height/channel-count/English-first comparators) is skipped by default. The optional reorder mode is not reproduced.
 - Chapters are stored as absolute seconds (sufficient for the chapter table/markers); the stream-file-index/relative-clip mapping BDInfo carries is not reconstructed.
 - Secondary audio/video and PIP entries are parsed only enough to advance correctly; deep subpath/subclip relationships, playlist extensions, and custom playlists are out of scope, matching the app's feature set.
+
+## Open Issues
+
+- `create_stream` registers MVC (`0x20`) as a normal video stream, but BDInfo's `TSPlaylistFile.CreatePlaylistStream` skips MVC with its own TODO. Playlist-level MVC visibility and base-view handling can diverge from BDInfo.
+- Chapter parsing ignores `stream_file_index` and stores absolute clip seconds. BDInfo converts chapter marks to playlist-relative seconds and ignores final chapter marks less than one second from the end, so multi-clip chapter tables can be wrong here.
+- Duplicate playlist streams use a first-PID-wins rule. BDInfo replaces an existing PID when a later significant clip (`RelativeLength > 0.01`) supplies better metadata, so multi-clip playlists can choose different stream attributes or languages.
+- Subpath/subclip IDs, subitem tables, extension blocks, custom playlists, and optional stream sorting are still not modeled. These are documented simplifications, but they remain BDInfo parity gaps.
+- Several parser paths still use direct `data[r.pos]` indexing or unchecked skip advances after partially validating offsets. Some malformed/truncated MPLS inputs can still panic instead of returning a graceful parse error.

@@ -23,3 +23,7 @@ Dolby TrueHD parser with embedded AC3 core fallback. This corresponds to BDInfo'
 - BDInfo's TrueHD-metadata dialnorm copy is commented out in `TSCodecTrueHD.cs` (its own `// TODO: Get THD dialnorm from metadata`); the same block is preserved here as a comment, so neither implementation copies core dialnorm.
 - A TrueHD sync seen before the AC3 core initializes leaves the parent uninitialized until a later core parse — BDInfo's identical two-call pattern.
 - Extension parsing only flags whether extension content exists (no Atmos classification) and there is no validation of impossible channel/sample-rate combinations, matching upstream.
+
+## Open Issues
+
+- The peak-bit-depth divisor is guarded with `max(1)`, which is a robustness improvement over BDInfo's raw arithmetic. Decide whether this malformed-input behavior should remain as an intentional parity exception or be changed/documented outside the "mirrors exactly" claim.

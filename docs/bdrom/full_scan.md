@@ -27,3 +27,11 @@ Background full-disc scanning worker. This maps primarily to BDInfo's full-scan 
 - Because frames are not individually parsed, `avg_frame_size` / `max_frame_size` / `max_frame_time` stay zero and there is no frame-reorder or frame-size diagnostic — consistent with the container-level scanning model.
 - Per-file scan errors are logged and scanning continues (no per-file error field in the progress DTO), and hidden-stream discovery uses PMT/PES visibility during the scan.
 - Per-file scanning shares stream records through raw pointers into the playlist stream vectors; the vectors are never mutated while those pointers are live, so the borrow is sound and avoids cloning every stream per PES payload.
+
+## Open Issues
+
+- Full scan still uses proportional duration-based byte attribution and container-level bitrate buckets instead of BDInfo's exact PTS-window per-stream accounting. Chapter/video bitrate numbers can differ on partial clips or sparse streams.
+- Angle-specific streams and per-angle byte totals are not scanned separately. BDInfo carries angle collections, while this worker only measures angle-0 clips.
+- Frame-level diagnostics (`avg_frame_size`, `max_frame_size`, `max_frame_time`, frame reorder, and `TSStreamDiagnostics`) remain unavailable because the M2TS layer does not expose the underlying PTS/frame model.
+- Per-file scan errors are only logged; the progress DTO has no per-file error list or BDInfo-style callback result, so the UI cannot distinguish a clean scan from a scan with skipped files.
+- Line coverage is above the target at 92.97%, but function coverage is 88.78%. Worker error/cancellation and less common measurement branches still need targeted tests if function coverage is treated as part of the 90% requirement.
