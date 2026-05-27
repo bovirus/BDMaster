@@ -8,6 +8,10 @@ import {
   Box,
   Button,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   IconButton,
   Link,
   LinearProgress,
@@ -20,6 +24,7 @@ import {
   TableHead,
   TableRow,
   TableSortLabel,
+  TextField,
   Tooltip,
   Typography,
 } from "@mui/material";
@@ -211,6 +216,8 @@ export default function DiscDetail() {
   const [betterMediaInfoAvailable, setBetterMediaInfoAvailable] = useState(false);
   const [mpcHcAvailable, setMpcHcAvailable] = useState(false);
   const [mkvToolNixToPath, setMkvToolNixToPath] = useState("");
+  const [outputPathDialogOpen, setOutputPathDialogOpen] = useState(false);
+  const [outputPathDraft, setOutputPathDraft] = useState("");
 
   // Probe whether mkvtoolnix-gui is reachable at the configured path. Used to
   // decide whether the per-playlist "Open in MKVToolNix GUI" action shows up
@@ -565,18 +572,29 @@ export default function DiscDetail() {
 
   const openTab = useAppStore((s) => s.openTab);
   const handleOpenPlaylistTab = (name: string) => openTab(Protocol.TabType.Playlist, name);
-  const handleChooseMkvToolNixToPath = async () => {
+  const handleOpenOutputPathDialog = () => {
     if (!disc) {
       return;
     }
+    setOutputPathDraft(mkvToolNixToPath || disc.path);
+    setOutputPathDialogOpen(true);
+  };
+  const handleBrowseOutputPath = async () => {
     const directory = await openDialog({
       directory: true,
       multiple: false,
-      defaultPath: mkvToolNixToPath || disc.path,
+      defaultPath: outputPathDraft || disc?.path,
     });
     if (typeof directory === "string") {
-      setMkvToolNixToPath(directory);
+      setOutputPathDraft(directory);
     }
+  };
+  const handleOutputPathOk = () => {
+    setMkvToolNixToPath(outputPathDraft);
+    setOutputPathDialogOpen(false);
+  };
+  const handleOutputPathCancel = () => {
+    setOutputPathDialogOpen(false);
   };
   const reportMkvToolNixError = (err: unknown) => {
     const raw = err == null ? "" : String(err);
@@ -797,7 +815,7 @@ export default function DiscDetail() {
                     component="button"
                     type="button"
                     aria-label={t("disc.changeOutputPathTooltip")}
-                    onClick={handleChooseMkvToolNixToPath}
+                    onClick={handleOpenOutputPathDialog}
                     sx={{
                       alignItems: "center",
                       display: "inherit",
@@ -1357,6 +1375,46 @@ export default function DiscDetail() {
           )}
         </Box>
       </Box>
+      <Dialog
+        open={outputPathDialogOpen}
+        onClose={handleOutputPathCancel}
+        maxWidth={false}
+        slotProps={{
+          paper: {
+            component: "form",
+            onSubmit: (e: React.FormEvent) => {
+              e.preventDefault();
+              handleOutputPathOk();
+            },
+            sx: { width: "60vw", maxWidth: "60vw" },
+          },
+        }}
+      >
+        <DialogTitle>{t("disc.selectOutputPath")}</DialogTitle>
+        <DialogContent>
+          <Stack direction="row" spacing={1} sx={{ alignItems: "stretch", mt: 1 }}>
+            <TextField
+              autoFocus
+              fullWidth
+              size="small"
+              value={outputPathDraft}
+              onChange={(e) => setOutputPathDraft(e.target.value)}
+              onFocus={(e) => e.target.select()}
+            />
+            <Button variant="outlined" type="button" onClick={handleBrowseOutputPath}>
+              {t("disc.browse")}
+            </Button>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: "center", mb: 1 }}>
+          <Button variant="contained" type="submit">
+            {t("disc.ok")}
+          </Button>
+          <Button type="button" onClick={handleOutputPathCancel}>
+            {t("disc.cancel")}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
