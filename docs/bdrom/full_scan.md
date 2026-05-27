@@ -30,8 +30,8 @@ Background full-disc scanning worker. This maps primarily to BDInfo's full-scan 
 
 ## Open Issues
 
-- Full scan still uses proportional duration-based byte attribution and container-level bitrate buckets instead of BDInfo's exact PTS-window per-stream accounting. Chapter/video bitrate numbers can differ on partial clips or sparse streams.
-- Angle-specific streams and per-angle byte totals are not scanned separately. BDInfo carries angle collections, while this worker only measures angle-0 clips.
-- Frame-level diagnostics (`avg_frame_size`, `max_frame_size`, `max_frame_time`, frame reorder, and `TSStreamDiagnostics`) remain unavailable because the M2TS layer does not expose the underlying PTS/frame model.
-- Per-file scan errors are only logged; the progress DTO has no per-file error list or BDInfo-style callback result, so the UI cannot distinguish a clean scan from a scan with skipped files.
-- Line coverage is above the target at 92.97%, but function coverage is 88.78%. Worker error/cancellation and less common measurement branches still need targeted tests if function coverage is treated as part of the 90% requirement.
+- Not resolved in this pass: full scan still uses proportional duration-based byte attribution and container-level bitrate buckets instead of BDInfo's exact PTS-window per-stream accounting. I reviewed this with the M2TS parity gaps, but fixing it requires a shared PTS/frame model in `m2ts.rs`; chapter/video bitrate numbers can still differ on partial clips or sparse streams.
+- Not resolved in this pass: angle-specific streams and per-angle byte totals are not scanned separately. The worker still measures angle-0 clips only; supporting BDInfo-style angle collections would require extending playlist/stream DTOs and UI aggregation.
+- Not resolved in this pass: frame-level diagnostics (`avg_frame_size`, `max_frame_size`, `max_frame_time`, frame reorder, and `TSStreamDiagnostics`) remain unavailable because the M2TS layer still does not expose the underlying PTS/frame model.
+- Not resolved in this pass: per-file scan errors are only logged. I reviewed the progress path, but exposing BDInfo-style per-file results requires a protocol/UI change because the current progress DTO has no per-file error list.
+- Module line coverage remains above target at 92.97%, but module function coverage remains 88.78%. The bdrom-focused aggregate coverage now clears 90% for both line and function coverage (90.54% / 93.29%); worker error/cancellation and less common measurement branches still need targeted module-level tests if per-module function coverage is required.

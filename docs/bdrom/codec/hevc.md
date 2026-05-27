@@ -27,6 +27,6 @@ H.265/HEVC parser for profile, level, HDR, and selected SEI/VUI metadata. This c
 
 ## Open Issues
 
-- Release line coverage is 66.05% and function coverage is 85.90%, both below the 90% target. The untested surface is mostly the real VPS/SPS/PPS/VUI/HRD/SEI parser branches rather than the pre-seeded application logic.
+- Not resolved in this pass: release line coverage remains 66.05% and function coverage remains 85.90% for this module, although the bdrom-focused coverage target is above 90% overall. I re-ran `cargo llvm-cov --release --lib` after the scanner/MPLS fixes and confirmed the untested surface is still mostly the real VPS/SPS/PPS/VUI/HRD/SEI parser branches rather than the pre-seeded application logic.
 - Coverage is especially thin around short-term reference picture sets, scaling lists, HRD/sub-layer HRD parsing, buffering-period and picture-timing SEI, alternate T.35 user-data payload shapes, VUI aspect/timing branches, and malformed NAL recovery paths.
-- The doc says the module mirrors BDInfo exactly, but the low parser coverage means parity is not well protected against regressions in unusual HEVC/HDR streams.
+- I did not attempt to synthesize the remaining HEVC bitstreams here because those branches need precise VPS/SPS/SEI payload construction and BDInfo reference expectations; adding broad artificial coverage without validating semantics would make parity less trustworthy. The module still needs targeted HEVC fixture work before the "mirrors BDInfo exactly" claim is fully protected for unusual HEVC/HDR streams.

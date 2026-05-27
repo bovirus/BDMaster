@@ -30,6 +30,6 @@ Minimal UDF 2.x image reader used for Blu-ray ISO support. BDInfo uses DiscUtils
 
 ## Open Issues
 
-- The reader is not DiscUtils-complete: descriptor tag CRC/checksum validation, descriptor version checks, logical-volume integrity data, sparable/virtual partitions, metadata mirror/bitmap/sparing structures, and defect handling are still absent.
-- Unsupported partition maps currently fall back to direct mapping. That is practical for known Blu-ray/UHD images, but malformed or non-retail UDF images can resolve paths differently from DiscUtils/BDInfo.
-- `UdfFileReader` does not stream embedded allocation data, and symlinks, file versions, permissions, timestamps, and extended attributes are ignored. These are low-risk for M2TS scanning but remain UDF parity gaps.
+- Not resolved in this pass: the reader is still not DiscUtils-complete. Descriptor tag CRC/checksum validation, descriptor version checks, logical-volume integrity data, sparable/virtual partitions, metadata mirror/bitmap/sparing structures, and defect handling remain absent. I reviewed this section while fixing native/ISO scanner parity, but these require substantial UDF conformance work beyond the Blu-ray layouts currently exercised by tests.
+- Not resolved in this pass: unsupported partition maps still fall back to direct mapping. That is practical for known Blu-ray/UHD images, but malformed or non-retail UDF images can resolve paths differently from DiscUtils/BDInfo; fixing it needs additional image fixtures for sparable/virtual partition behavior.
+- Not resolved in this pass: `UdfFileReader` does not stream embedded allocation data, and symlinks, file versions, permissions, timestamps, and extended attributes are ignored. I did not change this because embedded allocations are not used for M2TS streams and the omitted metadata is outside the app's current scan DTOs, but these remain UDF parity gaps.

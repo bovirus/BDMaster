@@ -16,18 +16,19 @@ pub mod mpls;
 pub mod types;
 pub mod udf;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::protocol::{
-    DiscInfo, PlaylistInfo, PlaylistStreamClipInfo, StreamClipFileInfo, StreamFileInfo, TSStreamInfo,
+    DiscInfo, PlaylistInfo, PlaylistStreamClipInfo, StreamClipFileInfo, StreamFileInfo,
+    TSStreamInfo,
 };
 
-use self::clpi::StreamClipFile;
+use self::clpi::{ClpiStream, StreamClipFile};
 use self::lang::language_name;
-use self::mpls::{parse_mpls_bytes, PlaylistFile, PlaylistStream};
+use self::mpls::{PlaylistFile, PlaylistStream, parse_mpls_bytes};
 use self::types::*;
 use self::udf::{UdfFile, UdfFileReader, UdfImage};
 
@@ -137,10 +138,7 @@ pub(crate) fn effective_stream_source<'a>(
 
 fn open_bdrom_native(path: &Path, use_ssif: bool) -> Result<BDRom> {
     let directory_bdmv = locate_bdmv(path)?;
-    let directory_root = directory_bdmv
-        .parent()
-        .ok_or_else(|| anyhow!("BDMV has no parent directory"))?
-        .to_path_buf();
+    let directory_root = native_disc_root(&directory_bdmv)?;
 
     let directory_playlist = find_subdir(&directory_bdmv, "PLAYLIST");
     let directory_clipinf = find_subdir(&directory_bdmv, "CLIPINF");
@@ -311,6 +309,19 @@ fn open_bdrom_iso(path: &Path, use_ssif: bool) -> Result<BDRom> {
     };
     if !bdmv.is_directory {
         return Err(anyhow!("UDF: BDMV is not a directory"));
+    }
+
+    {
+        let mut img = image.lock().unwrap_or_else(|e| e.into_inner());
+        let playlist = img.try_resolve("BDMV/PLAYLIST");
+        let clipinf = img.try_resolve("BDMV/CLIPINF");
+        if !playlist.as_ref().map(|f| f.is_directory).unwrap_or(false)
+            || !clipinf.as_ref().map(|f| f.is_directory).unwrap_or(false)
+        {
+            return Err(anyhow!(
+                "UDF: Unable to locate PLAYLIST or CLIPINF directory."
+            ));
+        }
     }
 
     // Volume label: prefer the UDF Logical Volume Identifier (what DiscUtils /
@@ -637,6 +648,21 @@ fn locate_bdmv(path: &Path) -> Result<PathBuf> {
     ))
 }
 
+fn native_disc_root(directory_bdmv: &Path) -> Result<PathBuf> {
+    if directory_bdmv
+        .file_name()
+        .map(|n| n.to_string_lossy().eq_ignore_ascii_case("BDMV"))
+        .unwrap_or(false)
+    {
+        directory_bdmv
+            .parent()
+            .ok_or_else(|| anyhow!("BDMV has no parent directory"))
+            .map(Path::to_path_buf)
+    } else {
+        Ok(directory_bdmv.to_path_buf())
+    }
+}
+
 fn find_subdir(parent: &Path, name: &str) -> Option<PathBuf> {
     let entries = std::fs::read_dir(parent).ok()?;
     for entry in entries.flatten() {
@@ -673,13 +699,34 @@ fn dir_has_extension(dir: &Path, ext: &str) -> bool {
 }
 
 fn directory_size(dir: &Path) -> u64 {
-    let mut size: u64 = 0;
-    if let Ok(entries) = std::fs::read_dir(dir) {
+    fn inner(dir: &Path, visited: &mut HashSet<PathBuf>, depth: usize) -> u64 {
+        const MAX_DEPTH: usize = 100;
+        if depth > MAX_DEPTH {
+            return 0;
+        }
+
+        let key = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+        if !visited.insert(key) {
+            return 0;
+        }
+
+        let mut size: u64 = 0;
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return 0;
+        };
+
         for entry in entries.flatten() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+
             let p = entry.path();
-            if p.is_dir() {
-                size += directory_size(&p);
-            } else if p.is_file() {
+            if file_type.is_dir() {
+                size += inner(&p, visited, depth + 1);
+            } else if file_type.is_file() {
                 if p.extension()
                     .map(|x| x.to_string_lossy().eq_ignore_ascii_case("ssif"))
                     .unwrap_or(false)
@@ -689,50 +736,167 @@ fn directory_size(dir: &Path) -> u64 {
                 size += std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
             }
         }
+        size
     }
-    size
+
+    let mut visited = HashSet::new();
+    inner(dir, &mut visited, 0)
 }
 
 fn read_disc_title_native(meta_dir: &Path) -> Option<String> {
-    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+    fn walk(dir: &Path, visited: &mut HashSet<PathBuf>, depth: usize, out: &mut Option<PathBuf>) {
+        const MAX_DEPTH: usize = 100;
+        if depth > MAX_DEPTH || out.is_some() {
+            return;
+        }
+
+        let key = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+        if !visited.insert(key) {
+            return;
+        }
+
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
+                if out.is_some() {
+                    return;
+                }
+                let Ok(file_type) = entry.file_type() else {
+                    continue;
+                };
+                if file_type.is_symlink() {
+                    continue;
+                }
                 let p = entry.path();
-                if p.is_dir() {
-                    walk(&p, out);
-                } else if p
-                    .file_name()
-                    .map(|n| n.to_string_lossy().eq_ignore_ascii_case("bdmt_eng.xml"))
-                    .unwrap_or(false)
+                if file_type.is_dir() {
+                    walk(&p, visited, depth + 1, out);
+                } else if file_type.is_file()
+                    && p.file_name()
+                        .map(|n| n.to_string_lossy().eq_ignore_ascii_case("bdmt_eng.xml"))
+                        .unwrap_or(false)
                 {
-                    out.push(p);
+                    *out = Some(p);
                 }
             }
         }
     }
-    let mut found = Vec::new();
-    walk(meta_dir, &mut found);
-    let path = found.first()?;
+    let mut visited = HashSet::new();
+    let mut found = None;
+    walk(meta_dir, &mut visited, 0, &mut found);
+    let path = found.as_ref()?;
     let text = std::fs::read_to_string(path).ok()?;
     extract_title_from_xml(&text)
 }
 
 fn extract_title_from_xml(xml: &str) -> Option<String> {
-    // Look for <di:name>...</di:name>, accepting any di prefix.
-    let lower = xml.to_ascii_lowercase();
-    let mut search_from = 0usize;
-    while let Some(start) = lower[search_from..].find(":name>") {
-        let abs = search_from + start;
-        let after = abs + ":name>".len();
-        if let Some(end_rel) = lower[after..].find("</") {
-            let title = xml[after..after + end_rel].trim().to_string();
-            if !title.is_empty() && title.to_lowercase() != "blu-ray" {
-                return Some(title);
+    let mut pos = 0usize;
+    let mut stack: Vec<String> = Vec::new();
+
+    while let Some(start_rel) = xml[pos..].find('<') {
+        let start = pos + start_rel;
+        let Some(end_rel) = xml[start..].find('>') else {
+            return None;
+        };
+        let end = start + end_rel;
+        let raw = xml[start + 1..end].trim();
+        pos = end + 1;
+
+        if raw.starts_with('?') || raw.starts_with('!') {
+            continue;
+        }
+
+        if let Some(close) = raw.strip_prefix('/') {
+            let close_name = xml_local_name(close);
+            while let Some(open_name) = stack.pop() {
+                if open_name == close_name {
+                    break;
+                }
+            }
+            continue;
+        }
+
+        let self_closing = raw.ends_with('/');
+        let tag_name = xml_local_name(raw.trim_end_matches('/').trim());
+        let parent = stack.last().map(String::as_str);
+
+        if tag_name == "name" && parent == Some("title") {
+            let content_start = end + 1;
+            let Some(close_start_rel) = xml[content_start..].find("</") else {
+                return None;
+            };
+            let close_start = content_start + close_start_rel;
+            let Some(close_end_rel) = xml[close_start..].find('>') else {
+                return None;
+            };
+            let close_end = close_start + close_end_rel;
+            if xml_local_name(xml[close_start + 2..close_end].trim()) == "name" {
+                let title = xml_decode_text(xml[content_start..close_start].trim());
+                if !title.is_empty() && !title.eq_ignore_ascii_case("blu-ray") {
+                    return Some(title);
+                }
             }
         }
-        search_from = after;
+
+        if !self_closing {
+            stack.push(tag_name);
+        }
     }
     None
+}
+
+fn xml_local_name(raw: &str) -> String {
+    let name = raw
+        .split(|c: char| c.is_whitespace() || c == '/' || c == '>')
+        .next()
+        .unwrap_or_default();
+    name.rsplit(':').next().unwrap_or(name).to_ascii_lowercase()
+}
+
+fn xml_decode_text(text: &str) -> String {
+    if !text.contains('&') {
+        return text.to_string();
+    }
+
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(amp) = rest.find('&') {
+        out.push_str(&rest[..amp]);
+        let after_amp = &rest[amp + 1..];
+        let Some(semi) = after_amp.find(';') else {
+            out.push('&');
+            rest = after_amp;
+            continue;
+        };
+        let entity = &after_amp[..semi];
+        match entity {
+            "amp" => out.push('&'),
+            "lt" => out.push('<'),
+            "gt" => out.push('>'),
+            "quot" => out.push('"'),
+            "apos" => out.push('\''),
+            _ if entity.starts_with("#x") => {
+                if let Ok(code) = u32::from_str_radix(&entity[2..], 16) {
+                    if let Some(ch) = char::from_u32(code) {
+                        out.push(ch);
+                    }
+                }
+            }
+            _ if entity.starts_with('#') => {
+                if let Ok(code) = entity[1..].parse::<u32>() {
+                    if let Some(ch) = char::from_u32(code) {
+                        out.push(ch);
+                    }
+                }
+            }
+            _ => {
+                out.push('&');
+                out.push_str(entity);
+                out.push(';');
+            }
+        }
+        rest = &after_amp[semi + 1..];
+    }
+    out.push_str(rest);
+    out
 }
 
 pub(crate) fn to_disc_info(bd: &BDRom) -> DiscInfo {
@@ -931,18 +1095,16 @@ fn build_playlist_info(pl: &PlaylistFile, bd: &BDRom, group_index: u32) -> Playl
     let mut audio_streams = Vec::new();
     let mut graphics_streams = Vec::new();
     let mut text_streams = Vec::new();
-    // First angle-0 clip, used to cross-check stream language codes against the
-    // matching CLPI program-info table when MPLS leaves them blank.
-    let first_clip = pl
-        .stream_clips
-        .iter()
-        .find(|c| c.angle_index == 0)
-        .map(|c| c.name.clone());
+    // Reference angle-0 clip, used to cross-check stream language codes and
+    // hidden streams against CLPI when MPLS leaves metadata out. BDInfo
+    // chooses the richest/longest clip rather than blindly using the first.
+    let reference_clip = reference_clip_name_for_playlist(pl, bd);
+    let mut has_hidden_tracks = false;
 
     for s in &pl.playlist_streams {
         let mut info = playlist_stream_to_info(s);
         if info.language_code.is_empty() {
-            if let Some(clip_name) = &first_clip {
+            if let Some(clip_name) = &reference_clip {
                 if let Some(code) = clpi_language_for(bd, clip_name, s.pid) {
                     info.language_name = language_name(&code);
                     info.language_code = code;
@@ -960,13 +1122,38 @@ fn build_playlist_info(pl: &PlaylistFile, bd: &BDRom, group_index: u32) -> Playl
         }
     }
 
+    let declared_pids: HashSet<u16> = pl.playlist_streams.iter().map(|s| s.pid).collect();
+    if let Some(clip_name) = &reference_clip {
+        if let Some(clpi) = clpi_file_for_clip(bd, clip_name) {
+            for stream in &clpi.streams {
+                if declared_pids.contains(&stream.pid) {
+                    continue;
+                }
+                let Some(mut info) = clpi_stream_to_info(stream) else {
+                    continue;
+                };
+                info.is_hidden = true;
+                has_hidden_tracks = true;
+                if info.is_video_stream {
+                    video_streams.push(info);
+                } else if info.is_audio_stream {
+                    audio_streams.push(info);
+                } else if info.is_graphics_stream {
+                    graphics_streams.push(info);
+                } else if info.is_text_stream {
+                    text_streams.push(info);
+                }
+            }
+        }
+    }
+
     PlaylistInfo {
         name: pl.name.clone(),
         group_index,
         file_size: total_file_size,
         measured_size: 0,
         total_length: total_length_45k.max(0) as u64,
-        has_hidden_tracks: false,
+        has_hidden_tracks,
         has_loops: playlist_has_loops(pl),
         is_custom: false,
         chapters: pl.chapters.clone(),
@@ -1022,16 +1209,57 @@ fn playlist_has_loops(pl: &PlaylistFile) -> bool {
 /// Look up a stream's language code from the matching CLPI clip's program-info
 /// table by PID. Used only as a fallback when MPLS supplies no language code.
 fn clpi_language_for(bd: &BDRom, clip_name: &str, pid: u16) -> Option<String> {
-    let stem = clip_name.rsplit_once('.').map(|(s, _)| s).unwrap_or(clip_name);
-    let clpi_name = format!("{}.CLPI", stem.to_uppercase());
-    let scf = bd.stream_clip_files.get(&clpi_name)?;
-    if !scf.is_valid {
-        return None;
-    }
+    let scf = clpi_file_for_clip(bd, clip_name)?;
     scf.streams
         .iter()
         .find(|s| s.pid == pid && !s.language_code.is_empty())
         .map(|s| s.language_code.clone())
+}
+
+fn clpi_file_for_clip<'a>(bd: &'a BDRom, clip_name: &str) -> Option<&'a StreamClipFile> {
+    let stem = clip_name
+        .rsplit_once('.')
+        .map(|(s, _)| s)
+        .unwrap_or(clip_name);
+    let clpi_name = format!("{}.CLPI", stem.to_uppercase());
+    let scf = bd.stream_clip_files.get(&clpi_name)?;
+    scf.is_valid.then_some(scf)
+}
+
+fn reference_clip_name_for_playlist(pl: &PlaylistFile, bd: &BDRom) -> Option<String> {
+    let mut best: Option<(String, usize, i64)> = None;
+    for clip in pl.stream_clips.iter().filter(|c| c.angle_index == 0) {
+        let stream_count = clpi_file_for_clip(bd, &clip.name)
+            .map(|c| c.streams.len())
+            .unwrap_or(0);
+        let length = (clip.time_out - clip.time_in).max(0);
+        match &best {
+            Some((_, best_count, best_length))
+                if stream_count < *best_count
+                    || (stream_count == *best_count && length <= *best_length) => {}
+            _ => best = Some((clip.name.clone(), stream_count, length)),
+        }
+    }
+    best.map(|(name, _, _)| name)
+}
+
+fn clpi_stream_to_info(stream: &ClpiStream) -> Option<TSStreamInfo> {
+    let stream_type = TSStreamType::from_u8(stream.stream_type);
+    if stream_type == TSStreamType::Unknown {
+        return None;
+    }
+
+    let playlist_stream = PlaylistStream {
+        pid: stream.pid,
+        stream_type,
+        video_format: TSVideoFormat::from_u8(stream.video_format),
+        frame_rate: TSFrameRate::from_u8(stream.frame_rate),
+        aspect_ratio: TSAspectRatio::from_u8(stream.aspect_ratio),
+        channel_layout: TSChannelLayout::from_u8(stream.channel_layout),
+        sample_rate_hz: stream.sample_rate,
+        language_code: stream.language_code.clone(),
+    };
+    Some(playlist_stream_to_info(&playlist_stream))
 }
 
 fn playlist_stream_to_info(s: &PlaylistStream) -> TSStreamInfo {
@@ -1690,7 +1918,13 @@ mod tests {
                 .map(|d| d.as_nanos())
                 .unwrap_or(0);
             let n = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-            let name = format!("bdmaster_modtest_{}_{}_{}_{}", tag, std::process::id(), n, nanos);
+            let name = format!(
+                "bdmaster_modtest_{}_{}_{}_{}",
+                tag,
+                std::process::id(),
+                n,
+                nanos
+            );
             let path = std::env::temp_dir().join(name);
             std::fs::create_dir_all(&path).expect("create temp dir");
             TempDir { path }
@@ -1891,12 +2125,23 @@ mod tests {
 
     fn pat_payload(program: u16, pmt_pid: u16) -> Vec<u8> {
         vec![
-            0x00, 0x00, 0xB0, 0x0D, 0x00, 0x01, 0x01, 0x00, 0x00,
+            0x00,
+            0x00,
+            0xB0,
+            0x0D,
+            0x00,
+            0x01,
+            0x01,
+            0x00,
+            0x00,
             (program >> 8) as u8,
             (program & 0xFF) as u8,
             0xE0 | (pmt_pid >> 8) as u8,
             (pmt_pid & 0xFF) as u8,
-            0x00, 0x00, 0x00, 0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
         ]
     }
 
@@ -1936,15 +2181,23 @@ mod tests {
     /// the PMT that the MPLS doesn't declare (hidden tracks / SSIF MVC).
     fn build_m2ts() -> Vec<u8> {
         let streams: &[(u8, u16)] = &[
-            (0x1b, 0x1011), // AVC (declared)
-            (0x81, 0x1100), // AC3 (declared)
+            (0x1b, 0x1011),       // AVC (declared)
+            (0x81, 0x1100),       // AC3 (declared)
             (0x20, SSIF_MVC_PID), // MVC (hidden / SSIF)
-            (0x90, 0x1200), // PGS (hidden)
-            (0x92, 0x1300), // Subtitle (hidden)
+            (0x90, 0x1200),       // PGS (hidden)
+            (0x92, 0x1300),       // Subtitle (hidden)
         ];
         let mut data = Vec::new();
-        data.extend_from_slice(&m2ts_frame(&ts_packet(true, 0x0000, &pat_payload(1, 0x0100))));
-        data.extend_from_slice(&m2ts_frame(&ts_packet(true, 0x0100, &pmt_payload_multi(streams))));
+        data.extend_from_slice(&m2ts_frame(&ts_packet(
+            true,
+            0x0000,
+            &pat_payload(1, 0x0100),
+        )));
+        data.extend_from_slice(&m2ts_frame(&ts_packet(
+            true,
+            0x0100,
+            &pmt_payload_multi(streams),
+        )));
         // A handful of PES per ES PID so the codec parsers get fed and the
         // byte accounting accumulates.
         for _ in 0..4 {
@@ -2009,7 +2262,7 @@ mod tests {
 
         if opts.with_meta {
             let xml = format!(
-                "<?xml version=\"1.0\"?><disclib><di:name>{}</di:name></disclib>",
+                "<?xml version=\"1.0\"?><disclib><di:title><di:name>{}</di:name></di:title></disclib>",
                 opts.meta_title
             );
             dir.write("BDMV/META/DL/bdmt_eng.xml", xml.as_bytes());
@@ -2090,7 +2343,10 @@ mod tests {
         assert!(pl.stream_clips[0].interleaved_file_size > 0);
 
         // Declared streams from MPLS.
-        assert_eq!(pl.video_streams.iter().filter(|s| !s.is_hidden).count() >= 1, true);
+        assert_eq!(
+            pl.video_streams.iter().filter(|s| !s.is_hidden).count() >= 1,
+            true
+        );
         let avc = pl
             .video_streams
             .iter()
@@ -2109,6 +2365,7 @@ mod tests {
         let pgs = pl.graphics_streams.iter().find(|s| s.pid == 0x1200);
         assert!(pgs.is_some(), "PGS hidden track added");
         assert!(pgs.unwrap().is_hidden);
+        assert_eq!(pgs.unwrap().language_code, "jpn");
         let sub = pl.text_streams.iter().find(|s| s.pid == 0x1300);
         assert!(sub.is_some(), "subtitle hidden track added");
         assert!(pl.has_hidden_tracks);
@@ -2216,7 +2473,10 @@ mod tests {
         let bd = open_bdrom(dir.path(), false).expect("open native");
         assert!(!bd.use_ssif);
         assert!(bd.is_3d, "SSIF files still present => is_3d true");
-        assert!(!bd.interleaved_files.is_empty(), "interleaved map populated");
+        assert!(
+            !bd.interleaved_files.is_empty(),
+            "interleaved map populated"
+        );
 
         // effective_stream_source with SSIF off returns the M2TS, not the SSIF.
         let src = effective_stream_source(&bd, "00001.M2TS").expect("source");
@@ -2277,9 +2537,7 @@ mod tests {
         let dir = TempDir::new("noplaylist");
         dir.write("BDMV/index.bdmv", b"INDX0200");
         dir.write("BDMV/CLIPINF/00001.clpi", &build_clpi_default());
-        let err = open_bdrom(dir.path(), false)
-            .err()
-            .expect("expected error");
+        let err = open_bdrom(dir.path(), false).err().expect("expected error");
         assert!(err.to_string().contains("PLAYLIST or CLIPINF"));
     }
 
@@ -2316,26 +2574,37 @@ mod tests {
 
     #[test]
     fn extract_title_from_xml_variants() {
-        // Basic case with a di prefix.
         assert_eq!(
-            extract_title_from_xml("<di:name>Hello World</di:name>").as_deref(),
+            extract_title_from_xml("<di:title><di:name>Hello World</di:name></di:title>")
+                .as_deref(),
             Some("Hello World")
         );
-        // Any prefix accepted (the code matches ":name>").
         assert_eq!(
-            extract_title_from_xml("<x:name>  Spaced  </x:name>").as_deref(),
-            Some("Spaced")
+            extract_title_from_xml("<x:title><y:name>Rock &amp; Roll</y:name></x:title>")
+                .as_deref(),
+            Some("Rock & Roll")
         );
-        // The literal "blu-ray" placeholder is skipped and the scan continues
-        // (this lightweight scanner intentionally does not handle multiple
-        // <di:name> elements robustly, matching the documented design note).
-        assert_eq!(extract_title_from_xml("<di:name>blu-ray</di:name>"), None);
-        // Empty title => None.
-        assert_eq!(extract_title_from_xml("<di:name></di:name>"), None);
+        assert_eq!(
+            extract_title_from_xml("<di:title><di:name>blu-ray</di:name></di:title>"),
+            None
+        );
+        assert_eq!(
+            extract_title_from_xml("<di:title><di:name></di:name></di:title>"),
+            None
+        );
+        // A name tag outside the title element is ignored, which avoids
+        // unrelated metadata fields being treated as the disc title.
+        assert_eq!(
+            extract_title_from_xml("<di:other><di:name>Wrong</di:name></di:other>"),
+            None
+        );
         // No name tag => None.
         assert_eq!(extract_title_from_xml("<other>x</other>"), None);
         // Unterminated tag => None (no closing </).
-        assert_eq!(extract_title_from_xml("<di:name>oops"), None);
+        assert_eq!(
+            extract_title_from_xml("<di:title><di:name>oops</di:title>"),
+            None
+        );
     }
 
     #[test]
@@ -2520,8 +2789,10 @@ mod tests {
             text_streams: Vec::new(),
             total_angles: 0,
         };
-        pl.video_streams
-            .push(TSStreamInfo::new(SSIF_MVC_PID, TSStreamType::MVCVideo as u8));
+        pl.video_streams.push(TSStreamInfo::new(
+            SSIF_MVC_PID,
+            TSStreamType::MVCVideo as u8,
+        ));
         disc.playlists.push(pl);
         recompute_mvc_extension(&mut disc);
         assert!(disc.has_mvc_extension);
@@ -2546,8 +2817,10 @@ mod tests {
                 .iter_mut()
                 .find(|p| p.name == "00800.MPLS")
                 .expect("playlist present");
-            pl.video_streams
-                .push(TSStreamInfo::new(SSIF_MVC_PID, TSStreamType::MVCVideo as u8));
+            pl.video_streams.push(TSStreamInfo::new(
+                SSIF_MVC_PID,
+                TSStreamType::MVCVideo as u8,
+            ));
         }
 
         refresh_ssif_derived_metadata(&mut disc, &bd);
@@ -2681,7 +2954,10 @@ mod tests {
         disc.playlists.push(pl);
 
         cache_estimated_stream_sizes(&mut disc);
-        assert_eq!(disc.playlists[0].video_streams[0].estimated_size, 100_000_000);
+        assert_eq!(
+            disc.playlists[0].video_streams[0].estimated_size,
+            100_000_000
+        );
     }
 
     // ====================================================================
@@ -2758,6 +3034,11 @@ mod tests {
         let a = dir.path().join("a");
         // directory_size excludes .ssif files.
         assert_eq!(directory_size(&a), 300);
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&a, a.join("sub/loop")).expect("create symlink loop");
+            assert_eq!(directory_size(&a), 300);
+        }
         // dir_has_files: 'a' has files; EmptyDir does not.
         assert!(dir_has_files(&a));
         assert!(!dir_has_files(&a.join("EmptyDir")));
@@ -2780,7 +3061,7 @@ mod tests {
         let dir = TempDir::new("meta");
         dir.write(
             "META/DL/bdmt_eng.xml",
-            b"<x><di:name>Nested Title</di:name></x>",
+            b"<x><di:title><di:name>Nested Title</di:name></di:title></x>",
         );
         let title = read_disc_title_native(&dir.path().join("META"));
         assert_eq!(title.as_deref(), Some("Nested Title"));

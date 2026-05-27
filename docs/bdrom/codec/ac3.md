@@ -26,5 +26,5 @@ Dolby Digital and Dolby Digital Plus parser, including partial Atmos/JOC detecti
 
 ## Open Issues
 
-- Release line coverage is 78.50%, below the 90% target. Missing coverage is concentrated in optional legacy AC3 skip fields, bsid-6 EX/headphone branches, dual-mono dependent paths, and the deeper EMDF/JOC payload configuration loop.
-- The current tests validate representative AC3 and E-AC3 frames, but they do not yet exercise enough of BDInfo's malformed/optional bitstream branches to make the "mirrors exactly" claim durable.
+- Not resolved in this pass: release line coverage remains 78.50% for this module, although the bdrom-focused coverage target is above 90% overall. I re-ran `cargo llvm-cov --release --lib` and confirmed the missed lines are still concentrated in optional legacy AC3 skip fields, bsid-6 EX/headphone branches, dual-mono dependent paths, and the deeper EMDF/JOC payload configuration loop.
+- I did not add synthetic vectors for those branches because doing so safely requires carefully hand-authoring several unusual AC3/E-AC3 bitstreams and validating expected BDInfo parity; rushing those fixtures would risk locking in incorrect parser behavior. The current tests still cover representative AC3 and E-AC3 frames plus robustness sweeps, but not enough malformed/optional branches to make the "mirrors exactly" claim fully regression-proof.

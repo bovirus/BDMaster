@@ -5,7 +5,7 @@
  * MPLS (Movie Playlist) parser. Port of TSPlaylistFile.cs Scan().
  */
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::path::Path;
 
 use super::types::*;
@@ -106,6 +106,18 @@ impl<'a> Reader<'a> {
         self.pos += len;
         Ok(s)
     }
+
+    fn seek(&mut self, pos: usize) -> Result<()> {
+        if pos > self.data.len() {
+            return Err(anyhow!("eof at {}", pos));
+        }
+        self.pos = pos;
+        Ok(())
+    }
+
+    fn skip(&mut self, len: usize) -> Result<()> {
+        self.seek(self.pos.saturating_add(len))
+    }
 }
 
 pub fn parse_mpls(path: &Path) -> Result<PlaylistFile> {
@@ -130,12 +142,12 @@ pub fn parse_mpls_bytes(name: String, data: &[u8]) -> Result<PlaylistFile> {
     let _extensions_offset = r.read_u32()? as usize;
 
     // misc flags @ 0x38
-    r.pos = 0x38;
+    r.seek(0x38)?;
     let misc_flags = r.read_u8()?;
     let mvc_base_view_r = (misc_flags & 0x10) != 0;
 
     // Playlist
-    r.pos = playlist_offset;
+    r.seek(playlist_offset)?;
     let _playlist_length = r.read_u32()?;
     let _reserved = r.read_u16()?;
     let item_count = r.read_u16()?;
@@ -152,16 +164,25 @@ pub fn parse_mpls_bytes(name: String, data: &[u8]) -> Result<PlaylistFile> {
         let _item_type = r.read_string(4)?;
 
         // skip 1 byte
-        r.pos += 1;
-        let multiangle = (data[r.pos] >> 4) & 0x01;
-        let _condition = data[r.pos] & 0x0F;
-        r.pos += 2;
+        r.skip(1)?;
+        let flags = r.read_u8()?;
+        let multiangle = (flags >> 4) & 0x01;
+        let _condition = flags & 0x0F;
+        r.skip(1)?;
 
         let in_time = r.read_u32()? as i64;
-        let in_time = if (in_time as i32) < 0 { in_time & 0x7FFFFFFF } else { in_time };
+        let in_time = if (in_time as i32) < 0 {
+            in_time & 0x7FFFFFFF
+        } else {
+            in_time
+        };
 
         let out_time = r.read_u32()? as i64;
-        let out_time = if (out_time as i32) < 0 { out_time & 0x7FFFFFFF } else { out_time };
+        let out_time = if (out_time as i32) < 0 {
+            out_time & 0x7FFFFFFF
+        } else {
+            out_time
+        };
 
         let stream_clip = PlaylistStreamClip {
             name: format!("{}.M2TS", item_name.trim_end_matches('\0')),
@@ -172,14 +193,14 @@ pub fn parse_mpls_bytes(name: String, data: &[u8]) -> Result<PlaylistFile> {
         stream_clips.push(stream_clip.clone());
 
         // skip 12 bytes
-        r.pos += 12;
+        r.skip(12)?;
         if multiangle > 0 {
-            let angles = data[r.pos] as i32;
-            r.pos += 2;
+            let angles = r.read_u8()? as i32;
+            r.skip(1)?;
             for angle in 0..(angles - 1).max(0) {
                 let angle_name = r.read_string(5)?;
                 let _angle_type = r.read_string(4)?;
-                r.pos += 1;
+                r.skip(1)?;
                 let angle_clip = PlaylistStreamClip {
                     name: format!("{}.M2TS", angle_name.trim_end_matches('\0')),
                     time_in: in_time,
@@ -195,7 +216,7 @@ pub fn parse_mpls_bytes(name: String, data: &[u8]) -> Result<PlaylistFile> {
 
         // STN_table
         let _stn_length = r.read_u16()?;
-        r.pos += 2;
+        r.skip(2)?;
         let stream_count_video = r.read_u8()? as i32;
         let stream_count_audio = r.read_u8()? as i32;
         let stream_count_pg = r.read_u8()? as i32;
@@ -203,43 +224,45 @@ pub fn parse_mpls_bytes(name: String, data: &[u8]) -> Result<PlaylistFile> {
         let stream_count_secondary_audio = r.read_u8()? as i32;
         let stream_count_secondary_video = r.read_u8()? as i32;
         let _stream_count_pip = r.read_u8()? as i32;
-        r.pos += 5;
+        r.skip(5)?;
+
+        let significant_clip = (out_time - in_time).max(0) > 450;
 
         for _ in 0..stream_count_video {
             if let Some(s) = create_stream(data, &mut r.pos)? {
-                add_unique(&mut playlist_streams, s);
+                add_stream_metadata(&mut playlist_streams, s, significant_clip);
             }
         }
         for _ in 0..stream_count_audio {
             if let Some(s) = create_stream(data, &mut r.pos)? {
-                add_unique(&mut playlist_streams, s);
+                add_stream_metadata(&mut playlist_streams, s, significant_clip);
             }
         }
         for _ in 0..stream_count_pg {
             if let Some(s) = create_stream(data, &mut r.pos)? {
-                add_unique(&mut playlist_streams, s);
+                add_stream_metadata(&mut playlist_streams, s, significant_clip);
             }
         }
         for _ in 0..stream_count_ig {
             if let Some(s) = create_stream(data, &mut r.pos)? {
-                add_unique(&mut playlist_streams, s);
+                add_stream_metadata(&mut playlist_streams, s, significant_clip);
             }
         }
         for _ in 0..stream_count_secondary_audio {
             let s = create_stream(data, &mut r.pos)?;
             // BDInfo skips the secondary-audio extension (pos += 2) after every
             // entry, whether or not a stream was produced.
-            r.pos += 2;
+            r.skip(2)?;
             if let Some(s) = s {
-                add_unique(&mut playlist_streams, s);
+                add_stream_metadata(&mut playlist_streams, s, significant_clip);
             }
         }
         for _ in 0..stream_count_secondary_video {
             let s = create_stream(data, &mut r.pos)?;
             // Likewise the secondary-video extension is always skipped (pos += 6).
-            r.pos += 6;
+            r.skip(6)?;
             if let Some(s) = s {
-                add_unique(&mut playlist_streams, s);
+                add_stream_metadata(&mut playlist_streams, s, significant_clip);
             }
         }
 
@@ -247,14 +270,14 @@ pub fn parse_mpls_bytes(name: String, data: &[u8]) -> Result<PlaylistFile> {
         let consumed = r.pos - item_start;
         let total = item_length + 2;
         if total > consumed {
-            r.pos += total - consumed;
+            r.skip(total - consumed)?;
         }
     }
 
     // Chapters
-    let mut chapters: Vec<f64> = Vec::new();
-    if chapters_offset + 4 <= data.len() {
-        r.pos = chapters_offset + 4;
+    let mut raw_chapters: Vec<(usize, u64)> = Vec::new();
+    if chapters_offset + 6 <= data.len() {
+        r.seek(chapters_offset + 4)?;
         let chapter_count = r.read_u16()? as usize;
         for _ in 0..chapter_count {
             if r.pos + 14 > data.len() {
@@ -267,12 +290,12 @@ pub fn parse_mpls_bytes(name: String, data: &[u8]) -> Result<PlaylistFile> {
                     | ((data[r.pos + 5] as u64) << 16)
                     | ((data[r.pos + 6] as u64) << 8)
                     | (data[r.pos + 7] as u64);
-                let secs = chapter_time as f64 / 45000.0;
-                chapters.push(secs);
+                raw_chapters.push((_stream_file_index as usize, chapter_time));
             }
-            r.pos += 14;
+            r.skip(14)?;
         }
     }
+    let chapters = playlist_relative_chapters(&stream_clips, &raw_chapters);
 
     Ok(PlaylistFile {
         name,
@@ -285,8 +308,12 @@ pub fn parse_mpls_bytes(name: String, data: &[u8]) -> Result<PlaylistFile> {
     })
 }
 
-fn add_unique(list: &mut Vec<PlaylistStream>, s: PlaylistStream) {
-    if !list.iter().any(|x| x.pid == s.pid) {
+fn add_stream_metadata(list: &mut Vec<PlaylistStream>, s: PlaylistStream, significant_clip: bool) {
+    if let Some(existing) = list.iter_mut().find(|x| x.pid == s.pid) {
+        if significant_clip && stream_metadata_score(&s) >= stream_metadata_score(existing) {
+            *existing = s;
+        }
+    } else {
         list.push(s);
     }
 }
@@ -298,7 +325,12 @@ fn create_stream(data: &[u8], pos: &mut usize) -> Result<Option<PlaylistStream>>
     let header_length = data[*pos] as usize;
     *pos += 1;
     let header_pos = *pos;
-    if header_pos >= data.len() {
+    let Some(header_end) = header_pos.checked_add(header_length) else {
+        *pos = data.len();
+        return Ok(None);
+    };
+    if header_pos >= data.len() || header_end > data.len() {
+        *pos = data.len();
         return Ok(None);
     }
     let header_type = data[*pos];
@@ -314,7 +346,9 @@ fn create_stream(data: &[u8], pos: &mut usize) -> Result<Option<PlaylistStream>>
             *pos += 2;
         }
         2 => {
-            *pos += 2; // subpathid + subclipid
+            if !checked_skip(pos, 2, data.len()) {
+                return Ok(None);
+            }
             if *pos + 2 > data.len() {
                 return Ok(None);
             }
@@ -322,7 +356,9 @@ fn create_stream(data: &[u8], pos: &mut usize) -> Result<Option<PlaylistStream>>
             *pos += 2;
         }
         3 => {
-            *pos += 1; // subpathid
+            if !checked_skip(pos, 1, data.len()) {
+                return Ok(None);
+            }
             if *pos + 2 > data.len() {
                 return Ok(None);
             }
@@ -330,7 +366,9 @@ fn create_stream(data: &[u8], pos: &mut usize) -> Result<Option<PlaylistStream>>
             *pos += 2;
         }
         4 => {
-            *pos += 2;
+            if !checked_skip(pos, 2, data.len()) {
+                return Ok(None);
+            }
             if *pos + 2 > data.len() {
                 return Ok(None);
             }
@@ -340,7 +378,7 @@ fn create_stream(data: &[u8], pos: &mut usize) -> Result<Option<PlaylistStream>>
         _ => {}
     }
 
-    *pos = header_pos + header_length;
+    *pos = header_end;
 
     if *pos >= data.len() {
         return Ok(None);
@@ -348,12 +386,22 @@ fn create_stream(data: &[u8], pos: &mut usize) -> Result<Option<PlaylistStream>>
     let stream_length = data[*pos] as usize;
     *pos += 1;
     let stream_pos = *pos;
-    if stream_pos >= data.len() {
+    let Some(stream_end) = stream_pos.checked_add(stream_length) else {
+        *pos = data.len();
+        return Ok(None);
+    };
+    if stream_pos >= data.len() || stream_end > data.len() {
+        *pos = data.len();
         return Ok(None);
     }
 
     let stream_type = TSStreamType::from_u8(data[*pos]);
     *pos += 1;
+
+    if stream_type == TSStreamType::MVCVideo {
+        *pos = stream_end;
+        return Ok(None);
+    }
 
     let mut stream = PlaylistStream::new(pid, stream_type);
 
@@ -405,7 +453,9 @@ fn create_stream(data: &[u8], pos: &mut usize) -> Result<Option<PlaylistStream>>
             }
         }
         TSStreamType::Subtitle => {
-            *pos += 1;
+            if !checked_skip(pos, 1, data.len()) {
+                return Ok(None);
+            }
             if *pos + 3 <= data.len() {
                 stream.language_code = String::from_utf8_lossy(&data[*pos..*pos + 3]).to_string();
                 *pos += 3;
@@ -414,9 +464,62 @@ fn create_stream(data: &[u8], pos: &mut usize) -> Result<Option<PlaylistStream>>
         _ => {}
     }
 
-    *pos = stream_pos + stream_length;
+    *pos = stream_end;
 
     Ok(Some(stream))
+}
+
+fn checked_skip(pos: &mut usize, amount: usize, len: usize) -> bool {
+    let Some(next) = pos.checked_add(amount) else {
+        *pos = len;
+        return false;
+    };
+    if next > len {
+        *pos = len;
+        return false;
+    }
+    *pos = next;
+    true
+}
+
+fn stream_metadata_score(s: &PlaylistStream) -> usize {
+    usize::from(s.video_format != TSVideoFormat::Unknown)
+        + usize::from(s.frame_rate != TSFrameRate::Unknown)
+        + usize::from(s.aspect_ratio != TSAspectRatio::Unknown)
+        + usize::from(s.channel_layout != TSChannelLayout::Unknown)
+        + usize::from(s.sample_rate_hz > 0)
+        + usize::from(!s.language_code.trim_end_matches('\0').is_empty())
+}
+
+fn playlist_relative_chapters(
+    clips: &[PlaylistStreamClip],
+    raw_chapters: &[(usize, u64)],
+) -> Vec<f64> {
+    let angle0: Vec<&PlaylistStreamClip> = clips.iter().filter(|c| c.angle_index == 0).collect();
+    let total_45k: i64 = angle0.iter().map(|c| (c.time_out - c.time_in).max(0)).sum();
+    let total_seconds = total_45k as f64 / 45000.0;
+
+    let mut chapters = Vec::new();
+    for &(stream_file_index, chapter_time) in raw_chapters {
+        let Some(clip) = angle0.get(stream_file_index).copied() else {
+            continue;
+        };
+        let prior_45k: i64 = angle0
+            .iter()
+            .take(stream_file_index)
+            .map(|c| (c.time_out - c.time_in).max(0))
+            .sum();
+        let relative_45k = prior_45k + chapter_time as i64 - clip.time_in;
+        if relative_45k < 0 {
+            continue;
+        }
+        let secs = relative_45k as f64 / 45000.0;
+        if total_seconds - secs < 1.0 {
+            continue;
+        }
+        chapters.push(secs);
+    }
+    chapters
 }
 
 #[cfg(test)]
@@ -573,11 +676,19 @@ mod tests {
         d.extend_from_slice(&[0u8; 5]); // reserved skip
 
         d.extend(stream_entry(1, 0x1011, &[0x1b, (6 << 4) | 1, 3 << 4])); // AVC video
-        d.extend(stream_entry(1, 0x1100, &[0x82, (6 << 4) | 1, b's', b'p', b'a'])); // DTS audio
+        d.extend(stream_entry(
+            1,
+            0x1100,
+            &[0x82, (6 << 4) | 1, b's', b'p', b'a'],
+        )); // DTS audio
         d.extend(stream_entry(2, 0x1200, &[0x90, b'e', b'n', b'g'])); // PG (header type 2)
         d.extend(stream_entry(3, 0x1201, &[0x92, 0x00, b'f', b'r', b'a'])); // subtitle (type 3)
         d.extend(stream_entry(4, 0x1400, &[0x91, b'j', b'p', b'n'])); // IG (type 4)
-        d.extend(stream_entry(1, 0x1A00, &[0x81, (1 << 4) | 1, b'd', b'e', b'u'])); // secondary audio
+        d.extend(stream_entry(
+            1,
+            0x1A00,
+            &[0x81, (1 << 4) | 1, b'd', b'e', b'u'],
+        )); // secondary audio
         d.extend_from_slice(&[0u8, 0u8]); // secondary-audio extension (+2)
         d.extend(stream_entry(1, 0x1B00, &[0x20, (6 << 4) | 1, 3 << 4])); // secondary video (MVC)
         d.extend_from_slice(&[0u8; 6]); // secondary-video extension (+6)
@@ -617,8 +728,9 @@ mod tests {
         assert_eq!(pl.stream_clips[0].name, "00002.M2TS");
         assert_eq!(pl.stream_clips[0].time_out, 9_000_000);
 
-        // video, audio, PG, subtitle, IG, secondary audio, secondary video.
-        assert_eq!(pl.playlist_streams.len(), 7);
+        // video, audio, PG, subtitle, IG, secondary audio. MPLS-declared MVC
+        // is skipped to mirror BDInfo's CreatePlaylistStream TODO.
+        assert_eq!(pl.playlist_streams.len(), 6);
         let by_pid = |pid: u16| pl.playlist_streams.iter().find(|s| s.pid == pid).unwrap();
         assert_eq!(by_pid(0x1011).stream_type, TSStreamType::AVCVideo);
         let dts = by_pid(0x1100);
@@ -626,15 +738,21 @@ mod tests {
         assert_eq!(dts.channel_layout, TSChannelLayout::Multi);
         assert_eq!(dts.sample_rate_hz, 48000);
         assert_eq!(dts.language_code, "spa");
-        assert_eq!(by_pid(0x1200).stream_type, TSStreamType::PresentationGraphics);
+        assert_eq!(
+            by_pid(0x1200).stream_type,
+            TSStreamType::PresentationGraphics
+        );
         assert_eq!(by_pid(0x1200).language_code, "eng");
         assert_eq!(by_pid(0x1201).stream_type, TSStreamType::Subtitle);
         assert_eq!(by_pid(0x1201).language_code, "fra");
-        assert_eq!(by_pid(0x1400).stream_type, TSStreamType::InteractiveGraphics);
+        assert_eq!(
+            by_pid(0x1400).stream_type,
+            TSStreamType::InteractiveGraphics
+        );
         assert_eq!(by_pid(0x1400).language_code, "jpn");
         assert_eq!(by_pid(0x1A00).stream_type, TSStreamType::AC3Audio);
         assert_eq!(by_pid(0x1A00).channel_layout, TSChannelLayout::Mono);
-        assert_eq!(by_pid(0x1B00).stream_type, TSStreamType::MVCVideo);
+        assert!(pl.playlist_streams.iter().all(|s| s.pid != 0x1B00));
 
         // Only the type-1 chapter survives.
         assert_eq!(pl.chapters.len(), 1);
@@ -691,6 +809,97 @@ mod tests {
         assert_eq!(pl.stream_clips[1].name, "00101.M2TS");
         assert_eq!(pl.stream_clips[2].angle_index, 2);
         assert_eq!(pl.playlist_streams.len(), 0);
+    }
+
+    #[test]
+    fn duplicate_pid_metadata_uses_later_significant_richer_stream() {
+        let mut list = vec![PlaylistStream {
+            pid: 0x1100,
+            stream_type: TSStreamType::AC3Audio,
+            video_format: TSVideoFormat::Unknown,
+            frame_rate: TSFrameRate::Unknown,
+            aspect_ratio: TSAspectRatio::Unknown,
+            channel_layout: TSChannelLayout::Unknown,
+            sample_rate_hz: 0,
+            language_code: String::new(),
+        }];
+
+        let richer = PlaylistStream {
+            pid: 0x1100,
+            stream_type: TSStreamType::AC3Audio,
+            video_format: TSVideoFormat::Unknown,
+            frame_rate: TSFrameRate::Unknown,
+            aspect_ratio: TSAspectRatio::Unknown,
+            channel_layout: TSChannelLayout::Multi,
+            sample_rate_hz: 48_000,
+            language_code: "eng".to_string(),
+        };
+        add_stream_metadata(&mut list, richer, true);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].language_code, "eng");
+        assert_eq!(list[0].sample_rate_hz, 48_000);
+
+        let poorer = PlaylistStream {
+            pid: 0x1100,
+            stream_type: TSStreamType::AC3Audio,
+            video_format: TSVideoFormat::Unknown,
+            frame_rate: TSFrameRate::Unknown,
+            aspect_ratio: TSAspectRatio::Unknown,
+            channel_layout: TSChannelLayout::Unknown,
+            sample_rate_hz: 0,
+            language_code: "fra".to_string(),
+        };
+        add_stream_metadata(&mut list, poorer, true);
+        assert_eq!(list[0].language_code, "eng");
+
+        let insignificant = PlaylistStream {
+            pid: 0x1100,
+            stream_type: TSStreamType::AC3Audio,
+            video_format: TSVideoFormat::Unknown,
+            frame_rate: TSFrameRate::Unknown,
+            aspect_ratio: TSAspectRatio::Unknown,
+            channel_layout: TSChannelLayout::Combo,
+            sample_rate_hz: 192_000,
+            language_code: "jpn".to_string(),
+        };
+        add_stream_metadata(&mut list, insignificant, false);
+        assert_eq!(list[0].language_code, "eng");
+    }
+
+    #[test]
+    fn chapters_are_playlist_relative_and_final_marks_are_dropped() {
+        let clips = vec![
+            PlaylistStreamClip {
+                name: "00001.M2TS".to_string(),
+                time_in: 0,
+                time_out: 450_000,
+                angle_index: 0,
+            },
+            PlaylistStreamClip {
+                name: "00002.M2TS".to_string(),
+                time_in: 900_000,
+                time_out: 1_800_000,
+                angle_index: 0,
+            },
+            PlaylistStreamClip {
+                name: "00003.M2TS".to_string(),
+                time_in: 0,
+                time_out: 1_000_000,
+                angle_index: 1,
+            },
+        ];
+        let chapters = playlist_relative_chapters(
+            &clips,
+            &[
+                (0, 90_000),    // 2 seconds into first clip.
+                (1, 1_125_000), // 5 seconds into second clip, after 10s first clip.
+                (1, 1_780_000), // Less than 1 second from playlist end -> drop.
+                (4, 0),         // Invalid stream-file index -> drop.
+            ],
+        );
+        assert_eq!(chapters.len(), 2);
+        assert!((chapters[0] - 2.0).abs() < 1e-6);
+        assert!((chapters[1] - 15.0).abs() < 1e-6);
     }
 
     #[test]

@@ -18,12 +18,9 @@ Dolby TrueHD parser with embedded AC3 core fallback. This corresponds to BDInfo'
 - The peak-bit-depth divisor is guarded with `max(1)`, so an all-zero header cannot produce a divide-by-zero (a small robustness improvement over the raw C# arithmetic).
 - Tests cover the AC3 core fallback, the empty-buffer case, the TrueHD sync path (sample rate, channels, LFE, derived bit depth), and a garbage-input robustness sweep.
 
-## Parity Notes (mirrors BDInfo exactly)
+## Parity Notes
 
 - BDInfo's TrueHD-metadata dialnorm copy is commented out in `TSCodecTrueHD.cs` (its own `// TODO: Get THD dialnorm from metadata`); the same block is preserved here as a comment, so neither implementation copies core dialnorm.
 - A TrueHD sync seen before the AC3 core initializes leaves the parent uninitialized until a later core parse — BDInfo's identical two-call pattern.
 - Extension parsing only flags whether extension content exists (no Atmos classification) and there is no validation of impossible channel/sample-rate combinations, matching upstream.
-
-## Open Issues
-
-- The peak-bit-depth divisor is guarded with `max(1)`, which is a robustness improvement over BDInfo's raw arithmetic. Decide whether this malformed-input behavior should remain as an intentional parity exception or be changed/documented outside the "mirrors exactly" claim.
+- The peak-bit-depth divisor intentionally keeps the local `max(1)` guard. I reviewed changing it back to BDInfo's raw arithmetic, but preserving the guard avoids malformed all-zero headers producing divide-by-zero behavior while leaving valid TrueHD streams unchanged; this is now documented as a robustness parity exception rather than claiming exact malformed-input parity.

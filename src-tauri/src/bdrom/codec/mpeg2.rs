@@ -10,6 +10,7 @@
  */
 
 use super::stream_buffer::TSStreamBuffer;
+#[cfg(debug_assertions)]
 use crate::bdrom::types::TSAspectRatio;
 use crate::protocol::TSStreamInfo;
 
@@ -20,10 +21,10 @@ pub fn scan(stream: &mut TSStreamInfo, buffer: &mut TSStreamBuffer) {
     let mut extension_parse: u32 = 0;
     let mut sequence_extension_parse: u32 = 0;
 
-    let debug_mode = cfg!(debug_assertions);
-
     for _ in 0..buffer.len() {
-        parse = parse.wrapping_shl(8).wrapping_add(buffer.read_byte_default() as u32);
+        parse = parse
+            .wrapping_shl(8)
+            .wrapping_add(buffer.read_byte_default() as u32);
 
         if parse == 0x00000100 {
             picture_parse = 2;
@@ -32,57 +33,64 @@ pub fn scan(stream: &mut TSStreamInfo, buffer: &mut TSStreamBuffer) {
         } else if sequence_header_parse > 0 {
             sequence_header_parse -= 1;
             match sequence_header_parse {
-                4 if debug_mode => {
-                    stream.width = (parse & 0xFFF000) >> 12;
-                    stream.height = parse & 0xFFF;
+                4 => {
+                    #[cfg(debug_assertions)]
+                    {
+                        stream.width = (parse & 0xFFF000) >> 12;
+                        stream.height = parse & 0xFFF;
+                    }
                 }
-                3 if debug_mode => {
-                    let ar = ((parse & 0xF0) >> 4) as u8;
-                    let aspect = TSAspectRatio::from_u8(ar);
-                    stream.aspect_ratio = aspect.label().to_string();
-                    stream.aspect_ratio_code = ar as u32;
+                3 => {
+                    #[cfg(debug_assertions)]
+                    {
+                        let ar = ((parse & 0xF0) >> 4) as u8;
+                        let aspect = TSAspectRatio::from_u8(ar);
+                        stream.aspect_ratio = aspect.label().to_string();
+                        stream.aspect_ratio_code = ar as u32;
 
-                    match parse & 0xF {
-                        1 => {
-                            stream.frame_rate_enumerator = 24000;
-                            stream.frame_rate_denominator = 1001;
-                        }
-                        2 => {
-                            stream.frame_rate_enumerator = 24000;
-                            stream.frame_rate_denominator = 1000;
-                        }
-                        3 => {
-                            stream.frame_rate_enumerator = 25000;
-                            stream.frame_rate_denominator = 1000;
-                        }
-                        4 => {
-                            stream.frame_rate_enumerator = 30000;
-                            stream.frame_rate_denominator = 1001;
-                        }
-                        5 => {
-                            stream.frame_rate_enumerator = 30000;
-                            stream.frame_rate_denominator = 1000;
-                        }
-                        6 => {
-                            stream.frame_rate_enumerator = 50000;
-                            stream.frame_rate_denominator = 1000;
-                        }
-                        7 => {
-                            stream.frame_rate_enumerator = 60000;
-                            stream.frame_rate_denominator = 1001;
-                        }
-                        8 => {
-                            stream.frame_rate_enumerator = 60000;
-                            stream.frame_rate_denominator = 1000;
-                        }
-                        _ => {
-                            stream.frame_rate_enumerator = 0;
-                            stream.frame_rate_denominator = 0;
+                        match parse & 0xF {
+                            1 => {
+                                stream.frame_rate_enumerator = 24000;
+                                stream.frame_rate_denominator = 1001;
+                            }
+                            2 => {
+                                stream.frame_rate_enumerator = 24000;
+                                stream.frame_rate_denominator = 1000;
+                            }
+                            3 => {
+                                stream.frame_rate_enumerator = 25000;
+                                stream.frame_rate_denominator = 1000;
+                            }
+                            4 => {
+                                stream.frame_rate_enumerator = 30000;
+                                stream.frame_rate_denominator = 1001;
+                            }
+                            5 => {
+                                stream.frame_rate_enumerator = 30000;
+                                stream.frame_rate_denominator = 1000;
+                            }
+                            6 => {
+                                stream.frame_rate_enumerator = 50000;
+                                stream.frame_rate_denominator = 1000;
+                            }
+                            7 => {
+                                stream.frame_rate_enumerator = 60000;
+                                stream.frame_rate_denominator = 1001;
+                            }
+                            8 => {
+                                stream.frame_rate_enumerator = 60000;
+                                stream.frame_rate_denominator = 1000;
+                            }
+                            _ => {
+                                stream.frame_rate_enumerator = 0;
+                                stream.frame_rate_denominator = 0;
+                            }
                         }
                     }
                 }
                 0 => {
-                    if debug_mode {
+                    #[cfg(debug_assertions)]
+                    {
                         stream.bit_rate = ((parse & 0xFFFFC0) >> 6) as u64 * 200;
                     }
                     stream.is_vbr = true;
@@ -107,9 +115,12 @@ pub fn scan(stream: &mut TSStreamInfo, buffer: &mut TSStreamBuffer) {
             }
         } else if sequence_extension_parse > 0 {
             sequence_extension_parse -= 1;
-            if sequence_extension_parse == 0 && debug_mode {
-                let sequence_extension = (parse & 0x8) >> 3;
-                stream.is_interlaced = sequence_extension == 0;
+            if sequence_extension_parse == 0 {
+                #[cfg(debug_assertions)]
+                {
+                    let sequence_extension = (parse & 0x8) >> 3;
+                    stream.is_interlaced = sequence_extension == 0;
+                }
             }
         }
     }
@@ -160,11 +171,14 @@ mod tests {
         let mut stream = mpeg2_stream();
         let mut buffer = TSStreamBuffer::new(&data);
         scan(&mut stream, &mut buffer);
-        if cfg!(debug_assertions) {
+        #[cfg(debug_assertions)]
+        {
             // Debug builds additionally populate dimensions from the ES.
             assert_eq!(stream.width, 1920);
             assert_eq!(stream.height, 1080);
-        } else {
+        }
+        #[cfg(not(debug_assertions))]
+        {
             // Release matches BDInfo's `#undef DEBUG`: dimensions stay unset.
             assert_eq!(stream.width, 0);
             assert_eq!(stream.height, 0);
@@ -180,12 +194,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     fn frame_rate_and_aspect_codes() {
-        // These elementary-stream fields are only populated in debug builds
-        // (mirroring BDInfo's `#undef DEBUG`); skip the assertions in release.
-        if !cfg!(debug_assertions) {
-            return;
-        }
+        // These elementary-stream fields are only populated in debug builds,
+        // mirroring BDInfo's `#undef DEBUG` release behavior.
         let cases = [
             (1u8, 24000u32, 1001u32),
             (2, 24000, 1000),
@@ -199,7 +211,17 @@ mod tests {
         for (code, num, den) in cases {
             // 4th byte after B3 carries aspect (high nibble) + frame-rate (low).
             let data = vec![
-                0x00, 0x00, 0x01, 0xB3, 0x78, 0x04, 0x38, (3 << 4) | code, 0x12, 0x34, 0x56,
+                0x00,
+                0x00,
+                0x01,
+                0xB3,
+                0x78,
+                0x04,
+                0x38,
+                (3 << 4) | code,
+                0x12,
+                0x34,
+                0x56,
             ];
             let mut stream = mpeg2_stream();
             let mut buffer = TSStreamBuffer::new(&data);
@@ -240,7 +262,8 @@ mod tests {
         scan(&mut stream, &mut buffer);
         assert!(stream.is_initialized);
         assert!(stream.is_vbr);
-        if cfg!(debug_assertions) {
+        #[cfg(debug_assertions)]
+        {
             assert_eq!(stream.width, 1920);
             assert_eq!(stream.height, 1080);
             assert!(stream.is_interlaced);

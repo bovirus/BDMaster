@@ -28,6 +28,6 @@ M2TS/MPEG-TS packet scanner for Blu-ray 192-byte BDAV packets. This is a pragmat
 
 ## Open Issues
 
-- BDInfo's PTS/DTS parser, per-stream `PacketSeconds`, PTS-window bitrate accounting, and `TSStreamDiagnostics` output are still absent. This is the largest remaining M2TS/full-scan parity gap.
-- PAT/PMT PSI is not reassembled across TS packets and table CRCs, continuity counters, transport-error/scrambling flags, and descriptor payloads are not validated or interpreted. Streams with unusual but legal PSI layout can diverge from BDInfo.
-- `scan_m2ts` and `scan_m2ts_streaming_from_reader` duplicate packet parsing logic. Future parity fixes must be applied to both paths or the quick-scan/sample path and streaming/full-scan path can drift.
+- Not resolved in this pass: BDInfo's PTS/DTS parser, per-stream `PacketSeconds`, PTS-window bitrate accounting, and `TSStreamDiagnostics` output are still absent. I reviewed this while checking the full-scan issues, but implementing it would require a new shared PTS/frame model consumed by both quick scan and full scan; this remains the largest M2TS/full-scan parity gap.
+- Not resolved in this pass: PAT/PMT PSI is not reassembled across TS packets and table CRCs, continuity counters, transport-error/scrambling flags, and descriptor payloads are not validated or interpreted. I did not attempt this because it changes core packet parsing behavior and needs legal fragmented-PSI fixtures; streams with unusual but legal PSI layout can still diverge from BDInfo.
+- Not resolved in this pass: `scan_m2ts` and `scan_m2ts_streaming_from_reader` still duplicate packet parsing logic. I left the structure unchanged because merging them safely would be a broader refactor touching quick-scan samples, full-scan progress, and PES callback behavior; future parity fixes still need to be applied to both paths.

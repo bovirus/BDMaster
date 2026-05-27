@@ -12,15 +12,10 @@ MPEG-2 video elementary-stream parser. This corresponds to BDInfo's `TSCodecMPEG
 
 - Scans for picture start, sequence header, and extension start codes.
 - Marks the stream VBR and initialized after a sequence header is processed — the only effect present in BDInfo's shipping build.
-- In debug builds, additionally fills width, height, aspect ratio, frame rate, bit rate, and the interlace flag from the elementary stream. In release builds this extraction is gated off to match BDInfo's `#undef DEBUG`.
-- Tests verify the always-on initialization behavior, the profile-gated dimension extraction (asserting both debug and release outcomes), the empty-buffer case, and garbage-input robustness.
+- In debug builds, additionally fills width, height, aspect ratio, frame rate, bit rate, and the interlace flag from the elementary stream. In release builds this extraction is compile-gated out to match BDInfo's `#undef DEBUG` and keep release coverage focused on reachable code.
+- Tests verify the always-on initialization behavior, the profile-gated dimension extraction (asserting both debug and release outcomes), the empty-buffer case, and garbage-input robustness. Release line coverage is now 99.35%.
 
 ## Parity Notes (mirrors BDInfo exactly)
 
-- BDInfo's `TSCodecMPEG2.cs` begins with `#undef DEBUG`, so in the shipping binary it only sets VBR + initialized and relies on MPLS metadata for dimensions/aspect/frame rate. The release build here reproduces that exactly; the debug-only extraction is an additive developer aid and is fully covered by a profile-aware test, so there is no test surprise.
+- BDInfo's `TSCodecMPEG2.cs` begins with `#undef DEBUG`, so in the shipping binary it only sets VBR + initialized and relies on MPLS metadata for dimensions/aspect/frame rate. The release build here reproduces that exactly; the debug-only extraction is an additive developer aid compiled only into debug builds.
 - GOP headers, chroma format, profile/level, VBV, closed captions, frame-type diagnostics, frame reorder, and per-frame bitrate are not parsed in either implementation.
-
-## Open Issues
-
-- Release line coverage is 53.11%, below the 90% target, because the debug-only elementary-stream extraction remains present in release coverage but cannot execute when `cfg!(debug_assertions)` is false.
-- The coverage story and the parity story conflict here: release behavior matches BDInfo's `#undef DEBUG`, but the unreachable debug-mode lines make the module fail a release-profile coverage gate unless they are compile-gated, excluded, or covered in a separate debug-profile report.
