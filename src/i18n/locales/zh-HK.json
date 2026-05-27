@@ -124,7 +124,18 @@
     "remaining": "剩餘",
     "reportCopied": "報告已複製到剪貼簿。",
     "savedTo": "已儲存到 {{path}}",
-    "outputDirNotWritable": "輸出資料夾無法寫入：{{path}}"
+    "outputDirNotWritable": "輸出資料夾無法寫入：{{path}}",
+    "stream": "串流",
+    "index": "索引",
+    "id": "ID",
+    "time": "時間",
+    "peak": "峰值",
+    "average": "平均",
+    "samples": "樣本",
+    "noBitRateData": "沒有位元率資料。",
+    "window1Sec": "1 秒",
+    "window5Sec": "5 秒",
+    "window10Sec": "10 秒"
   },
   "settings": {
     "title": "設定",
@@ -239,5 +250,8 @@
     "kbps": "kbps",
     "mbps": "Mbps",
     "application": "應用程式"
+  },
+  "common": {
+    "loading": "載入中…"
   }
 }

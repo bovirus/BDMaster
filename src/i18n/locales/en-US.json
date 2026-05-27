@@ -124,7 +124,18 @@
     "remaining": "Remaining",
     "reportCopied": "Report copied to clipboard.",
     "savedTo": "Saved to {{path}}",
-    "outputDirNotWritable": "The output folder is not writable: {{path}}"
+    "outputDirNotWritable": "The output folder is not writable: {{path}}",
+    "stream": "Stream",
+    "index": "Index",
+    "id": "ID",
+    "time": "Time",
+    "peak": "Peak",
+    "average": "Average",
+    "samples": "samples",
+    "noBitRateData": "No bitrate data.",
+    "window1Sec": "1 sec",
+    "window5Sec": "5 sec",
+    "window10Sec": "10 sec"
   },
   "settings": {
     "title": "Settings",
@@ -239,5 +250,8 @@
     "kbps": "kbps",
     "mbps": "Mbps",
     "application": "Application"
+  },
+  "common": {
+    "loading": "Loading…"
   }
 }

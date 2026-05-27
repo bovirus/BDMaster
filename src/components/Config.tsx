@@ -294,7 +294,7 @@ export default function Config() {
   }, [draft?.integration?.betterMediaInfo?.path]);
 
   if (!draft) {
-    return <Box sx={{ p: 2 }}>Loading…</Box>;
+    return <Box sx={{ p: 2 }}>{t("common.loading")}</Box>;
   }
 
   const updateDraft = (patch: Partial<Protocol.Config>) => {

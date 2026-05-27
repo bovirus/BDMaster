@@ -124,7 +124,18 @@
     "remaining": "Verbleibend",
     "reportCopied": "Bericht wurde in die Zwischenablage kopiert.",
     "savedTo": "Gespeichert unter {{path}}",
-    "outputDirNotWritable": "Der Ausgabeordner ist nicht beschreibbar: {{path}}"
+    "outputDirNotWritable": "Der Ausgabeordner ist nicht beschreibbar: {{path}}",
+    "stream": "Stream",
+    "index": "Index",
+    "id": "ID",
+    "time": "Zeit",
+    "peak": "Spitze",
+    "average": "Durchschnitt",
+    "samples": "Stichproben",
+    "noBitRateData": "Keine Bitratendaten.",
+    "window1Sec": "1 Sek.",
+    "window5Sec": "5 Sek.",
+    "window10Sec": "10 Sek."
   },
   "settings": {
     "title": "Einstellungen",
@@ -239,5 +250,8 @@
     "kbps": "kbps",
     "mbps": "Mbps",
     "application": "Anwendung"
+  },
+  "common": {
+    "loading": "Wird geladen…"
   }
 }

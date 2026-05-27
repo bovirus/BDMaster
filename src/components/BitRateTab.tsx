@@ -150,6 +150,11 @@ function BitRateChart({ playlistName, data }: { playlistName: string; data: Char
     const gridColor = theme.palette.divider;
     const axisFormatter = (value: number) => formatLengthSeconds(value * 60);
     const bitrateFormatter = (value: number) => `${trimChartNumber(value)} Mbps`;
+    // Window labels double as ECharts series names and legend keys, so compute
+    // them once and reuse to keep the (translated) strings in sync.
+    const oneSecLabel = t("disc.window1Sec");
+    const fiveSecLabel = t("disc.window5Sec");
+    const tenSecLabel = t("disc.window10Sec");
 
     return {
       backgroundColor: "transparent",
@@ -170,9 +175,9 @@ function BitRateChart({ playlistName, data }: { playlistName: string; data: Char
         top: 0,
         textStyle: { color: textColor },
         selected: {
-          "1 sec": true,
-          "5 sec": false,
-          "10 sec": false,
+          [oneSecLabel]: true,
+          [fiveSecLabel]: false,
+          [tenSecLabel]: false,
         },
       },
       toolbox: {
@@ -215,7 +220,7 @@ function BitRateChart({ playlistName, data }: { playlistName: string; data: Char
       },
       xAxis: {
         type: "value",
-        name: "Time",
+        name: t("disc.time"),
         nameLocation: "middle",
         nameGap: 34,
         min: 0,
@@ -254,28 +259,28 @@ function BitRateChart({ playlistName, data }: { playlistName: string; data: Char
         },
       ],
       series: [
-        chartSeries("1 sec", seriesData.one),
-        chartSeries("5 sec", seriesData.five),
-        chartSeries("10 sec", seriesData.ten),
+        chartSeries(oneSecLabel, seriesData.one),
+        chartSeries(fiveSecLabel, seriesData.five),
+        chartSeries(tenSecLabel, seriesData.ten),
       ],
     };
   }, [handleSaveChart, seriesData, stats.duration, t, theme]);
 
   if (data.length === 0) {
-    return <Typography variant="body2">No bitrate data.</Typography>;
+    return <Typography variant="body2">{t("disc.noBitRateData")}</Typography>;
   }
 
   if (sortedData.length === 0) {
-    return <Typography variant="body2">No bitrate data.</Typography>;
+    return <Typography variant="body2">{t("disc.noBitRateData")}</Typography>;
   }
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1, height: "100%", minHeight: 360 }}>
       <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
-        <Chip size="small" label={`Peak ${formatBitRate(stats.peak)}`} />
-        <Chip size="small" label={`Average ${formatBitRate(stats.average)}`} />
-        <Chip size="small" label={`Length ${formatLengthSeconds(stats.duration)}`} />
-        <Chip size="small" label={`${sortedData.length.toLocaleString()} samples`} />
+        <Chip size="small" label={`${t("disc.peak")} ${formatBitRate(stats.peak)}`} />
+        <Chip size="small" label={`${t("disc.average")} ${formatBitRate(stats.average)}`} />
+        <Chip size="small" label={`${t("disc.length")} ${formatLengthSeconds(stats.duration)}`} />
+        <Chip size="small" label={`${sortedData.length.toLocaleString()} ${t("disc.samples")}`} />
       </Stack>
       <Box sx={{ flex: 1, minHeight: 0 }}>
         <ReactECharts

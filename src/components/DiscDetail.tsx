@@ -763,7 +763,7 @@ export default function DiscDetail() {
   };
 
   if (!disc) {
-    return <Box sx={{ p: 2 }}>Loading…</Box>;
+    return <Box sx={{ p: 2 }}>{t("common.loading")}</Box>;
   }
 
   return (
@@ -1493,7 +1493,7 @@ function StreamClipTable({
               direction={sortDir}
               onSort={() => onSort("name")}
             >
-              Stream
+              {t("disc.stream")}
             </SortableHeaderCell>
             <SortableHeaderCell
               active={sortKey === "index"}
@@ -1501,14 +1501,14 @@ function StreamClipTable({
               onSort={() => onSort("index")}
               align="right"
             >
-              Index
+              {t("disc.index")}
             </SortableHeaderCell>
             <SortableHeaderCell
               active={sortKey === "length"}
               direction={sortDir}
               onSort={() => onSort("length")}
             >
-              Length
+              {t("disc.length")}
             </SortableHeaderCell>
             <SortableHeaderCell
               active={sortKey === "fileSize"}
@@ -1516,7 +1516,7 @@ function StreamClipTable({
               onSort={() => onSort("fileSize")}
               align="right"
             >
-              Estimated Size
+              {t("disc.estimatedSize")}
             </SortableHeaderCell>
             <SortableHeaderCell
               active={sortKey === "measuredSize"}
@@ -1524,7 +1524,7 @@ function StreamClipTable({
               onSort={() => onSort("measuredSize")}
               align="right"
             >
-              Measured Size
+              {t("disc.measuredSize")}
             </SortableHeaderCell>
             {showActionsColumn && (
               <TableCell align="center" sx={{ fontWeight: "bold" }}>
@@ -1661,13 +1661,13 @@ function TrackTable({
       <Table size="small" stickyHeader>
         <TableHead>
           <TableRow>
-            <TableCell sx={{ fontWeight: "bold" }}>ID</TableCell>
-            <TableCell sx={{ fontWeight: "bold" }}>Codec</TableCell>
-            <TableCell sx={{ fontWeight: "bold" }}>Language</TableCell>
-            <TableCell sx={{ fontWeight: "bold" }} align="right">Bit Rate</TableCell>
-            <TableCell sx={{ fontWeight: "bold" }}>Description</TableCell>
+            <TableCell sx={{ fontWeight: "bold" }}>{t("disc.id")}</TableCell>
+            <TableCell sx={{ fontWeight: "bold" }}>{t("disc.codec")}</TableCell>
+            <TableCell sx={{ fontWeight: "bold" }}>{t("disc.language")}</TableCell>
+            <TableCell sx={{ fontWeight: "bold" }} align="right">{t("disc.bitRate")}</TableCell>
+            <TableCell sx={{ fontWeight: "bold" }}>{t("disc.description")}</TableCell>
             <TableCell sx={{ fontWeight: "bold" }} align="right">{t("disc.estimatedSize")}</TableCell>
-            <TableCell sx={{ fontWeight: "bold" }} align="right">Measured Size</TableCell>
+            <TableCell sx={{ fontWeight: "bold" }} align="right">{t("disc.measuredSize")}</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>

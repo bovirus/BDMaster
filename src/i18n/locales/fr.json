@@ -124,7 +124,18 @@
     "remaining": "Restant",
     "reportCopied": "Rapport copié dans le presse-papiers.",
     "savedTo": "Enregistré dans {{path}}",
-    "outputDirNotWritable": "Le dossier de sortie n’est pas accessible en écriture : {{path}}"
+    "outputDirNotWritable": "Le dossier de sortie n’est pas accessible en écriture : {{path}}",
+    "stream": "Flux",
+    "index": "Index",
+    "id": "ID",
+    "time": "Temps",
+    "peak": "Crête",
+    "average": "Moyenne",
+    "samples": "échantillons",
+    "noBitRateData": "Aucune donnée de débit.",
+    "window1Sec": "1 s",
+    "window5Sec": "5 s",
+    "window10Sec": "10 s"
   },
   "settings": {
     "title": "Paramètres",
@@ -239,5 +250,8 @@
     "kbps": "kbps",
     "mbps": "Mbps",
     "application": "Application"
+  },
+  "common": {
+    "loading": "Chargement…"
   }
 }

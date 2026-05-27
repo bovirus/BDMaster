@@ -124,7 +124,18 @@
     "remaining": "Restante",
     "reportCopied": "Informe copiado al portapapeles.",
     "savedTo": "Guardado en {{path}}",
-    "outputDirNotWritable": "La carpeta de salida no admite escritura: {{path}}"
+    "outputDirNotWritable": "La carpeta de salida no admite escritura: {{path}}",
+    "stream": "Flujo",
+    "index": "Índice",
+    "id": "ID",
+    "time": "Tiempo",
+    "peak": "Pico",
+    "average": "Promedio",
+    "samples": "muestras",
+    "noBitRateData": "Sin datos de tasa de bits.",
+    "window1Sec": "1 s",
+    "window5Sec": "5 s",
+    "window10Sec": "10 s"
   },
   "settings": {
     "title": "Configuración",
@@ -239,5 +250,8 @@
     "kbps": "kbps",
     "mbps": "Mbps",
     "application": "Aplicación"
+  },
+  "common": {
+    "loading": "Cargando…"
   }
 }

@@ -124,7 +124,18 @@
     "remaining": "残り",
     "reportCopied": "レポートをクリップボードにコピーしました。",
     "savedTo": "{{path}} に保存しました",
-    "outputDirNotWritable": "出力フォルダーに書き込めません：{{path}}"
+    "outputDirNotWritable": "出力フォルダーに書き込めません：{{path}}",
+    "stream": "ストリーム",
+    "index": "インデックス",
+    "id": "ID",
+    "time": "時間",
+    "peak": "ピーク",
+    "average": "平均",
+    "samples": "サンプル",
+    "noBitRateData": "ビットレートデータがありません。",
+    "window1Sec": "1秒",
+    "window5Sec": "5秒",
+    "window10Sec": "10秒"
   },
   "settings": {
     "title": "設定",
@@ -239,5 +250,8 @@
     "kbps": "kbps",
     "mbps": "Mbps",
     "application": "アプリケーション"
+  },
+  "common": {
+    "loading": "読み込み中…"
   }
 }

@@ -124,7 +124,18 @@
     "remaining": "Rimanente",
     "reportCopied": "Rapporto copiato negli appunti.",
     "savedTo": "Salvato in {{path}}",
-    "outputDirNotWritable": "La cartella di output non è scrivibile: {{path}}"
+    "outputDirNotWritable": "La cartella di output non è scrivibile: {{path}}",
+    "stream": "Flusso",
+    "index": "Indice",
+    "id": "ID",
+    "time": "Tempo",
+    "peak": "Picco",
+    "average": "Media",
+    "samples": "campioni",
+    "noBitRateData": "Nessun dato sul bitrate.",
+    "window1Sec": "1 s",
+    "window5Sec": "5 s",
+    "window10Sec": "10 s"
   },
   "settings": {
     "title": "Impostazioni",
@@ -239,5 +250,8 @@
     "kbps": "kbps",
     "mbps": "Mbps",
     "application": "Applicazione"
+  },
+  "common": {
+    "loading": "Caricamento…"
   }
 }
