@@ -102,6 +102,20 @@ async fn write_binary_file(file: String, bytes: Vec<u8>) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn check_output_path_writable(path: String) -> Result<bool, String> {
+    controller::check_output_path_writable(path)
+        .await
+        .map_err(convert_error)
+}
+
+#[tauri::command]
+async fn output_path_exists(path: String) -> Result<bool, String> {
+    controller::output_path_exists(path)
+        .await
+        .map_err(convert_error)
+}
+
+#[tauri::command]
 async fn is_mkvtoolnix_found(
     path: String,
     check_running: bool,
@@ -372,6 +386,8 @@ pub fn run() {
             get_scan_progress,
             write_text_file,
             write_binary_file,
+            check_output_path_writable,
+            output_path_exists,
             is_mkvtoolnix_found,
             open_playlist_in_mkvtoolnix_gui,
             open_stream_file_in_mkvtoolnix_gui,

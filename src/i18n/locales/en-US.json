@@ -84,6 +84,8 @@
     "outputPath": "Output path",
     "changeOutputPathTooltip": "Click to change the output path.",
     "selectOutputPath": "Select Output Path",
+    "outputPathDoesNotExist": "The output path doesn't exist. It will be created.",
+    "outputPathNotWritable": "The output path is not writable. Please choose another path.",
     "browse": "Browse",
     "ok": "OK",
     "cancel": "Cancel",

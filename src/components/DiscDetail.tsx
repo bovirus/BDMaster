@@ -43,6 +43,8 @@ import {
   startFullScan,
   cancelFullScan,
   getScanProgress,
+  checkOutputPathWritable,
+  outputPathExists,
   isBetterMediaInfoFound,
   isMkvtoolnixFound,
   isMpcHcFound,
@@ -218,6 +220,9 @@ export default function DiscDetail() {
   const [mkvToolNixToPath, setMkvToolNixToPath] = useState("");
   const [outputPathDialogOpen, setOutputPathDialogOpen] = useState(false);
   const [outputPathDraft, setOutputPathDraft] = useState("");
+  const [outputPathMissing, setOutputPathMissing] = useState(false);
+  const [outputPathWritable, setOutputPathWritable] = useState(true);
+  const [outputPathChecking, setOutputPathChecking] = useState(false);
 
   // Probe whether mkvtoolnix-gui is reachable at the configured path. Used to
   // decide whether the per-playlist "Open in MKVToolNix GUI" action shows up
@@ -577,6 +582,9 @@ export default function DiscDetail() {
       return;
     }
     setOutputPathDraft(mkvToolNixToPath || disc.path);
+    setOutputPathMissing(false);
+    setOutputPathWritable(true);
+    setOutputPathChecking(false);
     setOutputPathDialogOpen(true);
   };
   const handleBrowseOutputPath = async () => {
@@ -590,12 +598,65 @@ export default function DiscDetail() {
     }
   };
   const handleOutputPathOk = () => {
-    setMkvToolNixToPath(outputPathDraft);
+    const trimmed = outputPathDraft.trim();
+    // An empty path clears the override (defaults back to the disc path).
+    if (trimmed.length === 0) {
+      setMkvToolNixToPath("");
+      setOutputPathDialogOpen(false);
+      return;
+    }
+    // Guard against a stale debounce / Enter race: never save a path the live
+    // check flagged as not writable (this also no-ops Enter while checking).
+    if (!outputPathWritable || outputPathChecking) {
+      return;
+    }
+    setMkvToolNixToPath(trimmed);
     setOutputPathDialogOpen(false);
   };
   const handleOutputPathCancel = () => {
     setOutputPathDialogOpen(false);
   };
+  // Debounced live check as the user types: drives both the non-blocking
+  // "will be created" hint (path doesn't exist yet) and the blocking
+  // not-writable warning that disables OK / no-ops Enter.
+  useEffect(() => {
+    if (!outputPathDialogOpen) {
+      return;
+    }
+    const trimmed = outputPathDraft.trim();
+    // An empty path clears the override, which is always allowed.
+    if (trimmed.length === 0) {
+      setOutputPathMissing(false);
+      setOutputPathWritable(true);
+      setOutputPathChecking(false);
+      return;
+    }
+    let cancelled = false;
+    setOutputPathChecking(true);
+    const handle = setTimeout(() => {
+      Promise.all([outputPathExists(trimmed), checkOutputPathWritable(trimmed)])
+        .then(([exists, writable]) => {
+          if (!cancelled) {
+            setOutputPathMissing(!exists);
+            setOutputPathWritable(writable);
+            setOutputPathChecking(false);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            // On a probe failure, fall back to allowing the save; the
+            // external tool's own OUTPUT_DIR_NOT_WRITABLE path is the backstop.
+            setOutputPathMissing(false);
+            setOutputPathWritable(true);
+            setOutputPathChecking(false);
+          }
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [outputPathDraft, outputPathDialogOpen]);
   const reportMkvToolNixError = (err: unknown) => {
     const raw = err == null ? "" : String(err);
     const notWritablePrefix = "OUTPUT_DIR_NOT_WRITABLE:";
@@ -1405,9 +1466,22 @@ export default function DiscDetail() {
               {t("disc.browse")}
             </Button>
           </Stack>
+          {!outputPathWritable ? (
+            <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+              {t("disc.outputPathNotWritable")}
+            </Typography>
+          ) : outputPathMissing ? (
+            <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+              {t("disc.outputPathDoesNotExist")}
+            </Typography>
+          ) : null}
         </DialogContent>
         <DialogActions sx={{ justifyContent: "center", mb: 1 }}>
-          <Button variant="contained" type="submit">
+          <Button
+            variant="contained"
+            type="submit"
+            disabled={!outputPathWritable || outputPathChecking}
+          >
             {t("disc.ok")}
           </Button>
           <Button type="button" onClick={handleOutputPathCancel}>

@@ -84,6 +84,8 @@
     "outputPath": "Ruta de salida",
     "changeOutputPathTooltip": "Haz clic para cambiar la ruta de salida.",
     "selectOutputPath": "Seleccionar ruta de salida",
+    "outputPathDoesNotExist": "La ruta de salida no existe. Se creará.",
+    "outputPathNotWritable": "La ruta de salida no se puede escribir. Elige otra ruta.",
     "browse": "Examinar",
     "ok": "Aceptar",
     "cancel": "Cancelar",

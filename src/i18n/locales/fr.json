@@ -84,6 +84,8 @@
     "outputPath": "Chemin de sortie",
     "changeOutputPathTooltip": "Cliquez pour modifier le chemin de sortie.",
     "selectOutputPath": "Sélectionner le chemin de sortie",
+    "outputPathDoesNotExist": "Le chemin de sortie n'existe pas. Il sera créé.",
+    "outputPathNotWritable": "Le chemin de sortie n'est pas accessible en écriture. Choisissez un autre chemin.",
     "browse": "Parcourir",
     "ok": "OK",
     "cancel": "Annuler",

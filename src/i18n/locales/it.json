@@ -84,6 +84,8 @@
     "outputPath": "Percorso destinazione",
     "changeOutputPathTooltip": "Per modificare il percorso destinazione clic qui.",
     "selectOutputPath": "Seleziona percorso destinazione",
+    "outputPathDoesNotExist": "Il percorso destinazione non esiste. Verrà creato.",
+    "outputPathNotWritable": "Il percorso destinazione non è scrivibile. Scegli un altro percorso.",
     "browse": "Sfoglia",
     "ok": "OK",
     "cancel": "Annulla",

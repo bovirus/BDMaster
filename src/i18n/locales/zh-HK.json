@@ -84,6 +84,8 @@
     "outputPath": "輸出路徑",
     "changeOutputPathTooltip": "按一下以變更輸出路徑。",
     "selectOutputPath": "選擇輸出路徑",
+    "outputPathDoesNotExist": "輸出路徑不存在。將會建立。",
+    "outputPathNotWritable": "輸出路徑無法寫入。請選擇其他路徑。",
     "browse": "瀏覽",
     "ok": "確定",
     "cancel": "取消",

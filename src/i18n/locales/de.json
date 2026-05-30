@@ -84,6 +84,8 @@
     "outputPath": "Ausgabepfad",
     "changeOutputPathTooltip": "Klicken, um den Ausgabepfad zu ändern.",
     "selectOutputPath": "Ausgabepfad auswählen",
+    "outputPathDoesNotExist": "Der Ausgabepfad existiert nicht. Er wird erstellt.",
+    "outputPathNotWritable": "Der Ausgabepfad ist nicht beschreibbar. Bitte wähle einen anderen Pfad.",
     "browse": "Durchsuchen",
     "ok": "OK",
     "cancel": "Abbrechen",

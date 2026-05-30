@@ -54,6 +54,14 @@ export async function writeBinaryFile(file: string, bytes: number[]): Promise<vo
   return await invoke<void>("write_binary_file", { file, bytes });
 }
 
+export async function checkOutputPathWritable(path: string): Promise<boolean> {
+  return await invoke<boolean>("check_output_path_writable", { path });
+}
+
+export async function outputPathExists(path: string): Promise<boolean> {
+  return await invoke<boolean>("output_path_exists", { path });
+}
+
 export async function isMkvtoolnixFound(
   path: string,
   checkRunning: boolean = false

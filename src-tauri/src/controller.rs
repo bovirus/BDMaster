@@ -63,6 +63,41 @@ pub async fn write_binary_file(file: String, bytes: Vec<u8>) -> Result<()> {
     Ok(())
 }
 
+/// Whether `path` (or, if it doesn't yet exist, its nearest existing ancestor)
+/// is a writable directory. Used by the output-path dialog to block a path the
+/// external tool would later fail to write into.
+pub async fn check_output_path_writable(path: String) -> Result<bool> {
+    let mut current = std::path::PathBuf::from(&path);
+    loop {
+        if current.exists() {
+            break;
+        }
+        let Some(parent) = current.parent() else {
+            return Ok(false);
+        };
+        current = parent.to_path_buf();
+    }
+    if !current.is_dir() {
+        return Ok(false);
+    }
+    let test_name = format!(".bdmaster_writecheck_{}", std::process::id());
+    let test_path = current.join(&test_name);
+    match File::create(&test_path) {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&test_path);
+            Ok(true)
+        }
+        Err(_) => Ok(false),
+    }
+}
+
+/// Whether the exact directory `path` already exists. Used by the output-path
+/// dialog to warn (non-blocking) that a non-existent path will be created when
+/// the external tool runs.
+pub async fn output_path_exists(path: String) -> Result<bool> {
+    Ok(Path::new(&path).is_dir())
+}
+
 pub fn check_for_updates() -> Result<UpdateCheckResult> {
     let app_version = get_app_version();
     log::info!("Checking for updates. Current version: {}", app_version);
