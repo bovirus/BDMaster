@@ -1,12 +1,25 @@
 /*
  *   Copyright (c) 2026. caoccao.com Sam Cao
  *   All rights reserved.
+
+ *   Licensed under the Apache License, Version 2.0 (the "License");
+ *   you may not use this file except in compliance with the License.
+ *   You may obtain a copy of the License at
+
+ *   http://www.apache.org/licenses/LICENSE-2.0
+
+ *   Unless required by applicable law or agreed to in writing, software
+ *   distributed under the License is distributed on an "AS IS" BASIS,
+ *   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *   See the License for the specific language governing permissions and
+ *   limitations under the License.
  */
 
 import { useEffect, useMemo } from "react";
 import { ThemeProvider, createTheme, CssBaseline, Box } from "@mui/material";
 import { useAppStore } from "./lib/store";
 import * as Protocol from "./lib/protocol";
+import { changeLanguage } from "./i18n";
 import Layout from "./components/Layout";
 import NotificationSnackbar from "./components/NotificationSnackbar";
 
@@ -43,11 +56,18 @@ function App() {
 
   const displayMode = config?.displayMode ?? Protocol.DisplayMode.Auto;
   const selectedTheme = config?.theme ?? Protocol.Theme.Ocean;
+  const language = config?.language;
 
   useEffect(() => {
     initConfig();
     initAbout();
   }, [initConfig, initAbout]);
+
+  useEffect(() => {
+    if (language) {
+      changeLanguage(language);
+    }
+  }, [language]);
 
   const prefersDarkMode = useMemo(() => {
     if (typeof window !== "undefined") {
