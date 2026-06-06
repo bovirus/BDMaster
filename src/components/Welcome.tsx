@@ -34,6 +34,7 @@ const AUTHOR_NAME = "Sam Cao";
 const AUTHOR_URL = "https://github.com/caoccao";
 const BDMASTER_URL = "https://github.com/caoccao/BDMaster";
 const BETTER_MEDIA_INFO_URL = "https://github.com/caoccao/BetterMediaInfo";
+const BATCH_MKV_MERGE_URL = "https://github.com/caoccao/BatchMkvMerge";
 const BATCH_MKV_EXTRACT_URL = "https://github.com/caoccao/BatchMkvExtract";
 
 interface AppCardProps {
@@ -191,6 +192,12 @@ export default function Welcome() {
             title="BetterMediaInfo"
             intro={t("cards.introBetterMediaInfo")}
             githubUrl={BETTER_MEDIA_INFO_URL}
+          />
+          <AppCard
+            logo="images/batchmkvmerge.png"
+            title="BatchMkvMerge"
+            intro={t("cards.introBatchMkvMerge")}
+            githubUrl={BATCH_MKV_MERGE_URL}
           />
           <AppCard
             logo="images/batchmkvextract.png"

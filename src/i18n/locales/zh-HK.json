@@ -22,6 +22,7 @@
     "welcomeSubtitle": "檢查藍光光碟,以查看播放清單、串流及編解碼器。",
     "introBDMaster": "將光碟資料夾(包含 BDMV/ 的資料夾)拖入此視窗,或使用「新增光碟資料夾」按鈕。每張光碟會在獨立分頁中顯示詳細的播放清單及串流資訊。",
     "introBetterMediaInfo": "以快速現代的介面檢查任何媒體檔案。一目了然地瀏覽視訊、音訊、圖片及字幕軌道的串流、屬性與中繼資料。",
+    "introBatchMkvMerge": "以使用者友善的方式批次處理媒體檔案。建構於 MKVToolNix 的 mkvmerge 之上的圖形介面。",
     "introBatchMkvExtract": "一次從多個 .mkv 檔案中擷取音軌、章節及附件。基於 MKVToolNix 的 mkvextract 的批次處理介面。",
     "viewOnGithub": "在 GitHub 上檢視",
     "emptyHint": "提示:可將藍光資料夾拖放至任何位置以開始掃描。",

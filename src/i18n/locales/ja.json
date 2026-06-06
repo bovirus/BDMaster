@@ -22,6 +22,7 @@
     "welcomeSubtitle": "Blu-ray ディスクを検査して、プレイリスト、ストリーム、コーデックを確認します。",
     "introBDMaster": "ディスクのディレクトリ (BDMV/ を含むフォルダー) をこのウィンドウにドラッグするか、「ディスクフォルダーを追加」ボタンを使用してください。各ディスクは独自のタブで開かれ、プレイリストとストリームの詳細情報が表示されます。",
     "introBetterMediaInfo": "高速でモダンな UI であらゆるメディアファイルを検査します。ビデオ、オーディオ、画像、字幕トラックのストリーム、プロパティ、メタデータを一目で参照できます。",
+    "introBatchMkvMerge": "メディアファイルを使いやすい方法でバッチ処理。MKVToolNix の mkvmerge を活用した GUI です。",
     "introBatchMkvExtract": "多数の .mkv ファイルからトラック、チャプター、添付ファイルを一括で抽出します。MKVToolNix の mkvextract をベースにしたバッチ向け GUI です。",
     "viewOnGithub": "GitHub で見る",
     "emptyHint": "ヒント: Blu-ray フォルダーを任意の場所にドロップしてスキャンします。",

@@ -22,6 +22,7 @@
     "welcomeSubtitle": "Inspectez un disque Blu-ray pour afficher les listes de lecture, les flux et les codecs.",
     "introBDMaster": "Faites glisser un répertoire de disque (le dossier contenant BDMV/) dans cette fenêtre ou utilisez le bouton Ajouter un dossier de disque. Chaque disque s’ouvre dans son propre onglet avec des informations détaillées sur les listes de lecture et les flux.",
     "introBetterMediaInfo": "Inspectez n’importe quel fichier multimédia avec une interface rapide et moderne. Parcourez en un coup d’œil les flux, propriétés et métadonnées des pistes vidéo, audio, image et sous-titres.",
+    "introBatchMkvMerge": "Traitez vos fichiers médias par lots de manière conviviale. Une interface graphique au-dessus de mkvmerge de MKVToolNix.",
     "introBatchMkvExtract": "Extrayez pistes, chapitres et pièces jointes de nombreux fichiers .mkv à la fois. Une interface par lot basée sur mkvextract de MKVToolNix.",
     "viewOnGithub": "Voir sur GitHub",
     "emptyHint": "Astuce : déposez un dossier Blu-ray n’importe où pour le scanner.",
