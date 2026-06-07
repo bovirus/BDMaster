@@ -2,8 +2,27 @@
 
 ## 0.3.0
 
-* Keyboard shortcuts for external tools: with a playlist selected, press **F9** (MKVToolNix GUI), **F10** (BetterMediaInfo), or **F11** (MPC-HC); with a stream selected, use **Ctrl+F9**, **Ctrl+F10**, or **Ctrl+F11**. The matching shortcut is shown in each action button's tooltip.
-* MKVToolNix output file template: customize the muxed output file name in **Settings → Integration → MKV**. A parser-based template engine substitutes placeholder variables — `{file_name}`, `{video_count}`, `{video_codec_1}`, `{audio_count}`, `{audio_codec_1}`, `{text_count}`, `{text_codec_1}` — with the actual values of the selected playlist or stream. The output file always uses the `.mkv` extension.
+### Easier MKVToolNix Workflow
+
+* Selected playlists and streams can now be sent to external tools with keyboard shortcuts. Use **F9** for MKVToolNix GUI, **F10** for BetterMediaInfo, and **F11** for MPC-HC. For a selected stream, use **Ctrl+F9**, **Ctrl+F10**, or **Ctrl+F11**.
+* MKV output files can now be chosen before opening MKVToolNix, and BDMaster warns when the selected destination cannot be used.
+* The default MKV file name can now be customized in **Settings -> Integration -> MKV**. For example, generated names can include the disc name, video codec, or number of audio tracks.
+* BatchMkvMerge is now shown on the Welcome screen with a direct GitHub link.
+
+### More Accurate Disc Information
+
+* Blu-ray scan results now more closely match trusted Blu-ray reporting tools such as BDInfo, especially for chapter times, hidden tracks, stream languages, and playlist details.
+* Audio and subtitle descriptions are clearer and more accurate, including Dolby Atmos, DTS:X, Dolby/DTS EX/ES, AAC/MPEG audio, and forced subtitles.
+* Blu-ray folders and ISO files are handled more reliably, with clearer results when a disc image is incomplete or invalid.
+* Disc sizes and folder sizes are calculated more safely and consistently.
+
+### General Improvements
+
+* Changing the language in Settings now updates the app immediately.
+* Settings for MKVToolNix, BetterMediaInfo, and MPC-HC are grouped together under Integration.
+* More messages, labels, and loading states are translated across all supported languages, with additional Italian translation updates.
+* Linux rendering behavior has been improved.
+* Licensing information has been made clearer throughout the project.
 
 ## 0.2.0
 
