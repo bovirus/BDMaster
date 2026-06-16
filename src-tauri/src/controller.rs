@@ -49,6 +49,11 @@ pub async fn scan_disc(path: String) -> Result<DiscInfo> {
   bdrom::scan(&path)
 }
 
+/// Dispose the per-disc codec cache when a disc is closed in the app.
+pub fn close_disc(path: String) {
+  bdrom::close_codec_cache(&path);
+}
+
 pub fn start_full_scan(path: String, state: Arc<FullScanState>) {
   bdrom::full_scan::start(path, state);
 }

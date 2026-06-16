@@ -1,5 +1,11 @@
 # Release Notes
 
+## 0.4.0
+
+### Performance
+
+* Faster disc open: each stream's codec details are cached for the open disc, so clips that repeat already-scanned streams are no longer re-read.
+
 ## 0.3.0
 
 ### Easier MKVToolNix Workflow

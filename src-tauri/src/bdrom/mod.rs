@@ -33,7 +33,7 @@ pub mod udf;
 use anyhow::{Result, anyhow};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::protocol::{
   DiscInfo, PlaylistInfo, PlaylistStreamClipInfo, StreamClipFileInfo, StreamFileInfo, TSStreamInfo,
@@ -92,6 +92,10 @@ pub fn scan(path_str: &str) -> Result<DiscInfo> {
   let use_ssif = crate::config::get_config().scan.enable_ssif_support;
   let bdrom = open_bdrom(path, use_ssif)?;
   let mut disc = to_disc_info(&bdrom);
+  // Set up the per-disc codec cache for this open (disposing any other
+  // disc's entries). codec_init reads each distinct stream once and reuses
+  // the cached result for every clip that repeats it.
+  open_codec_cache(&disc.path);
   // Codec initialization pass — mirrors BDInfo's `streamFile.Scan(playlists,
   // isFullScan: false)`. For every unique M2TS clip we open the stream once
   // and feed its PES payloads to the codec parsers until every relevant PID
@@ -1221,6 +1225,66 @@ fn clpi_file_for_clip<'a>(bd: &'a BDRom, clip_name: &str) -> Option<&'a StreamCl
   scf.is_valid.then_some(scf)
 }
 
+/// Cache key for one elementary stream.
+///
+/// - `disc_path` isolates discs (and parallel tests) from each other.
+/// - `playlists` is the *set of playlists that reference the clip* the stream
+///   came from. This is the crucial scoping bit: codec attributes are a
+///   property of the stream, but bitstream-level details (e.g. AC3 dialnorm,
+///   HDR metadata) are content-specific. Two playlists can declare audio with
+///   an identical CLPI descriptor yet carry different content with different
+///   dialnorm — they are *different* streams and must not share a cache entry.
+///   Clips that belong to the same playlist set, however, feed the same
+///   playlist stream entries, where the codec pass keeps the first clip's
+///   values anyway — so reusing within a playlist set matches a full scan.
+/// - `descriptor` is the clip's CLPI coding descriptor (PID + type + format
+///   bytes); a different codec/resolution on the same PID is a distinct entry.
+type StreamDescriptor = (u16, u8, u8, u8, u8, u8, u32);
+type StreamCacheKey = (String, Vec<usize>, StreamDescriptor);
+
+/// Per-disc codec cache.
+///
+/// A Blu-ray reuses the same elementary streams across many clips — a
+/// "play-all" / menu-loop playlist can reference hundreds of clips that all
+/// carry the same video + audio. So each distinct stream (per the key above)
+/// is scanned once, cached here, and reused everywhere it recurs; a clip whose
+/// every stream is already cached is never read.
+///
+/// Lifecycle: set up when a disc is opened (`open_codec_cache`) and disposed
+/// when it is closed (`close_codec_cache`). This is a single-disc app, so
+/// opening a disc also disposes any other disc's entries.
+static CODEC_CACHE: OnceLock<Mutex<HashMap<StreamCacheKey, TSStreamInfo>>> = OnceLock::new();
+
+fn codec_cache() -> &'static Mutex<HashMap<StreamCacheKey, TSStreamInfo>> {
+  CODEC_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Set up the codec cache for a freshly opened disc. Entries for any other
+/// disc are disposed; re-opening the same disc keeps its entries so
+/// already-scanned streams are reused rather than re-read.
+pub(crate) fn open_codec_cache(disc_path: &str) {
+  let mut cache = codec_cache().lock().unwrap_or_else(|e| e.into_inner());
+  cache.retain(|(p, _, _), _| p == disc_path);
+}
+
+/// Dispose the codec cache for a disc that has been closed in the app.
+pub fn close_codec_cache(disc_path: &str) {
+  let mut cache = codec_cache().lock().unwrap_or_else(|e| e.into_inner());
+  cache.retain(|(p, _, _), _| p != disc_path);
+}
+
+fn clpi_stream_descriptor(s: &ClpiStream) -> StreamDescriptor {
+  (
+    s.pid,
+    s.stream_type,
+    s.video_format,
+    s.frame_rate,
+    s.aspect_ratio,
+    s.channel_layout,
+    s.sample_rate,
+  )
+}
+
 fn reference_clip_name_for_playlist(pl: &PlaylistFile, bd: &BDRom) -> Option<String> {
   let mut best: Option<(String, usize, i64)> = None;
   for clip in pl.stream_clips.iter().filter(|c| c.angle_index == 0) {
@@ -1475,9 +1539,61 @@ pub(crate) fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
     }
   }
 
-  // Phase A.2: scan each unique clip until codecs are initialized.
+  // Phase A.2: scan each unique clip until codecs are initialized, reusing
+  // the per-disc codec cache so each distinct stream is read only once.
+  //
+  // A "play-all" / menu-loop playlist can reference hundreds of clips that
+  // all carry the same streams; reading every one of them just to re-confirm
+  // a codec we already identified meant reading the better part of a gigabyte
+  // during what should be a lightweight open. Before reading a clip we look
+  // up its streams (from its CLPI, which is already parsed, so no M2TS read)
+  // in the cache: if every one is present, we serve the clip from the cache.
+  // After reading a clip we store every one of its streams, so a sibling clip
+  // that only repeats them is free — even streams whose codec never
+  // initialized are cached, so a padding/fake file can't force re-reads.
+  let disc_path = disc.path.clone();
   let mut clip_cache: HashMap<String, ClipInitCache> = HashMap::new();
   for (clip_name, plis) in &clip_referencing_plis {
+    // Cache lookup: if this clip's CLPI lists only streams we've already
+    // scanned (in the same playlist set), reuse their cached codec metadata
+    // and don't read the M2TS.
+    if let Some(scf) = clpi_file_for_clip(bd, clip_name) {
+      if !scf.streams.is_empty() {
+        let cached = {
+          let cache = codec_cache().lock().unwrap_or_else(|e| e.into_inner());
+          if scf
+            .streams
+            .iter()
+            .all(|s| cache.contains_key(&(disc_path.clone(), plis.clone(), clpi_stream_descriptor(s))))
+          {
+            let meta: HashMap<u16, TSStreamInfo> = scf
+              .streams
+              .iter()
+              .filter_map(|s| {
+                cache
+                  .get(&(disc_path.clone(), plis.clone(), clpi_stream_descriptor(s)))
+                  .map(|m| (s.pid, m.clone()))
+              })
+              .collect();
+            Some(meta)
+          } else {
+            None
+          }
+        };
+        if let Some(codec_metadata) = cached {
+          clip_cache.insert(
+            clip_name.clone(),
+            ClipInitCache {
+              codec_metadata,
+              per_pid_bytes: HashMap::new(),
+              duration_seconds: 0.0,
+            },
+          );
+          continue;
+        }
+      }
+    }
+
     let entry = match effective_stream_source(bd, clip_name) {
       Some(e) => e,
       None => continue,
@@ -1625,6 +1741,26 @@ pub(crate) fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
         for (pid, ptr) in &pid_streams {
           unsafe {
             codec_metadata.insert(*pid, (**ptr).clone());
+          }
+        }
+
+        // Populate the per-disc cache with every stream this clip's CLPI
+        // lists, so a sibling clip that only repeats them is served without a
+        // read. Use the freshly scanned metadata when we have it, else a
+        // CLPI-derived placeholder — caching even an uninitialized stream so
+        // it can't force the clip to be rescanned by a sibling.
+        if let Some(scf) = clpi_file_for_clip(bd, clip_name) {
+          let mut cache = codec_cache().lock().unwrap_or_else(|e| e.into_inner());
+          for s in &scf.streams {
+            cache
+              .entry((disc_path.clone(), plis.clone(), clpi_stream_descriptor(s)))
+              .or_insert_with(|| {
+                codec_metadata
+                  .get(&s.pid)
+                  .cloned()
+                  .or_else(|| clpi_stream_to_info(s))
+                  .unwrap_or_else(|| TSStreamInfo::new(s.pid, s.stream_type))
+              });
           }
         }
 

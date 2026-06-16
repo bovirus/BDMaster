@@ -17,7 +17,7 @@
 
 import { create } from "zustand";
 import * as Protocol from "./protocol";
-import { getAbout, getConfig } from "./service";
+import { closeDisc, getAbout, getConfig } from "./service";
 
 interface DialogNotification {
   title: string;
@@ -78,7 +78,7 @@ function tabsEqual(a: OpenTab, type: Protocol.TabType, playlistName?: string): b
   return a.type === type && (a.playlistName ?? null) === (playlistName ?? null);
 }
 
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>((set, get) => ({
   config: null,
   about: null,
   dialogNotification: null,
@@ -129,14 +129,20 @@ export const useAppStore = create<AppState>((set) => ({
         fullScanCompletedFor: null,
       };
     }),
-  clearDisc: () =>
+  clearDisc: () => {
+    // Closing the disc disposes its backend codec cache.
+    const path = get().disc?.path;
+    if (path) {
+      closeDisc(path).catch(() => {});
+    }
     set(() => ({
       disc: null,
       openTabs: DEFAULT_TABS,
       activeTabIndex: 0,
       fullScanProgress: null,
       fullScanCompletedFor: null,
-    })),
+    }));
+  },
   setScanningPath: (scanningPath) => set({ scanningPath }),
   setFullScanProgress: (fullScanProgress) => set({ fullScanProgress }),
   setFullScanCompletedFor: (fullScanCompletedFor) => set({ fullScanCompletedFor }),

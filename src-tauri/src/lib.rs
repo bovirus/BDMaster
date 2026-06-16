@@ -85,6 +85,11 @@ async fn scan_disc(path: String) -> Result<protocol::DiscInfo, String> {
 }
 
 #[tauri::command]
+fn close_disc(path: String) {
+  controller::close_disc(path);
+}
+
+#[tauri::command]
 fn start_full_scan(path: String, state: tauri::State<'_, Arc<FullScanState>>) {
   controller::start_full_scan(path, state.inner().clone());
 }
@@ -358,6 +363,7 @@ pub fn run() {
       skip_version,
       get_launch_args,
       scan_disc,
+      close_disc,
       start_full_scan,
       cancel_full_scan,
       get_scan_progress,
