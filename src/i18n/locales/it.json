@@ -24,7 +24,7 @@
     "introBetterMediaInfo": "Analizza qualsiasi file multimediale con un'interfaccia rapida e moderna. Sfoglia a colpo d'occhio stream, proprietà e metadati di tracce video, audio, immagini e sottotitoli.",
     "introBatchMkvMerge": "Elabora file multimediali in batch in modo intuitivo. Una GUI basata su mkvmerge di MKVToolNix.",
     "introBatchMkvExtract": "Estrai contemporaneamente da molti file .mkv tracce, capitoli e allegati. Un'interfaccia ottimizzata per il batch basata su mkvextract di MKVToolNix.",
-    "viewOnGithub": "Visualizza in GitHub",
+    "viewOnGithub": "Info (GitHub)",
     "emptyHint": "Suggerimento: per analizzarla trascina in qualsiasi punto una cartella Blu-ray o un ISO.",
     "addDisc": "Aggiungi cartella disco",
     "scanning": "Analisi di {{path}}…",
