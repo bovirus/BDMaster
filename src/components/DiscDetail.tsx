@@ -235,6 +235,7 @@ export default function DiscDetail() {
   const [outputPathMissing, setOutputPathMissing] = useState(false);
   const [outputPathWritable, setOutputPathWritable] = useState(true);
   const [outputPathChecking, setOutputPathChecking] = useState(false);
+  const outputPathInputRef = useRef<HTMLInputElement | null>(null);
 
   // Probe whether mkvtoolnix-gui is reachable at the configured path. Used to
   // decide whether the per-playlist "Open in MKVToolNix GUI" action shows up
@@ -628,6 +629,25 @@ export default function DiscDetail() {
   const handleOutputPathCancel = () => {
     setOutputPathDialogOpen(false);
   };
+  useEffect(() => {
+    if (!outputPathDialogOpen) {
+      return;
+    }
+    const focusAndSelect = () => {
+      const input = outputPathInputRef.current;
+      if (!input) {
+        return;
+      }
+      input.focus();
+      input.select();
+    };
+    const frame = window.requestAnimationFrame(focusAndSelect);
+    const handle = window.setTimeout(focusAndSelect, 0);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(handle);
+    };
+  }, [outputPathDialogOpen]);
   // Debounced live check as the user types: drives both the non-blocking
   // "will be created" hint (path doesn't exist yet) and the blocking
   // not-writable warning that disables OK / no-ops Enter.
@@ -857,6 +877,29 @@ export default function DiscDetail() {
     return <Box sx={{ p: 2 }}>{t("common.loading")}</Box>;
   }
 
+  const outputPathOverride = mkvToolNixToPath.trim();
+  const hasCustomOutputPath = outputPathOverride.length > 0 && outputPathOverride !== disc.path;
+  const pathLinkSx = {
+    cursor: "pointer",
+    display: "block",
+    font: "inherit",
+    fontSize: "caption.fontSize",
+    maxWidth: "100%",
+    minWidth: 0,
+    overflow: "hidden",
+    textAlign: "left",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  };
+  const pathTextSx = {
+    display: "block",
+    maxWidth: "100%",
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  };
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1, p: 1, height: "100%" }}>
       {/* Header */}
@@ -871,51 +914,58 @@ export default function DiscDetail() {
               spacing={3}
               sx={{ mt: 0.5, flexWrap: "wrap", alignItems: "center" }}
             >
-              <Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+              <Stack direction="row" spacing={0.5} sx={{ alignItems: "center", minWidth: 0 }}>
                 <Typography variant="caption" sx={{ fontWeight: 600 }}>
                   {t("disc.path")}:
                 </Typography>
-                <Typography variant="caption">
-                  {disc.path}
-                </Typography>
-              </Stack>
-              <Stack direction="row" spacing={0} sx={{ alignItems: "center" }}>
-                <Typography variant="caption" sx={{ fontWeight: 600 }}>
-                  {t("disc.outputPath")}:
-                </Typography>
-                <Tooltip title={t("disc.changeOutputPathTooltip")}>
-                  <Box
-                    component="button"
-                    type="button"
-                    aria-label={t("disc.changeOutputPathTooltip")}
-                    onClick={handleOpenOutputPathDialog}
-                    sx={{
-                      alignItems: "center",
-                      display: "inherit",
-                      lineHeight: "inherit",
-                      m: 0,
-                      px: 0.5,
-                      py: 0,
-                      border: 0,
-                      borderRadius: 0.5,
-                      color: "primary.main",
-                      bgcolor: "transparent",
-                      cursor: "pointer",
-                      font: "inherit",
-                      fontSize: "caption.fontSize",
-                      overflow: "hidden",
-                      textAlign: "left",
-                      textOverflow: "ellipsis",
-                      verticalAlign: "baseline",
-                      whiteSpace: "nowrap",
-                      "&:hover": {
-                        bgcolor: "action.hover",
-                      },
-                    }}
-                  >
-                    {mkvToolNixToPath || disc.path}
-                  </Box>
-                </Tooltip>
+                <Box
+                  sx={{
+                    alignItems: "center",
+                    display: "grid",
+                    gap: 0.5,
+                    gridTemplateColumns: hasCustomOutputPath
+                      ? "minmax(0, 1fr) auto minmax(0, 1fr)"
+                      : "minmax(0, max-content)",
+                    minWidth: 0,
+                    maxWidth: "100%",
+                  }}
+                >
+                  {hasCustomOutputPath ? (
+                    <Typography variant="caption" sx={pathTextSx}>
+                      {disc.path}
+                    </Typography>
+                  ) : (
+                    <Tooltip title={t("disc.changeOutputPathTooltip")}>
+                      <Link
+                        component="button"
+                        underline="hover"
+                        aria-label={t("disc.changeOutputPathTooltip")}
+                        onClick={handleOpenOutputPathDialog}
+                        sx={pathLinkSx}
+                      >
+                        {disc.path}
+                      </Link>
+                    </Tooltip>
+                  )}
+                  {hasCustomOutputPath ? (
+                    <Typography variant="caption" color="text.secondary" aria-hidden="true">
+                      -&gt;
+                    </Typography>
+                  ) : null}
+                  {hasCustomOutputPath ? (
+                    <Tooltip title={t("disc.changeOutputPathTooltip")}>
+                      <Link
+                        component="button"
+                        underline="hover"
+                        aria-label={t("disc.changeOutputPathTooltip")}
+                        onClick={handleOpenOutputPathDialog}
+                        sx={pathLinkSx}
+                      >
+                        {outputPathOverride}
+                      </Link>
+                    </Tooltip>
+                  ) : null}
+                </Box>
               </Stack>
               <Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
                 <Typography variant="caption" sx={{ fontWeight: 600 }}>
@@ -1469,6 +1519,7 @@ export default function DiscDetail() {
             <TextField
               autoFocus
               fullWidth
+              inputRef={outputPathInputRef}
               size="small"
               value={outputPathDraft}
               onChange={(e) => setOutputPathDraft(e.target.value)}
