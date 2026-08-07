@@ -188,11 +188,6 @@ export default function MainContent() {
           const prev = activeTabIndex > 0 ? activeTabIndex - 1 : openTabs.length - 1;
           setActiveTabIndex(prev);
         }
-      } else if (!event.ctrlKey && event.altKey && !event.shiftKey) {
-        if (event.key === "x") {
-          event.stopPropagation();
-          getCurrentWindow().close();
-        }
       }
     };
     document.addEventListener("keyup", handleKeyUp);
