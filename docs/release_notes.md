@@ -5,6 +5,13 @@
 ### Performance
 
 * Faster disc open: each stream's codec details are cached for the open disc, so clips that repeat already-scanned streams are no longer re-read.
+* Fast scan now has a configurable wall-clock limit (10 seconds by default) and prioritizes playlist reference clips within that budget.
+
+### More Accurate Full Scans
+
+* Full scan now uses PES payload bytes and PTS/DTS timing windows for clip, stream, bitrate, chapter, and frame-size measurements, with a safe fallback for timestamp-free files.
+* Alternate-angle files are scanned and reported separately, fragmented PAT/PMT tables are supported, and per-file read errors are retained without aborting the rest of the disc.
+* Full scan begins its exhaustive pass immediately instead of rerunning the bounded fast phase, while byte and partial-disc progress continue to update during the current file.
 
 ## 0.3.0
 

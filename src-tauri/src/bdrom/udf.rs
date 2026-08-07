@@ -772,6 +772,8 @@ fn parse_fids(buf: &[u8]) -> Result<Vec<UdfDirEntry>> {
 /// without buffering whole files.
 pub struct UdfFileReader {
   image: Arc<Mutex<UdfImage>>,
+  embedded_data: Option<Vec<u8>>,
+  embedded_offset: usize,
   /// (physical LBA, run length in bytes) for every byte the file references.
   runs: Vec<(u64, u64)>,
   run_index: usize,
@@ -798,6 +800,8 @@ impl UdfFileReader {
     }
     Ok(Self {
       image,
+      embedded_data: fe.embedded_data.clone(),
+      embedded_offset: 0,
       runs,
       run_index: 0,
       run_offset: 0,
@@ -810,6 +814,18 @@ impl Read for UdfFileReader {
   fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
     if self.total_remaining == 0 {
       return Ok(0);
+    }
+    if let Some(data) = &self.embedded_data {
+      let available = data.len().saturating_sub(self.embedded_offset);
+      let remaining = usize::try_from(self.total_remaining).unwrap_or(usize::MAX);
+      let want = buf.len().min(available).min(remaining);
+      if want == 0 {
+        return Ok(0);
+      }
+      buf[..want].copy_from_slice(&data[self.embedded_offset..self.embedded_offset + want]);
+      self.embedded_offset += want;
+      self.total_remaining -= want as u64;
+      return Ok(want);
     }
     while self.run_index < self.runs.len() {
       let (lba, length) = self.runs[self.run_index];
@@ -2665,5 +2681,11 @@ mod tests {
     let mut img = UdfImage::open(&tmp.path).expect("opens");
     let out = img.read_file(&fe).expect("reads embedded");
     assert_eq!(out, vec![1, 2, 3, 4]);
+
+    let image = Arc::new(Mutex::new(img));
+    let mut reader = UdfFileReader::new(image, &fe).expect("streaming reader");
+    let mut streamed = Vec::new();
+    reader.read_to_end(&mut streamed).expect("streams embedded");
+    assert_eq!(streamed, vec![1, 2, 3, 4]);
   }
 }

@@ -285,6 +285,8 @@ impl Default for ConfigMpcHc {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ConfigScan {
+  #[serde(rename = "fastScanSeconds", default = "default_fast_scan_seconds")]
+  pub fast_scan_seconds: u32,
   #[serde(rename = "enableSsifSupport", default = "default_true")]
   pub enable_ssif_support: bool,
   #[serde(rename = "filterLoopingPlaylists", default = "default_true")]
@@ -298,6 +300,9 @@ pub struct ConfigScan {
 fn default_true() -> bool {
   true
 }
+fn default_fast_scan_seconds() -> u32 {
+  10
+}
 fn default_filter_short_value() -> u32 {
   20
 }
@@ -305,6 +310,7 @@ fn default_filter_short_value() -> u32 {
 impl Default for ConfigScan {
   fn default() -> Self {
     Self {
+      fast_scan_seconds: default_fast_scan_seconds(),
       enable_ssif_support: true,
       filter_looping_playlists: true,
       filter_short_playlists: true,
@@ -697,6 +703,7 @@ mod tests {
     assert!(matches!(config.display_mode, DisplayMode::Auto));
     assert!(matches!(config.theme, Theme::Ocean));
     assert!(config.scan.enable_ssif_support);
+    assert_eq!(config.scan.fast_scan_seconds, 10);
     assert!(config.scan.filter_looping_playlists);
     assert!(config.scan.filter_short_playlists);
     assert_eq!(config.scan.filter_short_playlists_value, 20);
@@ -733,6 +740,7 @@ mod tests {
                     }
                 },
                 "scan": {
+                    "fastScanSeconds": 7,
                     "filterShortPlaylistsValue": 30
                 },
                 "window": {
@@ -759,6 +767,7 @@ mod tests {
     assert!(matches!(config.formatting.bit_rate.precision, FormatPrecision::Two));
     assert!(matches!(config.formatting.size.unit, FormatUnit::KMGT));
     assert!(config.scan.enable_ssif_support);
+    assert_eq!(config.scan.fast_scan_seconds, 7);
     assert!(config.scan.filter_looping_playlists);
     assert!(config.scan.filter_short_playlists);
     assert_eq!(config.scan.filter_short_playlists_value, 30);

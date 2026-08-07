@@ -123,6 +123,7 @@ export interface ConfigWindow {
 }
 
 export interface ConfigScan {
+  fastScanSeconds: number;
   enableSsifSupport: boolean;
   filterLoopingPlaylists: boolean;
   filterShortPlaylists: boolean;
@@ -285,6 +286,7 @@ export interface PlaylistInfo {
   audioStreams: TSStreamInfo[];
   graphicsStreams: TSStreamInfo[];
   textStreams: TSStreamInfo[];
+  angleStreams: TSStreamInfo[][];
   totalAngles: number;
 }
 
@@ -378,10 +380,16 @@ export interface ScanProgress {
   isCompleted: boolean;
   isCancelled: boolean;
   error: string | null;
+  fileErrors: ScanFileError[];
   currentFile: string | null;
   startedAtMs: number;
   disc: DiscInfo | null;
   version: number;
+}
+
+export interface ScanFileError {
+  file: string;
+  message: string;
 }
 
 export function getLanguages(): Language[] {

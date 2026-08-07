@@ -16,16 +16,48 @@
 */
 
 use std::collections::{HashMap, HashSet};
+use std::io::{Read, Result as IoResult};
+use std::time::{Duration, Instant};
 
 use crate::bdrom::codec;
 use crate::bdrom::codec_cache::{clpi_stream_descriptor, codec_cache};
-use crate::bdrom::disc_info::{clpi_file_for_clip, clpi_stream_to_info, is_ssif_mvc_stream};
+use crate::bdrom::disc_info::{
+  clpi_file_for_clip, clpi_stream_to_info, is_ssif_mvc_stream, reference_clip_name_for_playlist,
+};
 use crate::bdrom::m2ts;
 use crate::bdrom::model::{BDRom, effective_stream_source, open_stream_reader};
 use crate::bdrom::types::*;
 use crate::protocol::{DiscInfo, TSStreamInfo};
 
-/// Run a one-shot codec init pass over every unique angle-0 clip on the disc.
+/// Reader used by the lightweight phase. The deadline is shared by every
+/// clip on the disc, so a pathological or slow stream cannot turn the fast
+/// scan into an accidental full scan.
+struct DeadlineReader<R> {
+  inner: R,
+  deadline: Instant,
+}
+
+impl<R> DeadlineReader<R> {
+  fn new(inner: R, deadline: Instant) -> Self {
+    Self { inner, deadline }
+  }
+}
+
+impl<R: Read> Read for DeadlineReader<R> {
+  fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+    if Instant::now() >= self.deadline {
+      return Ok(0);
+    }
+    // Keep each grant small enough that scan_inner returns to the deadline
+    // gate frequently even though it normally asks for a 5 MiB chunk.
+    const DEADLINE_CHUNK: usize = 192 * 256;
+    let limit = buf.len().min(DEADLINE_CHUNK);
+    self.inner.read(&mut buf[..limit])
+  }
+}
+
+/// Run a one-shot codec init pass over every unique clip on the disc,
+/// including alternate-angle files.
 /// For each clip we open the M2TS reader, dispatch reassembled PES payloads
 /// to the matching codec parser, and stop reading the moment every PMT-
 /// listed PID has reported `is_initialized` (mirrors BDInfo's
@@ -34,6 +66,9 @@ use crate::protocol::{DiscInfo, TSStreamInfo};
 /// every other playlist that references the same clip.
 pub(crate) fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
   use codec::CodecScanState;
+
+  let fast_scan_seconds = crate::config::get_config().scan.fast_scan_seconds.clamp(1, 3600);
+  let deadline = Instant::now() + Duration::from_secs(fast_scan_seconds as u64);
 
   /// Codec-init result captured per unique clip. `codec_metadata` is the
   /// snapshot of every PID's TSStreamInfo after the codec parsers ran
@@ -48,15 +83,12 @@ pub(crate) fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
   }
 
   // Phase A.1: collect every playlist index that references each unique
-  // angle-0 clip. We need the union (not just one "lead") because
+  // main- or alternate-angle clip. We need the union (not just one "lead") because
   // playlists can subset streams differently — a PID present in this
   // clip's PMT might only appear in a non-lead playlist's MPLS.
   let mut clip_referencing_plis: HashMap<String, Vec<usize>> = HashMap::new();
   for (pli, pl) in disc.playlists.iter().enumerate() {
     for clip in &pl.stream_clips {
-      if clip.angle_index != 0 {
-        continue;
-      }
       let entry = clip_referencing_plis.entry(clip.name.clone()).or_default();
       if !entry.contains(&pli) {
         entry.push(pli);
@@ -77,8 +109,26 @@ pub(crate) fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
   // that only repeats them is free — even streams whose codec never
   // initialized are cached, so a padding/fake file can't force re-reads.
   let disc_path = disc.path.clone();
+  // Scan reference clips first. They are the source BDInfo uses when it
+  // merges codec-level metadata into a playlist, and prioritizing them also
+  // makes a short deadline deterministic and useful.
+  let reference_clips: HashSet<String> = bd
+    .playlists
+    .values()
+    .filter_map(|pl| reference_clip_name_for_playlist(pl, bd))
+    .collect();
+  let mut clips_to_scan: Vec<(String, Vec<usize>)> = clip_referencing_plis.into_iter().collect();
+  clips_to_scan.sort_by(|(a, _), (b, _)| {
+    let a_reference = reference_clips.contains(a);
+    let b_reference = reference_clips.contains(b);
+    b_reference.cmp(&a_reference).then_with(|| a.cmp(b))
+  });
+
   let mut clip_cache: HashMap<String, ClipInitCache> = HashMap::new();
-  for (clip_name, plis) in &clip_referencing_plis {
+  for (clip_name, plis) in &clips_to_scan {
+    if Instant::now() >= deadline {
+      break;
+    }
     // Cache lookup: if this clip's CLPI lists only streams we've already
     // scanned (in the same playlist set), reuse their cached codec metadata
     // and don't read the M2TS.
@@ -132,17 +182,32 @@ pub(crate) fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
     let mut pid_streams: HashMap<u16, *mut TSStreamInfo> = HashMap::new();
     for &pli in plis {
       let pl = &mut disc.playlists[pli];
-      for s in pl.video_streams.iter_mut() {
-        pid_streams.entry(s.pid).or_insert(s as *mut TSStreamInfo);
+      let angle_indices: Vec<u32> = pl
+        .stream_clips
+        .iter()
+        .filter(|clip| clip.name == *clip_name)
+        .map(|clip| clip.angle_index)
+        .collect();
+      if angle_indices.contains(&0) {
+        for s in pl.video_streams.iter_mut() {
+          pid_streams.entry(s.pid).or_insert(s as *mut TSStreamInfo);
+        }
+        for s in pl.audio_streams.iter_mut() {
+          pid_streams.entry(s.pid).or_insert(s as *mut TSStreamInfo);
+        }
+        for s in pl.graphics_streams.iter_mut() {
+          pid_streams.entry(s.pid).or_insert(s as *mut TSStreamInfo);
+        }
+        for s in pl.text_streams.iter_mut() {
+          pid_streams.entry(s.pid).or_insert(s as *mut TSStreamInfo);
+        }
       }
-      for s in pl.audio_streams.iter_mut() {
-        pid_streams.entry(s.pid).or_insert(s as *mut TSStreamInfo);
-      }
-      for s in pl.graphics_streams.iter_mut() {
-        pid_streams.entry(s.pid).or_insert(s as *mut TSStreamInfo);
-      }
-      for s in pl.text_streams.iter_mut() {
-        pid_streams.entry(s.pid).or_insert(s as *mut TSStreamInfo);
+      for angle_index in angle_indices.into_iter().filter(|index| *index > 0) {
+        if let Some(streams) = pl.angle_streams.get_mut(angle_index as usize - 1) {
+          for s in streams {
+            pid_streams.entry(s.pid).or_insert(s as *mut TSStreamInfo);
+          }
+        }
       }
     }
     if pid_streams.is_empty() {
@@ -164,13 +229,7 @@ pub(crate) fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
       }
     };
 
-    // Safety cap on bytes read per clip. The PMT-driven early-stop
-    // normally fires within the first ~1 MB on a well-formed Blu-ray,
-    // but if anything goes wrong (multi-packet PMT we don't fully
-    // reassemble, codec parser that never initializes a particular
-    // PID, etc.) this guarantees the codec init pass stays fast.
-    const CODEC_INIT_BYTE_BUDGET: u64 = 8 * 1024 * 1024;
-    let reader = std::io::Read::take(reader, CODEC_INIT_BYTE_BUDGET);
+    let reader = DeadlineReader::new(reader, deadline);
 
     // PMT may declare PIDs that no playlist's MPLS references — those
     // are "hidden" tracks (BDInfo's TSPlaylistFile.cs sets IsHidden=true
@@ -320,13 +379,26 @@ pub(crate) fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
       .collect();
 
     for clip in &pl.stream_clips {
-      if clip.angle_index != 0 {
-        continue;
-      }
       let cached = match clip_cache.get(&clip.name) {
         Some(c) => c,
         None => continue,
       };
+
+      if clip.angle_index > 0 {
+        if let Some(angle_streams) = pl.angle_streams.get_mut(clip.angle_index as usize - 1) {
+          for stream in angle_streams {
+            if stream.is_initialized {
+              continue;
+            }
+            if let Some(meta) = cached.codec_metadata.get(&stream.pid) {
+              if meta.is_initialized {
+                copy_codec_metadata(stream, meta);
+              }
+            }
+          }
+        }
+        continue;
+      }
 
       // Update existing streams with codec details.
       for s in pl
@@ -419,9 +491,8 @@ pub(crate) fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
     }
 
     // Refine VBR video bit_rate using the playlist's total bandwidth.
-    // The codec-init partial scan only reads ~8 MB per clip, so its
-    // running average for VBR streams is biased toward whatever happens
-    // in the first few seconds. Total bandwidth (angle-0 clip bytes ×
+    // The deadline-bounded codec-init sample can be biased toward whatever
+    // happens in the first few seconds. Total bandwidth (angle-0 clip bytes ×
     // 8 / total length) is exact, and audio bit rates are mostly
     // codec-fixed and accurate — so the residual is a much better
     // estimate of the dominant VBR video stream's actual average.
@@ -476,6 +547,11 @@ pub(crate) fn codec_init(disc: &mut DiscInfo, bd: &BDRom) {
     {
       codec::finalize_description(s);
     }
+    for angle_streams in &mut pl.angle_streams {
+      for stream in angle_streams {
+        codec::finalize_description(stream);
+      }
+    }
   }
 }
 
@@ -520,5 +596,29 @@ pub(crate) fn copy_codec_metadata(dst: &mut TSStreamInfo, src: &TSStreamInfo) {
   }
   if dst.active_bit_rate == 0 && src.active_bit_rate > 0 {
     dst.active_bit_rate = src.active_bit_rate;
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::io::Cursor;
+
+  #[test]
+  fn deadline_reader_stops_before_reading_after_deadline() {
+    let mut reader = DeadlineReader::new(Cursor::new(vec![1, 2, 3]), Instant::now());
+    let mut buffer = [0u8; 3];
+    assert_eq!(reader.read(&mut buffer).expect("deadline is EOF"), 0);
+  }
+
+  #[test]
+  fn deadline_reader_delegates_before_deadline() {
+    let mut reader = DeadlineReader::new(
+      Cursor::new(vec![1, 2, 3]),
+      Instant::now() + Duration::from_secs(1),
+    );
+    let mut buffer = [0u8; 3];
+    assert_eq!(reader.read(&mut buffer).expect("read succeeds"), 3);
+    assert_eq!(buffer, [1, 2, 3]);
   }
 }

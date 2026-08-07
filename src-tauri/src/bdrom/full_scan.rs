@@ -32,7 +32,9 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-use crate::protocol::{ChapterMetricsInfo, ChartSample, DiscInfo, FullScanState, ScanProgressInfo, TSStreamInfo};
+use crate::protocol::{
+  ChapterMetricsInfo, ChartSample, DiscInfo, FullScanState, ScanFileErrorInfo, ScanProgressInfo, TSStreamInfo,
+};
 
 use super::codec::{self, CodecScanState};
 use super::m2ts;
@@ -48,6 +50,8 @@ struct CachedStreamEstimate {
   active_bit_rate: u64,
   estimated_size: u64,
 }
+
+type StreamMeasurementKey = (usize, u32, u16);
 
 /// Read wrapper that reports cumulative bytes consumed at most once per
 /// `min_interval` AND short-circuits to EOF the moment the scan's cancel
@@ -122,6 +126,7 @@ pub fn start(path: String, state: Arc<FullScanState>) {
       is_completed: false,
       is_cancelled: false,
       error: None,
+      file_errors: Vec::new(),
       current_file: None,
       started_at_ms,
       disc: None,
@@ -173,28 +178,22 @@ pub fn snapshot(state: &FullScanState) -> ScanProgressInfo {
 }
 
 fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
-  // 1. Open the disc once and build the same disc info the UI is
-  //    currently displaying. The previous implementation called
-  //    `super::scan` here, which re-opened the BDRom a second time
-  //    internally — a measurable cost on slow drives. We now share a
-  //    single BDRom across the codec-init partial pass and the
-  //    subsequent full pass.
+  // 1. Open the disc once and build its structural metadata. Codec
+  //    initialization happens inline while the exhaustive pass reads each
+  //    file, so this phase starts reporting full-scan progress immediately
+  //    and never spends the configured fast-scan budget a second time.
   let use_ssif = crate::config::get_config().scan.enable_ssif_support;
   let bdrom = open_bdrom(Path::new(&path), use_ssif)?;
   let mut disc = super::to_disc_info(&bdrom);
-  super::codec_init(&mut disc, &bdrom);
   refresh_ssif_derived_metadata(&mut disc, &bdrom);
   cache_estimated_stream_sizes(&mut disc);
   let cached_estimates = capture_stream_estimates(&disc);
 
-  // 2. Collect every (clip-name → playlist-indices) pair for angle 0. This
+  // 2. Collect every main/angle (clip-name → playlist-indices) pair. This
   //    is the same union BDInfo builds in PlaylistMap.
   let mut clip_to_pls: HashMap<String, Vec<usize>> = HashMap::new();
   for (pli, pl) in disc.playlists.iter().enumerate() {
     for clip in &pl.stream_clips {
-      if clip.angle_index != 0 {
-        continue;
-      }
       let entry = clip_to_pls.entry(clip.name.clone()).or_default();
       if !entry.contains(&pli) {
         entry.push(pli);
@@ -242,9 +241,16 @@ fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
       s.captions = 0;
       s.forced_captions = 0;
     }
+    for angle_streams in &mut pl.angle_streams {
+      for stream in angle_streams {
+        stream.measured_size = 0;
+      }
+    }
   }
 
   let mut completed_bytes: u64 = 0;
+  let mut measured_seconds: HashMap<(String, u32), f64> = HashMap::new();
+  let mut playlist_diagnostics: HashMap<String, Vec<m2ts::StreamDiagnostic>> = HashMap::new();
 
   // 4. Iterate clips in stable order, scanning each file once.
   for clip_name in &clip_names {
@@ -272,6 +278,8 @@ fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
       &state,
       completed_bytes,
       &cached_estimates,
+      &mut measured_seconds,
+      &mut playlist_diagnostics,
     ) {
       Ok(()) => {}
       Err(err) => {
@@ -283,6 +291,12 @@ fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
         // applies via scanState.Exception.
         if !state.cancel.load(Ordering::SeqCst) {
           log::warn!("Full scan: failed to scan {}: {}", clip_name, err);
+          let mut progress = state.progress.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+          progress.file_errors.push(ScanFileErrorInfo {
+            file: clip_name.clone(),
+            message: err.to_string(),
+          });
+          progress.version += 1;
         }
       }
     }
@@ -302,7 +316,7 @@ fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
     // descriptions) so the snapshot we publish reflects what we know so
     // far. Doing this per-file means every poll the user sees up-to-date
     // numbers.
-    restore_stream_estimates(&mut disc, &cached_estimates);
+    restore_estimated_sizes(&mut disc, &cached_estimates);
     finalize_after_file(&mut disc);
 
     let mut p = state.progress.lock().unwrap_or_else(|e| e.into_inner());
@@ -315,8 +329,12 @@ fn run_worker(path: String, state: Arc<FullScanState>) -> Result<()> {
   // partial disc snapshot in place; the frontend reverts to the un-scanned
   // state by re-issuing a basic scan_disc when it sees is_cancelled.
   if !state.cancel.load(Ordering::SeqCst) {
-    restore_stream_estimates(&mut disc, &cached_estimates);
+    restore_estimated_sizes(&mut disc, &cached_estimates);
     finalize_after_file(&mut disc);
+    // The full pass now owns the definitive bit rates. Rebuild estimates
+    // from those measured values instead of retaining the structural
+    // pre-scan zeros.
+    cache_estimated_stream_sizes(&mut disc);
     let mut p = state.progress.lock().unwrap_or_else(|e| e.into_inner());
     p.disc = Some(disc);
     p.current_file = None;
@@ -344,15 +362,13 @@ fn scan_one_file(
   state: &Arc<FullScanState>,
   base_completed: u64,
   cached_estimates: &HashMap<(String, u16), CachedStreamEstimate>,
+  measured_seconds: &mut HashMap<(String, u32), f64>,
+  playlist_diagnostics: &mut HashMap<String, Vec<m2ts::StreamDiagnostic>>,
 ) -> Result<()> {
-  // Map of every playlist index that references this clip (angle 0).
+  // Map of every playlist index that references this clip at any angle.
   let mut plis: Vec<usize> = Vec::new();
   for (pli, pl) in disc.playlists.iter().enumerate() {
-    if pl
-      .stream_clips
-      .iter()
-      .any(|c| c.angle_index == 0 && c.name == clip_name)
-    {
+    if pl.stream_clips.iter().any(|c| c.name == clip_name) {
       plis.push(pli);
     }
   }
@@ -366,17 +382,32 @@ fn scan_one_file(
   let mut pid_streams: HashMap<u16, *mut TSStreamInfo> = HashMap::new();
   for &pli in &plis {
     let pl = &mut disc.playlists[pli];
-    for s in pl.video_streams.iter_mut() {
-      pid_streams.entry(s.pid).or_insert(s as *mut _);
+    let angle_indices: Vec<u32> = pl
+      .stream_clips
+      .iter()
+      .filter(|clip| clip.name == clip_name)
+      .map(|clip| clip.angle_index)
+      .collect();
+    if angle_indices.contains(&0) {
+      for s in pl.video_streams.iter_mut() {
+        pid_streams.entry(s.pid).or_insert(s as *mut _);
+      }
+      for s in pl.audio_streams.iter_mut() {
+        pid_streams.entry(s.pid).or_insert(s as *mut _);
+      }
+      for s in pl.graphics_streams.iter_mut() {
+        pid_streams.entry(s.pid).or_insert(s as *mut _);
+      }
+      for s in pl.text_streams.iter_mut() {
+        pid_streams.entry(s.pid).or_insert(s as *mut _);
+      }
     }
-    for s in pl.audio_streams.iter_mut() {
-      pid_streams.entry(s.pid).or_insert(s as *mut _);
-    }
-    for s in pl.graphics_streams.iter_mut() {
-      pid_streams.entry(s.pid).or_insert(s as *mut _);
-    }
-    for s in pl.text_streams.iter_mut() {
-      pid_streams.entry(s.pid).or_insert(s as *mut _);
+    for angle_index in angle_indices.into_iter().filter(|index| *index > 0) {
+      if let Some(streams) = pl.angle_streams.get_mut(angle_index as usize - 1) {
+        for stream in streams {
+          pid_streams.entry(stream.pid).or_insert(stream as *mut _);
+        }
+      }
     }
   }
   if pid_streams.is_empty() {
@@ -484,14 +515,14 @@ fn scan_one_file(
     return Ok(());
   }
 
+  let file_total_bytes = result.bytes;
+  let file_duration_s = result.duration_seconds;
+  let per_pid_bytes: HashMap<u16, u64> = result.streams.iter().map(|(pid, stats)| (*pid, stats.total_bytes)).collect();
+
   // The m2ts scanner returns per-PID byte totals and per-second bitrate
   // samples. We attribute those to clips proportionally to each clip's
   // [time_in, time_out] window vs. the file's full duration — accurate for
   // CBR and a close approximation for VBR.
-  let file_total_bytes = result.bytes;
-  let file_duration_s = result.duration_seconds;
-  let per_pid_bytes: HashMap<u16, u64> = result.streams.iter().map(|(pid, st)| (*pid, st.total_bytes)).collect();
-
   // Snapshot codec metadata via the same raw pointers (captures synthetic
   // hidden streams, plus any codec changes the full scan made).
   let mut codec_metadata: HashMap<u16, TSStreamInfo> = HashMap::new();
@@ -521,8 +552,9 @@ fn scan_one_file(
       .map(|s| s.pid)
       .collect();
 
+    let mut clip_ratios_by_angle: HashMap<u32, f64> = HashMap::new();
     for clip in pl.stream_clips.iter_mut() {
-      if clip.angle_index != 0 || clip.name != clip_name {
+      if clip.name != clip_name {
         continue;
       }
       let clip_duration_s = clip.length as f64 / 45000.0;
@@ -535,23 +567,12 @@ fn scan_one_file(
       // measured size is the file's total bytes. Partial clips get
       // a proportional share.
       clip.measured_size = (file_total_bytes as f64 * ratio).round() as u64;
+      *clip_ratios_by_angle.entry(clip.angle_index).or_default() += ratio;
     }
 
     // Distribute per-PID bytes to each declared stream of the playlist.
     // The same pro-rata factor used for the clip applies to its streams.
-    let total_clip_ratio: f64 = pl
-      .stream_clips
-      .iter()
-      .filter(|c| c.angle_index == 0 && c.name == clip_name)
-      .map(|c| {
-        let cl = c.length as f64 / 45000.0;
-        if file_duration_s > 0.0 {
-          (cl / file_duration_s).clamp(0.0, 1.0)
-        } else {
-          1.0
-        }
-      })
-      .sum();
+    let total_clip_ratio = clip_ratios_by_angle.get(&0).copied().unwrap_or_default();
 
     if total_clip_ratio > 0.0 {
       for s in pl
@@ -562,7 +583,7 @@ fn scan_one_file(
         .chain(pl.text_streams.iter_mut())
       {
         if let Some(b) = per_pid_bytes.get(&s.pid) {
-          let base = base_stream_bytes.get(&(pli, s.pid)).copied().unwrap_or(s.measured_size);
+          let base = base_stream_bytes.get(&(pli, 0, s.pid)).copied().unwrap_or(s.measured_size);
           s.measured_size = base + (*b as f64 * total_clip_ratio).round() as u64;
         }
         // Copy codec-derived fields if the codec parser touched them
@@ -582,8 +603,32 @@ fn scan_one_file(
       }
     }
 
+    // Alternate angles have their own video-stream dictionaries in BDInfo.
+    // Timestamp-free files retain the same proportional fallback as angle 0.
+    for (angle_index, ratio) in clip_ratios_by_angle.iter().filter(|(angle, _)| **angle > 0) {
+      if let Some(streams) = pl.angle_streams.get_mut(*angle_index as usize - 1) {
+        for stream in streams {
+          if let Some(bytes) = per_pid_bytes.get(&stream.pid) {
+            let base = base_stream_bytes
+              .get(&(pli, *angle_index, stream.pid))
+              .copied()
+              .unwrap_or(stream.measured_size);
+            stream.measured_size = base.saturating_add((*bytes as f64 * *ratio).round() as u64);
+          }
+          if let Some(meta) = codec_metadata.get(&stream.pid) {
+            if !stream.is_initialized && meta.is_initialized {
+              copy_codec_metadata(stream, meta);
+            }
+          }
+        }
+      }
+    }
+
     // Hidden tracks: PIDs that appear in the file's PMT but not in the
     // playlist's MPLS. We attach a copy with is_hidden=true once.
+    if total_clip_ratio <= 0.0 {
+      continue;
+    }
     for (pid, meta) in &codec_metadata {
       if declared_pids.contains(pid) {
         continue;
@@ -625,14 +670,306 @@ fn scan_one_file(
     }
   }
 
-  restore_stream_estimates(disc, cached_estimates);
+  // Replace the proportional fallback above with PTS/DTS-window attribution
+  // whenever the stream supplied usable timing diagnostics. Keeping the
+  // fallback path makes malformed, timestamp-free files remain reportable.
+  for &pli in &plis {
+    apply_exact_file_measurements(
+      &mut disc.playlists[pli],
+      pli,
+      clip_name,
+      &result,
+      &codec_metadata,
+      &base_stream_bytes,
+      measured_seconds,
+      playlist_diagnostics,
+    );
+  }
+  if result.streams.values().all(|stream| stream.diagnostics.is_empty()) {
+    append_bitrate_samples_and_refresh_chapters(disc, &plis, clip_name, &result.bitrate_samples);
+  }
+
+  restore_estimated_sizes(disc, cached_estimates);
   refresh_ssif_derived_metadata(disc, bd);
-  append_bitrate_samples_and_refresh_chapters(disc, &plis, clip_name, &result.bitrate_samples);
 
   Ok(())
 }
 
-fn capture_stream_measurement_base(disc: &DiscInfo, plis: &[usize]) -> HashMap<(usize, u16), u64> {
+fn diagnostic_in_clip(diagnostic: &m2ts::StreamDiagnostic, time_in_45k: u64, time_out_45k: u64) -> bool {
+  let time_in = time_in_45k as f64 / 45_000.0;
+  let time_out = time_out_45k as f64 / 45_000.0;
+  diagnostic.marker == 0.0 || (diagnostic.marker >= time_in && diagnostic.marker <= time_out)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_exact_file_measurements(
+  pl: &mut crate::protocol::PlaylistInfo,
+  playlist_index: usize,
+  clip_name: &str,
+  result: &m2ts::M2tsScanResult,
+  codec_metadata: &HashMap<u16, TSStreamInfo>,
+  base_stream_bytes: &HashMap<StreamMeasurementKey, u64>,
+  measured_seconds: &mut HashMap<(String, u32), f64>,
+  playlist_diagnostics: &mut HashMap<String, Vec<m2ts::StreamDiagnostic>>,
+) {
+  let matching_indices: Vec<usize> = pl
+    .stream_clips
+    .iter()
+    .enumerate()
+    .filter_map(|(index, clip)| (clip.name == clip_name).then_some(index))
+    .collect();
+  if matching_indices.is_empty() {
+    return;
+  }
+
+  let mut attributed_by_angle: HashMap<u32, HashMap<u16, u64>> = HashMap::new();
+  let mut seconds_by_angle: HashMap<u32, f64> = HashMap::new();
+  let mut transformed_diagnostics = Vec::new();
+
+  for clip_index in matching_indices {
+    let clip = pl.stream_clips[clip_index].clone();
+    let mut clip_packets = 0u64;
+    let mut has_timing = false;
+
+    for (pid, stats) in &result.streams {
+      let mut stream_bytes = 0u64;
+      for diagnostic in &stats.diagnostics {
+        if diagnostic_in_clip(diagnostic, clip.time_in, clip.time_out) {
+          has_timing = true;
+          clip_packets = clip_packets.saturating_add(diagnostic.packets);
+          stream_bytes = stream_bytes.saturating_add(diagnostic.bytes);
+        }
+      }
+      if stream_bytes > 0 {
+        *attributed_by_angle
+          .entry(clip.angle_index)
+          .or_default()
+          .entry(*pid)
+          .or_default() += stream_bytes;
+      }
+    }
+
+    if has_timing {
+      pl.stream_clips[clip_index].measured_size = clip_packets.saturating_mul(192);
+    }
+
+    let primary_pid = if clip.angle_index == 0 {
+      pl.video_streams.first().map(|stream| stream.pid)
+    } else {
+      pl.angle_streams
+        .get(clip.angle_index as usize - 1)
+        .and_then(|streams| streams.first())
+        .map(|stream| stream.pid)
+    };
+    if let Some(stats) = primary_pid.and_then(|pid| result.streams.get(&pid)) {
+      for diagnostic in &stats.diagnostics {
+        if !diagnostic_in_clip(diagnostic, clip.time_in, clip.time_out) {
+          continue;
+        }
+        *seconds_by_angle.entry(clip.angle_index).or_default() += diagnostic.interval;
+        if clip.angle_index == 0 {
+          let mut transformed = diagnostic.clone();
+          transformed.marker =
+            clip.relative_time_in as f64 / 45_000.0 + diagnostic.marker - clip.time_in as f64 / 45_000.0;
+          transformed_diagnostics.push(transformed);
+        }
+      }
+    }
+  }
+
+  if let Some(per_pid_bytes) = attributed_by_angle.get(&0) {
+    for stream in pl
+      .video_streams
+      .iter_mut()
+      .chain(pl.audio_streams.iter_mut())
+      .chain(pl.graphics_streams.iter_mut())
+      .chain(pl.text_streams.iter_mut())
+    {
+      if let Some(bytes) = per_pid_bytes.get(&stream.pid) {
+        let base = base_stream_bytes
+          .get(&(playlist_index, 0, stream.pid))
+          .copied()
+          .unwrap_or_default();
+        stream.measured_size = base.saturating_add(*bytes);
+      }
+    }
+  }
+
+  for (angle_index, per_pid_bytes) in attributed_by_angle.iter().filter(|(angle, _)| **angle > 0) {
+    if let Some(streams) = pl.angle_streams.get_mut(*angle_index as usize - 1) {
+      for stream in streams {
+        if let Some(bytes) = per_pid_bytes.get(&stream.pid) {
+          let base = base_stream_bytes
+            .get(&(playlist_index, *angle_index, stream.pid))
+            .copied()
+            .unwrap_or_default();
+          stream.measured_size = base.saturating_add(*bytes);
+        }
+        if let Some(meta) = codec_metadata.get(&stream.pid) {
+          if !stream.is_initialized && meta.is_initialized {
+            copy_codec_metadata(stream, meta);
+          }
+        }
+      }
+    }
+  }
+
+  for (angle_index, seconds) in seconds_by_angle {
+    *measured_seconds.entry((pl.name.clone(), angle_index)).or_default() += seconds;
+  }
+  update_measured_bitrates(pl, measured_seconds);
+
+  if !transformed_diagnostics.is_empty() {
+    let diagnostics = playlist_diagnostics.entry(pl.name.clone()).or_default();
+    diagnostics.extend(transformed_diagnostics);
+    diagnostics.sort_by(|a, b| {
+      a.marker
+        .partial_cmp(&b.marker)
+        .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    rebuild_chart_samples(pl, diagnostics);
+    refresh_chapter_metrics_from_diagnostics(pl, diagnostics);
+  }
+}
+
+fn update_measured_bitrates(
+  pl: &mut crate::protocol::PlaylistInfo,
+  measured_seconds: &HashMap<(String, u32), f64>,
+) {
+  if let Some(seconds) = measured_seconds.get(&(pl.name.clone(), 0)).copied().filter(|seconds| *seconds > 0.0) {
+    for stream in pl
+      .video_streams
+      .iter_mut()
+      .chain(pl.audio_streams.iter_mut())
+      .chain(pl.graphics_streams.iter_mut())
+      .chain(pl.text_streams.iter_mut())
+    {
+      let active = (stream.measured_size as f64 * 8.0 / seconds).round() as u64;
+      if stream.is_video_stream {
+        stream.active_bit_rate = active;
+      }
+      if stream.is_vbr {
+        stream.bit_rate = active;
+      }
+    }
+  }
+  for (index, streams) in pl.angle_streams.iter_mut().enumerate() {
+    let angle_index = index as u32 + 1;
+    let Some(seconds) = measured_seconds
+      .get(&(pl.name.clone(), angle_index))
+      .copied()
+      .filter(|seconds| *seconds > 0.0)
+    else {
+      continue;
+    };
+    for stream in streams {
+      let active = (stream.measured_size as f64 * 8.0 / seconds).round() as u64;
+      stream.active_bit_rate = active;
+      if stream.is_vbr {
+        stream.bit_rate = active;
+      }
+    }
+  }
+}
+
+fn rebuild_chart_samples(pl: &mut crate::protocol::PlaylistInfo, diagnostics: &[m2ts::StreamDiagnostic]) {
+  let mut buckets: std::collections::BTreeMap<u64, (u64, f64)> = std::collections::BTreeMap::new();
+  for diagnostic in diagnostics {
+    let second = diagnostic.marker.max(0.0).floor() as u64;
+    let bucket = buckets.entry(second).or_default();
+    bucket.0 = bucket.0.saturating_add(diagnostic.bytes);
+    bucket.1 += diagnostic.interval;
+  }
+  pl.bitrate_samples = buckets
+    .into_iter()
+    .map(|(second, (bytes, seconds))| ChartSample {
+      time: second as f64,
+      bit_rate: if seconds > 0.0 {
+        (bytes as f64 * 8.0 / seconds).round() as u64
+      } else {
+        0
+      },
+    })
+    .collect();
+}
+
+fn refresh_chapter_metrics_from_diagnostics(
+  pl: &mut crate::protocol::PlaylistInfo,
+  diagnostics: &[m2ts::StreamDiagnostic],
+) {
+  pl.chapter_metrics.clear();
+  let total_length = pl.total_length as f64 / 45_000.0;
+  for chapter_index in 0..pl.chapters.len() {
+    let start = pl.chapters[chapter_index];
+    let end = pl.chapters.get(chapter_index + 1).copied().unwrap_or(total_length);
+    let chapter: Vec<&m2ts::StreamDiagnostic> = diagnostics
+      .iter()
+      .filter(|diagnostic| diagnostic.marker >= start && diagnostic.marker < end)
+      .collect();
+    if chapter.is_empty() {
+      pl.chapter_metrics.push(ChapterMetricsInfo::default());
+      continue;
+    }
+
+    let total_bytes: u64 = chapter.iter().map(|diagnostic| diagnostic.bytes).sum();
+    let chapter_length = (end - start).max(0.0);
+    let avg_video_rate = if chapter_length > 0.0 {
+      (total_bytes as f64 * 8.0 / chapter_length).round() as u64
+    } else {
+      0
+    };
+    let (max_1_sec_rate, max_1_sec_time) = diagnostic_peak_window(&chapter, 1.0);
+    let (max_5_sec_rate, max_5_sec_time) = diagnostic_peak_window(&chapter, 5.0);
+    let (max_10_sec_rate, max_10_sec_time) = diagnostic_peak_window(&chapter, 10.0);
+    let frame_count = chapter.iter().filter(|diagnostic| diagnostic.has_frame).count() as u64;
+    let (max_frame_size, max_frame_time) = chapter
+      .iter()
+      .filter(|diagnostic| diagnostic.has_frame)
+      .max_by_key(|diagnostic| diagnostic.bytes)
+      .map(|diagnostic| (diagnostic.bytes, diagnostic.marker))
+      .unwrap_or((0, 0.0));
+
+    pl.chapter_metrics.push(ChapterMetricsInfo {
+      avg_video_rate,
+      max_1_sec_rate,
+      max_1_sec_time,
+      max_5_sec_rate,
+      max_5_sec_time,
+      max_10_sec_rate,
+      max_10_sec_time,
+      avg_frame_size: if frame_count > 0 { total_bytes / frame_count } else { 0 },
+      max_frame_size,
+      max_frame_time,
+    });
+  }
+}
+
+fn diagnostic_peak_window(diagnostics: &[&m2ts::StreamDiagnostic], window_seconds: f64) -> (u64, f64) {
+  let mut queue: std::collections::VecDeque<&m2ts::StreamDiagnostic> = std::collections::VecDeque::new();
+  let mut bytes = 0u64;
+  let mut seconds = 0.0;
+  let mut best_rate = 0u64;
+  let mut best_time = 0.0;
+  for diagnostic in diagnostics {
+    queue.push_back(diagnostic);
+    bytes = bytes.saturating_add(diagnostic.bytes);
+    seconds += diagnostic.interval;
+    if seconds > window_seconds {
+      let rate = (bytes as f64 * 8.0 / seconds).round() as u64;
+      if rate > best_rate {
+        best_rate = rate;
+        best_time = (diagnostic.marker - seconds).max(0.0);
+      }
+      if let Some(front) = queue.pop_front() {
+        bytes = bytes.saturating_sub(front.bytes);
+        seconds = (seconds - front.interval).max(0.0);
+      }
+    }
+  }
+  (best_rate, best_time)
+}
+
+fn capture_stream_measurement_base(disc: &DiscInfo, plis: &[usize]) -> HashMap<StreamMeasurementKey, u64> {
   let mut base = HashMap::new();
   for &pli in plis {
     let Some(pl) = disc.playlists.get(pli) else {
@@ -645,7 +982,12 @@ fn capture_stream_measurement_base(disc: &DiscInfo, plis: &[usize]) -> HashMap<(
       .chain(pl.graphics_streams.iter())
       .chain(pl.text_streams.iter())
     {
-      base.insert((pli, s.pid), s.measured_size);
+      base.insert((pli, 0, s.pid), s.measured_size);
+    }
+    for (angle_index, streams) in pl.angle_streams.iter().enumerate() {
+      for stream in streams {
+        base.insert((pli, angle_index as u32 + 1, stream.pid), stream.measured_size);
+      }
     }
   }
   base
@@ -682,10 +1024,31 @@ fn restore_stream_estimates(disc: &mut DiscInfo, cached: &HashMap<(String, u16),
       .chain(pl.audio_streams.iter_mut())
       .chain(pl.graphics_streams.iter_mut())
       .chain(pl.text_streams.iter_mut())
+      .chain(pl.angle_streams.iter_mut().flatten())
     {
       if let Some(estimate) = cached.get(&(pl.name.clone(), s.pid)) {
+        s.estimated_size = estimate.estimated_size;
         s.bit_rate = estimate.bit_rate;
         s.active_bit_rate = estimate.active_bit_rate;
+      }
+    }
+  }
+}
+
+fn restore_estimated_sizes(
+  disc: &mut DiscInfo,
+  cached: &HashMap<(String, u16), CachedStreamEstimate>,
+) {
+  for pl in disc.playlists.iter_mut() {
+    for s in pl
+      .video_streams
+      .iter_mut()
+      .chain(pl.audio_streams.iter_mut())
+      .chain(pl.graphics_streams.iter_mut())
+      .chain(pl.text_streams.iter_mut())
+      .chain(pl.angle_streams.iter_mut().flatten())
+    {
+      if let Some(estimate) = cached.get(&(pl.name.clone(), s.pid)) {
         s.estimated_size = estimate.estimated_size;
       }
     }
@@ -693,22 +1056,27 @@ fn restore_stream_estimates(disc: &mut DiscInfo, cached: &HashMap<(String, u16),
 }
 
 fn publish_partial_file_snapshot(
-  disc: &mut DiscInfo,
+  disc: &DiscInfo,
   plis: &[usize],
   clip_name: &str,
   progress: &m2ts::M2tsScanProgress,
-  base_stream_bytes: &HashMap<(usize, u16), u64>,
+  base_stream_bytes: &HashMap<StreamMeasurementKey, u64>,
   cached_estimates: &HashMap<(String, u16), CachedStreamEstimate>,
   state: &Arc<FullScanState>,
   base_completed: u64,
 ) {
-  apply_partial_file_measurements(disc, plis, clip_name, progress, base_stream_bytes);
-  restore_stream_estimates(disc, cached_estimates);
-  finalize_after_file(disc);
+  // Never apply provisional measurements or cached rates to the live disc:
+  // codec parsers are mutating that same object during the scan. Publishing
+  // from a clone prevents a progress tick from undoing metadata discovered
+  // earlier in the current file.
+  let mut snapshot = disc.clone();
+  apply_partial_file_measurements(&mut snapshot, plis, clip_name, progress, base_stream_bytes);
+  restore_stream_estimates(&mut snapshot, cached_estimates);
+  finalize_after_file(&mut snapshot);
 
   let mut p = state.progress.lock().unwrap_or_else(|e| e.into_inner());
   p.finished_bytes = base_completed + progress.bytes;
-  p.disc = Some(disc.clone());
+  p.disc = Some(snapshot);
   p.version += 1;
 }
 
@@ -717,7 +1085,7 @@ fn apply_partial_file_measurements(
   plis: &[usize],
   clip_name: &str,
   progress: &m2ts::M2tsScanProgress,
-  base_stream_bytes: &HashMap<(usize, u16), u64>,
+  base_stream_bytes: &HashMap<StreamMeasurementKey, u64>,
 ) {
   let file_duration_s = progress.duration_seconds;
   for &pli in plis {
@@ -725,8 +1093,9 @@ fn apply_partial_file_measurements(
       continue;
     };
 
+    let mut clip_ratios_by_angle: HashMap<u32, f64> = HashMap::new();
     for clip in pl.stream_clips.iter_mut() {
-      if clip.angle_index != 0 || clip.name != clip_name {
+      if clip.name != clip_name {
         continue;
       }
       let clip_duration_s = clip.length as f64 / 45000.0;
@@ -736,36 +1105,35 @@ fn apply_partial_file_measurements(
         1.0
       };
       clip.measured_size = (progress.bytes as f64 * ratio).round() as u64;
+      *clip_ratios_by_angle.entry(clip.angle_index).or_default() += ratio;
     }
 
-    let total_clip_ratio: f64 = pl
-      .stream_clips
-      .iter()
-      .filter(|c| c.angle_index == 0 && c.name == clip_name)
-      .map(|c| {
-        let cl = c.length as f64 / 45000.0;
-        if file_duration_s > 0.0 {
-          (cl / file_duration_s).clamp(0.0, 1.0)
-        } else {
-          1.0
+    let total_clip_ratio = clip_ratios_by_angle.get(&0).copied().unwrap_or_default();
+    if total_clip_ratio > 0.0 {
+      for s in pl
+        .video_streams
+        .iter_mut()
+        .chain(pl.audio_streams.iter_mut())
+        .chain(pl.graphics_streams.iter_mut())
+        .chain(pl.text_streams.iter_mut())
+      {
+        if let Some(stat) = progress.streams.get(&s.pid) {
+          let base = base_stream_bytes.get(&(pli, 0, s.pid)).copied().unwrap_or(s.measured_size);
+          s.measured_size = base + (stat.total_bytes as f64 * total_clip_ratio).round() as u64;
         }
-      })
-      .sum();
-
-    if total_clip_ratio <= 0.0 {
-      continue;
+      }
     }
-
-    for s in pl
-      .video_streams
-      .iter_mut()
-      .chain(pl.audio_streams.iter_mut())
-      .chain(pl.graphics_streams.iter_mut())
-      .chain(pl.text_streams.iter_mut())
-    {
-      if let Some(stat) = progress.streams.get(&s.pid) {
-        let base = base_stream_bytes.get(&(pli, s.pid)).copied().unwrap_or(s.measured_size);
-        s.measured_size = base + (stat.total_bytes as f64 * total_clip_ratio).round() as u64;
+    for (angle_index, ratio) in clip_ratios_by_angle.iter().filter(|(angle, _)| **angle > 0) {
+      if let Some(streams) = pl.angle_streams.get_mut(*angle_index as usize - 1) {
+        for stream in streams {
+          if let Some(stat) = progress.streams.get(&stream.pid) {
+            let base = base_stream_bytes
+              .get(&(pli, *angle_index, stream.pid))
+              .copied()
+              .unwrap_or(stream.measured_size);
+            stream.measured_size = base + (stat.total_bytes as f64 * *ratio).round() as u64;
+          }
+        }
       }
     }
   }
@@ -924,6 +1292,11 @@ fn finalize_after_file(disc: &mut DiscInfo) {
     {
       codec::finalize_description(s);
     }
+    for angle_streams in &mut pl.angle_streams {
+      for stream in angle_streams {
+        codec::finalize_description(stream);
+      }
+    }
   }
   recompute_mvc_extension(disc);
 }
@@ -1049,6 +1422,7 @@ mod tests {
       audio_streams: Vec::new(),
       graphics_streams: Vec::new(),
       text_streams: Vec::new(),
+      angle_streams: Vec::new(),
       total_angles: 0,
     }
   }
@@ -1189,7 +1563,7 @@ mod tests {
   fn build_m2ts_bytes() -> Vec<u8> {
     let mut data = Vec::new();
     let mut atc: u32 = 0;
-    let mut push = |frame: Vec<u8>, data: &mut Vec<u8>| {
+    let push = |frame: Vec<u8>, data: &mut Vec<u8>| {
       data.extend_from_slice(&frame);
     };
     push(
@@ -1477,6 +1851,152 @@ mod tests {
   }
 
   #[test]
+  fn exact_timing_windows_drive_payload_bitrates_and_chapter_metrics() {
+    let mut pl = empty_playlist("00001.MPLS");
+    pl.total_length = 180_000;
+    pl.chapters = vec![0.0];
+    pl.stream_clips.push(clip("00001.M2TS", 0, 180_000));
+    let mut video = video_stream(0x1011);
+    video.is_vbr = true;
+    video.measured_size = 0;
+    let mut audio = audio_stream(0x1100);
+    audio.is_vbr = true;
+    audio.measured_size = 0;
+    pl.video_streams.push(video);
+    pl.audio_streams.push(audio);
+
+    let diagnostics = |bytes, packets, has_frame| {
+      [1.0, 2.0, 3.0]
+        .into_iter()
+        .map(|marker| m2ts::StreamDiagnostic {
+          marker,
+          interval: 1.0,
+          bytes,
+          packets,
+          has_frame,
+        })
+        .collect()
+    };
+    let mut streams = HashMap::new();
+    streams.insert(
+      0x1011,
+      m2ts::StreamStats {
+        pid: 0x1011,
+        stream_type: 0x1b,
+        total_bytes: 300,
+        packet_count: 6,
+        packet_seconds: 3.0,
+        diagnostics: diagnostics(100, 2, true),
+        pes_sample: Vec::new(),
+        pes_in_progress: Vec::new(),
+        pes_started: false,
+      },
+    );
+    streams.insert(
+      0x1100,
+      m2ts::StreamStats {
+        pid: 0x1100,
+        stream_type: 0x81,
+        total_bytes: 60,
+        packet_count: 3,
+        packet_seconds: 0.0,
+        diagnostics: diagnostics(20, 1, false),
+        pes_sample: Vec::new(),
+        pes_in_progress: Vec::new(),
+        pes_started: false,
+      },
+    );
+    let result = m2ts::M2tsScanResult {
+      bytes: 9 * 192,
+      duration_seconds: 3.0,
+      streams,
+      bitrate_samples: Vec::new(),
+      program_pmt_pids: Vec::new(),
+      pcr_pid: None,
+    };
+    let mut measured_seconds = HashMap::new();
+    let mut playlist_diagnostics = HashMap::new();
+    apply_exact_file_measurements(
+      &mut pl,
+      0,
+      "00001.M2TS",
+      &result,
+      &HashMap::new(),
+      &HashMap::new(),
+      &mut measured_seconds,
+      &mut playlist_diagnostics,
+    );
+
+    assert_eq!(pl.stream_clips[0].measured_size, 9 * 192);
+    assert_eq!(pl.video_streams[0].measured_size, 300);
+    assert_eq!(pl.audio_streams[0].measured_size, 60);
+    assert_eq!(pl.video_streams[0].active_bit_rate, 800);
+    assert_eq!(pl.video_streams[0].bit_rate, 800);
+    assert_eq!(pl.audio_streams[0].bit_rate, 160);
+    assert_eq!(pl.bitrate_samples.len(), 3);
+    assert_eq!(pl.chapter_metrics.len(), 1);
+    assert_eq!(pl.chapter_metrics[0].avg_video_rate, 600);
+    assert_eq!(pl.chapter_metrics[0].avg_frame_size, 100);
+    assert_eq!(pl.chapter_metrics[0].max_frame_size, 100);
+  }
+
+  #[test]
+  fn exact_angle_measurement_replaces_the_live_proportional_snapshot() {
+    let mut pl = empty_playlist("00001.MPLS");
+    let mut angle_clip = clip("00101.M2TS", 0, 90_000);
+    angle_clip.angle_index = 1;
+    pl.stream_clips.push(angle_clip);
+    let mut angle_video = video_stream(0x1011);
+    angle_video.measured_size = 999;
+    pl.angle_streams.push(vec![angle_video]);
+
+    let mut streams = HashMap::new();
+    streams.insert(
+      0x1011,
+      m2ts::StreamStats {
+        pid: 0x1011,
+        stream_type: 0x1b,
+        total_bytes: 100,
+        packet_count: 2,
+        packet_seconds: 1.0,
+        diagnostics: vec![m2ts::StreamDiagnostic {
+          marker: 1.0,
+          interval: 1.0,
+          bytes: 100,
+          packets: 2,
+          has_frame: true,
+        }],
+        pes_sample: Vec::new(),
+        pes_in_progress: Vec::new(),
+        pes_started: false,
+      },
+    );
+    let result = m2ts::M2tsScanResult {
+      bytes: 384,
+      duration_seconds: 1.0,
+      streams,
+      bitrate_samples: Vec::new(),
+      program_pmt_pids: Vec::new(),
+      pcr_pid: None,
+    };
+    let mut base = HashMap::new();
+    base.insert((0, 1, 0x1011), 50);
+    apply_exact_file_measurements(
+      &mut pl,
+      0,
+      "00101.M2TS",
+      &result,
+      &HashMap::new(),
+      &base,
+      &mut HashMap::new(),
+      &mut HashMap::new(),
+    );
+
+    assert_eq!(pl.stream_clips[0].measured_size, 384);
+    assert_eq!(pl.angle_streams[0][0].measured_size, 150);
+  }
+
+  #[test]
   fn capture_and_restore_stream_estimates_roundtrip() {
     let mut disc = empty_disc();
     let mut pl = empty_playlist("00800.MPLS");
@@ -1514,7 +2034,7 @@ mod tests {
     disc.playlists.push(empty_playlist("b"));
 
     let base = capture_stream_measurement_base(&disc, &[0, 99]);
-    assert_eq!(base.get(&(0, 0x1011)).copied(), Some(1234));
+    assert_eq!(base.get(&(0, 0, 0x1011)).copied(), Some(1234));
     // index 99 doesn't exist; skipped without panic.
     assert_eq!(base.len(), 1);
   }
@@ -1538,6 +2058,8 @@ mod tests {
         stream_type: 0x1b,
         total_bytes: 8000,
         packet_count: 1,
+        packet_seconds: 0.0,
+        diagnostics: Vec::new(),
         pes_sample: Vec::new(),
         pes_in_progress: Vec::new(),
         pes_started: false,
@@ -1705,12 +2227,14 @@ mod tests {
       duration_seconds: 10.0,
       streams: HashMap::new(),
     };
-    publish_partial_file_snapshot(&mut disc, &[0], "00001.M2TS", &progress, &base, &cached, &state, 1000);
+    publish_partial_file_snapshot(&disc, &[0], "00001.M2TS", &progress, &base, &cached, &state, 1000);
     let p = snapshot(&state);
     assert_eq!(p.finished_bytes, 1000 + 4000);
-    assert!(p.disc.is_some());
+    let published = p.disc.expect("partial disc snapshot");
+    assert!(published.playlists[0].stream_clips[0].measured_size > 0);
     assert!(p.version >= 1);
-    // estimates restored (bit_rate left at the cached value).
+    // The live codec target remains untouched by provisional snapshots.
+    assert_eq!(disc.playlists[0].stream_clips[0].measured_size, 0);
     assert_eq!(disc.playlists[0].video_streams[0].bit_rate, 20_000_000);
   }
 
@@ -1854,13 +2378,26 @@ mod tests {
     let use_ssif = false;
     let bdrom = open_bdrom(tmp.path(), use_ssif).expect("open bdrom");
     let mut disc = super::super::to_disc_info(&bdrom);
-    super::super::codec_init(&mut disc, &bdrom);
+    super::super::codec_init::codec_init(&mut disc, &bdrom);
     let cached = capture_stream_estimates(&disc);
 
     let state = make_state();
     let clip_name = "00001.M2TS";
     let entry = effective_stream_source(&bdrom, clip_name).expect("stream source");
-    scan_one_file(&bdrom, &entry.0, &mut disc, clip_name, &state, 0, &cached).expect("scan_one_file ok");
+    let mut measured_seconds = HashMap::new();
+    let mut diagnostics = HashMap::new();
+    scan_one_file(
+      &bdrom,
+      &entry.0,
+      &mut disc,
+      clip_name,
+      &state,
+      0,
+      &cached,
+      &mut measured_seconds,
+      &mut diagnostics,
+    )
+    .expect("scan_one_file ok");
 
     let pl = &disc.playlists[0];
     // The clip and at least the video stream picked up measured bytes.
@@ -1880,14 +2417,27 @@ mod tests {
     build_native_disc(tmp.path());
     let bdrom = open_bdrom(tmp.path(), false).expect("open bdrom");
     let mut disc = super::super::to_disc_info(&bdrom);
-    super::super::codec_init(&mut disc, &bdrom);
+    super::super::codec_init::codec_init(&mut disc, &bdrom);
     let cached = capture_stream_estimates(&disc);
 
     let state = make_state();
     state.cancel.store(true, Ordering::SeqCst);
     let clip_name = "00001.M2TS";
     let entry = effective_stream_source(&bdrom, clip_name).expect("stream source");
-    scan_one_file(&bdrom, &entry.0, &mut disc, clip_name, &state, 0, &cached).expect("scan_one_file ok");
+    let mut measured_seconds = HashMap::new();
+    let mut diagnostics = HashMap::new();
+    scan_one_file(
+      &bdrom,
+      &entry.0,
+      &mut disc,
+      clip_name,
+      &state,
+      0,
+      &cached,
+      &mut measured_seconds,
+      &mut diagnostics,
+    )
+    .expect("scan_one_file ok");
 
     // Cancelled: no per-clip measured-size deltas applied.
     assert_eq!(disc.playlists[0].stream_clips[0].measured_size, 0);
@@ -1903,7 +2453,20 @@ mod tests {
     let state = make_state();
     // Use the real stream source but a clip name no playlist references.
     let entry = effective_stream_source(&bdrom, "00001.M2TS").expect("src");
-    scan_one_file(&bdrom, &entry.0, &mut disc, "99999.M2TS", &state, 0, &cached).expect("noop ok");
+    let mut measured_seconds = HashMap::new();
+    let mut diagnostics = HashMap::new();
+    scan_one_file(
+      &bdrom,
+      &entry.0,
+      &mut disc,
+      "99999.M2TS",
+      &state,
+      0,
+      &cached,
+      &mut measured_seconds,
+      &mut diagnostics,
+    )
+    .expect("noop ok");
     // No playlist references that clip name -> nothing measured.
     assert_eq!(disc.playlists[0].stream_clips[0].measured_size, 0);
   }

@@ -20,8 +20,8 @@
  * (4-byte arrival timecode + 188-byte MPEG-TS packet) to discover PIDs from
  * PAT/PMT, total bytes per PID, and bitrate-over-time samples for charts.
  *
- * This is a pragmatic port of TSStreamFile.cs. It does not run the deep
- * codec parsers (TSCodec*.cs) — codec details still come from MPLS for now.
+ * This is a pragmatic port of TSStreamFile.cs. Callers receive reassembled
+ * elementary PES payloads and dispatch them to the codec parsers.
  */
 
 use anyhow::Result;
@@ -109,12 +109,99 @@ pub struct StreamStats {
   pub stream_type: u8,
   pub total_bytes: u64,
   pub packet_count: u64,
+  /// Presentation time covered by the video timing windows for this PID.
+  pub packet_seconds: f64,
+  /// PTS/DTS-aligned payload windows. Full scan uses these to attribute
+  /// packets and elementary-stream bytes to exact playlist clip ranges.
+  pub diagnostics: Vec<StreamDiagnostic>,
   /// First reassembled PES payload (without the PES header) up to ~64KB.
   /// Used by codec parsers to extract format details.
   pub pes_sample: Vec<u8>,
   /// PUSI-marked partial PES we are currently building, used to fill pes_sample.
   pub pes_in_progress: Vec<u8>,
   pub pes_started: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct StreamDiagnostic {
+  /// Absolute MPEG presentation/decode timestamp in seconds.
+  pub marker: f64,
+  /// Duration since the preceding timestamp.
+  pub interval: f64,
+  /// Elementary-stream payload bytes accumulated in this window.
+  pub bytes: u64,
+  /// 192-byte M2TS packets accumulated in this window.
+  pub packets: u64,
+  /// True when the window was closed by this video PID's timestamp.
+  pub has_frame: bool,
+}
+
+#[derive(Default)]
+struct PendingPes {
+  data: Vec<u8>,
+  remaining: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PesHeader {
+  payload_offset: usize,
+  payload_length: Option<usize>,
+  pts: Option<i64>,
+  dts: Option<i64>,
+}
+
+#[derive(Default)]
+struct PsiSectionAssembler {
+  bytes: Vec<u8>,
+}
+
+impl PsiSectionAssembler {
+  fn push(&mut self, payload: &[u8], payload_unit_start: bool) -> Vec<Vec<u8>> {
+    let mut completed = Vec::new();
+    let mut data = payload;
+    if payload_unit_start {
+      let Some((&pointer, rest)) = payload.split_first() else {
+        return completed;
+      };
+      let pointer = pointer as usize;
+      if pointer > rest.len() {
+        self.bytes.clear();
+        return completed;
+      }
+      if !self.bytes.is_empty() && pointer > 0 {
+        self.bytes.extend_from_slice(&rest[..pointer]);
+        self.take_completed(&mut completed);
+      }
+      // A new section starts after the pointer. Any still-incomplete prior
+      // section is corrupt and must not absorb bytes from the new one.
+      self.bytes.clear();
+      data = &rest[pointer..];
+    }
+    self.bytes.extend_from_slice(data);
+    self.take_completed(&mut completed);
+    completed
+  }
+
+  fn take_completed(&mut self, completed: &mut Vec<Vec<u8>>) {
+    loop {
+      while self.bytes.first() == Some(&0xFF) {
+        self.bytes.remove(0);
+      }
+      if self.bytes.len() < 3 {
+        return;
+      }
+      let section_length = (((self.bytes[1] as usize) & 0x0F) << 8) | self.bytes[2] as usize;
+      let total = 3 + section_length;
+      if total < 3 || total > 1024 {
+        self.bytes.clear();
+        return;
+      }
+      if self.bytes.len() < total {
+        return;
+      }
+      completed.push(self.bytes.drain(..total).collect());
+    }
+  }
 }
 
 const SAMPLE_INTERVAL_SECONDS: f64 = 1.0;
@@ -141,12 +228,14 @@ where
   let mut pmt_pid_flags = [false; MAX_PID];
   let mut pmt_pids: Vec<u16> = Vec::new();
   let mut pid_to_stream_type: HashMap<u16, u8> = HashMap::new();
+  let mut psi_assemblers: HashMap<u16, PsiSectionAssembler> = HashMap::new();
   let mut stream_type_by_pid = [0u8; MAX_PID];
   let mut pid_seen = [false; MAX_PID];
   let mut seen_pids: Vec<u16> = Vec::new();
   let mut total_bytes_by_pid = [0u64; MAX_PID];
   let mut packet_count_by_pid = [0u64; MAX_PID];
-  let mut pending_pes: HashMap<u16, Vec<u8>> = HashMap::new();
+  let mut pending_pes: HashMap<u16, PendingPes> = HashMap::new();
+  let mut first_pes_samples: HashMap<u16, Vec<u8>> = HashMap::new();
   // PIDs whose PES we no longer need to reassemble. Once a stream's codec
   // has been initialized (and it's not PGS, which keeps accumulating
   // caption counts), the callback returns `SkipPid` and we skip the
@@ -156,6 +245,14 @@ where
   let mut pcr_pid: Option<u16> = None;
   let mut first_pcr_27mhz: Option<i128> = None;
   let mut last_pcr_27mhz: Option<i128> = None;
+  let mut last_timestamp_raw = [None; MAX_PID];
+  let mut last_timestamp_unwrapped = [None; MAX_PID];
+  let mut first_video_timestamp: Option<i64> = None;
+  let mut last_video_timestamp: Option<i64> = None;
+  let mut window_bytes_by_pid = [0u64; MAX_PID];
+  let mut window_packets_by_pid = [0u64; MAX_PID];
+  let mut packet_seconds_by_pid = [0.0f64; MAX_PID];
+  let mut diagnostics_by_pid: HashMap<u16, Vec<StreamDiagnostic>> = HashMap::new();
 
   let mut first_atc_27mhz: Option<i128> = None;
   let mut prev_atc_27mhz: Option<i128> = None;
@@ -172,6 +269,7 @@ where
   const READ_CHUNK_SIZE: usize = 5 * 1024 * 1024;
   let mut buffer = vec![0u8; READ_CHUNK_SIZE + M2TS_PACKET_SIZE];
   let mut carry_len = 0usize;
+  let mut stopped = false;
 
   'outer: loop {
     let read_len = reader.read(&mut buffer[carry_len..])?;
@@ -209,14 +307,29 @@ where
       let ts = &packet[4..4 + TS_PACKET_SIZE];
       let payload_unit_start = (ts[1] & 0x40) != 0;
       let pid: u16 = (((ts[1] as u16) & 0x1F) << 8) | (ts[2] as u16);
+      let transport_scrambling_control = (ts[3] >> 6) & 0x3;
       let adaptation_field_control = (ts[3] >> 4) & 0x3;
       let has_adaptation = (adaptation_field_control & 0x2) != 0;
       let has_payload = (adaptation_field_control & 0x1) != 0;
+      let pid_index = pid as usize;
+
+      if !pid_seen[pid_index] {
+        pid_seen[pid_index] = true;
+        seen_pids.push(pid);
+      }
+      packet_count_by_pid[pid_index] += 1;
+      window_packets_by_pid[pid_index] += 1;
 
       let mut payload_offset = 4usize;
       if has_adaptation {
+        if payload_offset >= TS_PACKET_SIZE {
+          continue;
+        }
         let af_len = ts[4] as usize;
         if af_len >= 1 {
+          if 5 + af_len > TS_PACKET_SIZE {
+            continue;
+          }
           let flags = ts[5];
           let pcr_present = (flags & 0x10) != 0;
           if pcr_present && af_len >= 7 {
@@ -241,48 +354,141 @@ where
       }
       let payload = &ts[payload_offset..];
 
-      let pid_index = pid as usize;
-      if !pid_seen[pid_index] {
-        pid_seen[pid_index] = true;
-        seen_pids.push(pid);
-      }
-      total_bytes_by_pid[pid_index] += payload.len() as u64;
-      packet_count_by_pid[pid_index] += 1;
-
-      if pid == 0 && payload_unit_start {
-        parse_pat(payload, &mut pmt_pids, &mut pmt_pid_set, &mut pmt_pid_flags);
-      } else if pmt_pid_flags[pid_index] && payload_unit_start {
-        parse_pmt(payload, &mut pid_to_stream_type, &mut stream_type_by_pid);
-      } else if pid != 0 && !pmt_pid_flags[pid_index] && !skip_pids[pid_index] {
-        // PES reassembly + dispatch
-        if payload_unit_start && payload.len() >= 9 && payload[0] == 0x00 && payload[1] == 0x00 && payload[2] == 0x01 {
-          // Flush previous PES for this PID, if any.
-          let mut start_new_pes = true;
+      if pid == 0 {
+        for section in psi_assemblers.entry(pid).or_default().push(payload, payload_unit_start) {
+          parse_pat_section(&section, &mut pmt_pids, &mut pmt_pid_set, &mut pmt_pid_flags);
+        }
+      } else if pmt_pid_flags[pid_index] {
+        for section in psi_assemblers.entry(pid).or_default().push(payload, payload_unit_start) {
+          parse_pmt_section(&section, &mut pid_to_stream_type, &mut stream_type_by_pid);
+        }
+      } else if pid != 0 && !pmt_pid_flags[pid_index] {
+        if payload_unit_start {
+          // A new PUSI terminates a variable-length PES. Dispatch it before
+          // beginning the next one, just as BDInfo does.
           if let Some(prev) = pending_pes.remove(&pid) {
-            if !prev.is_empty() {
+            if !skip_pids[pid_index] && !prev.data.is_empty() {
               let stream_type = *pid_to_stream_type.get(&pid).unwrap_or(&0);
-              match on_pes(pid, stream_type, &prev, &pid_to_stream_type) {
+              match on_pes(pid, stream_type, &prev.data, &pid_to_stream_type) {
                 PesAction::Continue => {}
-                PesAction::Stop => break 'outer,
-                PesAction::SkipPid => {
-                  skip_pids[pid_index] = true;
-                  start_new_pes = false;
+                PesAction::Stop => {
+                  stopped = true;
+                  break 'outer;
+                }
+                PesAction::SkipPid => skip_pids[pid_index] = true,
+              }
+            }
+          }
+          // BDInfo still closes the previous PES on a scrambled PUSI, but
+          // never parses or counts the encrypted elementary payload.
+          if transport_scrambling_control != 0 {
+            continue;
+          }
+
+          if let Some(header) = parse_pes_header(payload) {
+            let stream_type = *pid_to_stream_type.get(&pid).unwrap_or(&0);
+            if is_video_stream_type(stream_type) {
+              if let Some(raw_timestamp) = header.dts.or(header.pts) {
+                let unwrapped = match (last_timestamp_raw[pid_index], last_timestamp_unwrapped[pid_index]) {
+                  (Some(previous_raw), Some(previous_unwrapped)) => {
+                    previous_unwrapped + timestamp_delta(raw_timestamp, previous_raw)
+                  }
+                  _ => raw_timestamp,
+                };
+                if let Some(previous) = last_timestamp_unwrapped[pid_index] {
+                  let interval = unwrapped - previous;
+                  if interval > 0 {
+                    flush_timing_windows(
+                      pid,
+                      unwrapped,
+                      interval,
+                      &seen_pids,
+                      &stream_type_by_pid,
+                      &mut window_bytes_by_pid,
+                      &mut window_packets_by_pid,
+                      &mut packet_seconds_by_pid,
+                      &mut diagnostics_by_pid,
+                    );
+                  }
+                }
+                last_timestamp_raw[pid_index] = Some(raw_timestamp);
+                last_timestamp_unwrapped[pid_index] = Some(unwrapped);
+                first_video_timestamp =
+                  Some(first_video_timestamp.map_or(unwrapped, |first| first.min(unwrapped)));
+                last_video_timestamp = Some(last_video_timestamp.map_or(unwrapped, |last| last.max(unwrapped)));
+              }
+            }
+
+            let available_payload = &payload[header.payload_offset..];
+            let take = header.payload_length.map_or(available_payload.len(), |n| n.min(available_payload.len()));
+            if take > 0 {
+              total_bytes_by_pid[pid_index] += take as u64;
+              window_bytes_by_pid[pid_index] += take as u64;
+              let sample = first_pes_samples.entry(pid).or_default();
+              if sample.len() < 64 * 1024 {
+                let sample_take = take.min(64 * 1024 - sample.len());
+                sample.extend_from_slice(&available_payload[..sample_take]);
+              }
+            }
+
+            let remaining = header.payload_length.map(|n| n.saturating_sub(take));
+            let pending = PendingPes {
+              data: if skip_pids[pid_index] {
+                Vec::new()
+              } else {
+                available_payload[..take].to_vec()
+              },
+              remaining,
+            };
+
+            if pending.remaining == Some(0) {
+              if !skip_pids[pid_index] && !pending.data.is_empty() {
+                match on_pes(pid, stream_type, &pending.data, &pid_to_stream_type) {
+                  PesAction::Continue => {}
+                  PesAction::Stop => {
+                    stopped = true;
+                    break 'outer;
+                  }
+                  PesAction::SkipPid => skip_pids[pid_index] = true,
+                }
+              }
+            } else {
+              pending_pes.insert(pid, pending);
+            }
+          }
+        } else if transport_scrambling_control == 0 {
+          if let Some(pending) = pending_pes.get_mut(&pid) {
+            let take = pending.remaining.map_or(payload.len(), |n| n.min(payload.len()));
+            if take > 0 {
+              total_bytes_by_pid[pid_index] += take as u64;
+              window_bytes_by_pid[pid_index] += take as u64;
+              let sample = first_pes_samples.entry(pid).or_default();
+              if sample.len() < 64 * 1024 {
+                let sample_take = take.min(64 * 1024 - sample.len());
+                sample.extend_from_slice(&payload[..sample_take]);
+              }
+              if !skip_pids[pid_index] {
+                pending.data.extend_from_slice(&payload[..take]);
+              }
+            }
+            if let Some(remaining) = pending.remaining.as_mut() {
+              *remaining = remaining.saturating_sub(take);
+            }
+            if pending.remaining == Some(0) {
+              let completed = pending_pes.remove(&pid).unwrap_or_default();
+              if !skip_pids[pid_index] && !completed.data.is_empty() {
+                let stream_type = *pid_to_stream_type.get(&pid).unwrap_or(&0);
+                match on_pes(pid, stream_type, &completed.data, &pid_to_stream_type) {
+                  PesAction::Continue => {}
+                  PesAction::Stop => {
+                    stopped = true;
+                    break 'outer;
+                  }
+                  PesAction::SkipPid => skip_pids[pid_index] = true,
                 }
               }
             }
           }
-          if start_new_pes {
-            let header_data_length = payload[8] as usize;
-            let pes_header_size = 9usize + header_data_length;
-            if payload.len() > pes_header_size {
-              pending_pes
-                .entry(pid)
-                .or_insert_with(Vec::new)
-                .extend_from_slice(&payload[pes_header_size..]);
-            }
-          }
-        } else if let Some(buf) = pending_pes.get_mut(&pid) {
-          buf.extend_from_slice(payload);
         }
       }
 
@@ -320,10 +526,12 @@ where
   }
 
   // Flush any remaining accumulated PES so codec parsers get a final shot.
-  for (pid, buf) in pending_pes.into_iter() {
-    if !buf.is_empty() && !skip_pids[pid as usize] {
-      let stream_type = *pid_to_stream_type.get(&pid).unwrap_or(&0);
-      let _ = on_pes(pid, stream_type, &buf, &pid_to_stream_type);
+  if !stopped {
+    for (pid, pending) in pending_pes.into_iter() {
+      if !pending.data.is_empty() && !skip_pids[pid as usize] {
+        let stream_type = *pid_to_stream_type.get(&pid).unwrap_or(&0);
+        let _ = on_pes(pid, stream_type, &pending.data, &pid_to_stream_type);
+      }
     }
   }
 
@@ -337,14 +545,19 @@ where
         stream_type: stream_type_by_pid[pid_index],
         total_bytes: total_bytes_by_pid[pid_index],
         packet_count: packet_count_by_pid[pid_index],
-        pes_sample: Vec::new(),
+        packet_seconds: packet_seconds_by_pid[pid_index],
+        diagnostics: diagnostics_by_pid.remove(&pid).unwrap_or_default(),
+        pes_sample: first_pes_samples.remove(&pid).unwrap_or_default(),
         pes_in_progress: Vec::new(),
         pes_started: false,
       },
     );
   }
 
-  let duration_seconds = current_duration_seconds(first_pcr_27mhz, last_pcr_27mhz, first_atc_27mhz, prev_atc_27mhz);
+  let duration_seconds = match (first_video_timestamp, last_video_timestamp) {
+    (Some(first), Some(last)) if last > first => (last - first) as f64 / 90_000.0,
+    _ => current_duration_seconds(first_pcr_27mhz, last_pcr_27mhz, first_atc_27mhz, prev_atc_27mhz),
+  };
 
   Ok(M2tsScanResult {
     bytes: total_bytes,
@@ -356,6 +569,110 @@ where
   })
 }
 
+fn parse_pes_header(payload: &[u8]) -> Option<PesHeader> {
+  if payload.len() < 9 || payload[..3] != [0x00, 0x00, 0x01] {
+    return None;
+  }
+  let packet_length = u16::from_be_bytes([payload[4], payload[5]]) as usize;
+  let flags = payload[7];
+  let header_data_length = payload[8] as usize;
+  let payload_offset = 9usize.checked_add(header_data_length)?;
+  if payload_offset > payload.len() {
+    return None;
+  }
+  let pts = if flags & 0x80 != 0 {
+    parse_timestamp(payload.get(9..14)?)
+  } else {
+    None
+  };
+  let dts = if flags & 0x40 != 0 {
+    parse_timestamp(payload.get(14..19)?)
+  } else {
+    None
+  };
+  let payload_length = if packet_length == 0 {
+    None
+  } else {
+    Some(packet_length.saturating_sub(3 + header_data_length))
+  };
+  Some(PesHeader {
+    payload_offset,
+    payload_length,
+    pts,
+    dts,
+  })
+}
+
+fn parse_timestamp(bytes: &[u8]) -> Option<i64> {
+  if bytes.len() < 5 {
+    return None;
+  }
+  Some(
+    (((bytes[0] as i64) & 0x0E) << 29)
+      | ((bytes[1] as i64) << 22)
+      | (((bytes[2] as i64) & 0xFE) << 14)
+      | ((bytes[3] as i64) << 7)
+      | (((bytes[4] as i64) & 0xFE) >> 1),
+  )
+}
+
+fn timestamp_delta(current: i64, previous: i64) -> i64 {
+  const WRAP: i64 = 1i64 << 33;
+  const HALF_WRAP: i64 = WRAP / 2;
+  let mut delta = current - previous;
+  if delta < -HALF_WRAP {
+    delta += WRAP;
+  } else if delta > HALF_WRAP {
+    delta -= WRAP;
+  }
+  delta
+}
+
+fn is_video_stream_type(stream_type: u8) -> bool {
+  matches!(stream_type, 0x01 | 0x02 | 0x1B | 0x20 | 0x24 | 0xEA)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn flush_timing_windows(
+  trigger_pid: u16,
+  marker_90k: i64,
+  interval_90k: i64,
+  seen_pids: &[u16],
+  stream_type_by_pid: &[u8; MAX_PID],
+  window_bytes_by_pid: &mut [u64; MAX_PID],
+  window_packets_by_pid: &mut [u64; MAX_PID],
+  packet_seconds_by_pid: &mut [f64; MAX_PID],
+  diagnostics_by_pid: &mut HashMap<u16, Vec<StreamDiagnostic>>,
+) {
+  if interval_90k <= 0 {
+    return;
+  }
+  let marker = marker_90k as f64 / 90_000.0;
+  let interval = interval_90k as f64 / 90_000.0;
+  for &pid in seen_pids {
+    let i = pid as usize;
+    if is_video_stream_type(stream_type_by_pid[i]) && pid != trigger_pid {
+      continue;
+    }
+    if window_packets_by_pid[i] == 0 && window_bytes_by_pid[i] == 0 {
+      continue;
+    }
+    diagnostics_by_pid.entry(pid).or_default().push(StreamDiagnostic {
+      marker,
+      interval,
+      bytes: window_bytes_by_pid[i],
+      packets: window_packets_by_pid[i],
+      has_frame: pid == trigger_pid,
+    });
+    if pid == trigger_pid {
+      packet_seconds_by_pid[i] += interval;
+    }
+    window_bytes_by_pid[i] = 0;
+    window_packets_by_pid[i] = 0;
+  }
+}
+
+#[cfg(test)]
 pub fn scan_m2ts(path: &Path) -> Result<M2tsScanResult> {
   let file = File::open(path)?;
   let total_size = file.metadata()?.len();
@@ -467,6 +784,8 @@ pub fn scan_m2ts(path: &Path) -> Result<M2tsScanResult> {
       stream_type: *pid_to_stream_type.get(&pid).unwrap_or(&0),
       total_bytes: 0,
       packet_count: 0,
+      packet_seconds: 0.0,
+      diagnostics: Vec::new(),
       pes_sample: Vec::new(),
       pes_in_progress: Vec::new(),
       pes_started: false,
@@ -548,35 +867,43 @@ pub fn scan_m2ts(path: &Path) -> Result<M2tsScanResult> {
   })
 }
 
+#[cfg(test)]
 fn parse_pat(
   payload: &[u8],
   pmt_pids: &mut Vec<u16>,
   pmt_pid_set: &mut std::collections::HashSet<u16>,
   pmt_pid_flags: &mut [bool; MAX_PID],
 ) {
-  if payload.is_empty() {
+  let mut assembler = PsiSectionAssembler::default();
+  for section in assembler.push(payload, true) {
+    parse_pat_section(&section, pmt_pids, pmt_pid_set, pmt_pid_flags);
+  }
+}
+
+fn parse_pat_section(
+  section: &[u8],
+  pmt_pids: &mut Vec<u16>,
+  pmt_pid_set: &mut std::collections::HashSet<u16>,
+  pmt_pid_flags: &mut [bool; MAX_PID],
+) {
+  if section.len() < 8 {
     return;
   }
-  let pointer = payload[0] as usize;
-  let start = 1 + pointer;
-  if start + 8 > payload.len() {
-    return;
-  }
-  let table_id = payload[start];
+  let table_id = section[0];
   if table_id != 0x00 {
     return;
   }
-  let section_length = ((payload[start + 1] as usize & 0x0F) << 8) | payload[start + 2] as usize;
-  let section_end = start + 3 + section_length;
-  if section_end > payload.len() {
+  let section_length = ((section[1] as usize & 0x0F) << 8) | section[2] as usize;
+  let section_end = 3 + section_length;
+  if section_end > section.len() {
     return;
   }
   // Skip past 5-byte section header (transport_stream_id + version + section).
-  let mut i = start + 8;
+  let mut i = 8;
   let table_end = section_end.saturating_sub(4); // strip 4-byte CRC
   while i + 4 <= table_end {
-    let program_number = ((payload[i] as u16) << 8) | payload[i + 1] as u16;
-    let pid = (((payload[i + 2] as u16) & 0x1F) << 8) | payload[i + 3] as u16;
+    let program_number = ((section[i] as u16) << 8) | section[i + 1] as u16;
+    let pid = (((section[i + 2] as u16) & 0x1F) << 8) | section[i + 3] as u16;
     i += 4;
     if program_number != 0 {
       if pmt_pid_set.insert(pid) {
@@ -608,6 +935,8 @@ fn build_progress_snapshot(
         stream_type: stream_type_by_pid[pid_index],
         total_bytes: total_bytes_by_pid[pid_index],
         packet_count: packet_count_by_pid[pid_index],
+        packet_seconds: 0.0,
+        diagnostics: Vec::new(),
         pes_sample: Vec::new(),
         pes_in_progress: Vec::new(),
         pes_started: false,
@@ -636,31 +965,34 @@ fn current_duration_seconds(
   }
 }
 
+#[cfg(test)]
 fn parse_pmt(payload: &[u8], pid_to_stream_type: &mut HashMap<u16, u8>, stream_type_by_pid: &mut [u8; MAX_PID]) {
-  if payload.is_empty() {
+  let mut assembler = PsiSectionAssembler::default();
+  for section in assembler.push(payload, true) {
+    parse_pmt_section(&section, pid_to_stream_type, stream_type_by_pid);
+  }
+}
+
+fn parse_pmt_section(section: &[u8], pid_to_stream_type: &mut HashMap<u16, u8>, stream_type_by_pid: &mut [u8; MAX_PID]) {
+  if section.len() < 12 {
     return;
   }
-  let pointer = payload[0] as usize;
-  let start = 1 + pointer;
-  if start + 12 > payload.len() {
-    return;
-  }
-  let table_id = payload[start];
+  let table_id = section[0];
   if table_id != 0x02 {
     return;
   }
-  let section_length = ((payload[start + 1] as usize & 0x0F) << 8) | payload[start + 2] as usize;
-  let section_end = start + 3 + section_length;
-  if section_end > payload.len() {
+  let section_length = ((section[1] as usize & 0x0F) << 8) | section[2] as usize;
+  let section_end = 3 + section_length;
+  if section_end > section.len() {
     return;
   }
-  let program_info_length = ((payload[start + 10] as usize & 0x0F) << 8) | payload[start + 11] as usize;
-  let mut i = start + 12 + program_info_length;
+  let program_info_length = ((section[10] as usize & 0x0F) << 8) | section[11] as usize;
+  let mut i = 12 + program_info_length;
   let table_end = section_end.saturating_sub(4);
   while i + 5 <= table_end {
-    let stream_type = payload[i];
-    let elem_pid = (((payload[i + 1] as u16) & 0x1F) << 8) | payload[i + 2] as u16;
-    let es_info_length = ((payload[i + 3] as usize & 0x0F) << 8) | payload[i + 4] as usize;
+    let stream_type = section[i];
+    let elem_pid = (((section[i + 1] as u16) & 0x1F) << 8) | section[i + 2] as u16;
+    let es_info_length = ((section[i + 3] as usize & 0x0F) << 8) | section[i + 4] as usize;
     pid_to_stream_type.insert(elem_pid, stream_type);
     stream_type_by_pid[elem_pid as usize] = stream_type;
     i += 5 + es_info_length;
@@ -776,6 +1108,34 @@ mod tests {
     v.extend(std::iter::repeat(0x55).take(header_data_length as usize));
     v.extend_from_slice(es);
     v
+  }
+
+  fn encode_timestamp(timestamp: i64, prefix: u8) -> [u8; 5] {
+    [
+      prefix | (((timestamp >> 29) as u8) & 0x0E) | 1,
+      (timestamp >> 22) as u8,
+      (((timestamp >> 14) as u8) & 0xFE) | 1,
+      (timestamp >> 7) as u8,
+      ((timestamp as u8) << 1) | 1,
+    ]
+  }
+
+  fn pes_payload_with_pts(timestamp: i64, es: &[u8]) -> Vec<u8> {
+    let packet_length = 3 + 5 + es.len();
+    let mut payload = vec![
+      0x00,
+      0x00,
+      0x01,
+      0xE0,
+      (packet_length >> 8) as u8,
+      packet_length as u8,
+      0x80,
+      0x80,
+      0x05,
+    ];
+    payload.extend_from_slice(&encode_timestamp(timestamp, 0x20));
+    payload.extend_from_slice(es);
+    payload
   }
 
   /// RAII guard that removes a temp file on drop.
@@ -1028,6 +1388,28 @@ mod tests {
     // ts_packet payload is padded with 0xFF, so check the leading ES byte.
     assert_eq!(payloads.len(), 1);
     assert_eq!(payloads[0][0], 0x11);
+  }
+
+  #[test]
+  fn scrambled_pes_is_not_parsed_or_counted() {
+    let pid = 0x1011;
+    let first = ts_packet(true, pid, &pes_payload_with_pts(90_000, &[1, 2, 3]));
+    let mut scrambled = ts_packet(true, pid, &pes_payload_with_pts(180_000, &[4, 5, 6]));
+    scrambled[3] |= 0x80;
+    let mut data = Vec::new();
+    data.extend(m2ts(&first));
+    data.extend(m2ts(&scrambled));
+
+    let mut callbacks = 0;
+    let result = scan_m2ts_streaming_from_reader(data.as_slice(), |_pid, _st, payload, _pmt| {
+      callbacks += 1;
+      assert_eq!(payload, &[1, 2, 3]);
+      PesAction::Continue
+    })
+    .expect("scan succeeds");
+
+    assert_eq!(callbacks, 1);
+    assert_eq!(result.streams.get(&pid).expect("stats").total_bytes, 3);
   }
 
   #[test]
@@ -1486,6 +1868,36 @@ mod tests {
     // Too short to even hold the 12-byte fixed header.
     parse_pmt(&[0x00, 0x02, 0xB0], &mut map, &mut by_pid);
     assert!(map.is_empty());
+  }
+
+  #[test]
+  fn psi_section_assembler_reassembles_fragmented_sections() {
+    let payload = pat_payload(1, 0x0100);
+    let section = &payload[1..];
+    let mut assembler = PsiSectionAssembler::default();
+    assert!(assembler.push(&[&[0][..], &section[..6]].concat(), true).is_empty());
+    let completed = assembler.push(&section[6..], false);
+    assert_eq!(completed, vec![section.to_vec()]);
+  }
+
+  #[test]
+  fn pts_windows_bound_payload_and_emit_frame_diagnostics() {
+    let video_pid = 0x1011;
+    let mut data = Vec::new();
+    data.extend(m2ts(&ts_packet(true, 0, &pat_payload(1, 0x0100))));
+    data.extend(m2ts(&ts_packet(true, 0x0100, &pmt_payload())));
+    for (timestamp, es) in [(90_000, &[1u8, 2][..]), (180_000, &[3u8, 4][..]), (270_000, &[5u8, 6][..])] {
+      data.extend(m2ts(&ts_packet(true, video_pid, &pes_payload_with_pts(timestamp, es))));
+    }
+
+    let result = scan_m2ts_from_reader(std::io::Cursor::new(data)).expect("scan");
+    let stats = result.streams.get(&video_pid).expect("video stats");
+    assert_eq!(stats.total_bytes, 6, "PES headers and TS stuffing are excluded");
+    assert_eq!(stats.diagnostics.len(), 2);
+    assert_eq!(stats.diagnostics.iter().map(|diagnostic| diagnostic.bytes).sum::<u64>(), 4);
+    assert!(stats.diagnostics.iter().all(|diagnostic| diagnostic.has_frame));
+    assert!((stats.packet_seconds - 2.0).abs() < 1e-9);
+    assert!((result.duration_seconds - 2.0).abs() < 1e-9);
   }
 
   #[test]

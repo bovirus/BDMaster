@@ -759,6 +759,103 @@ use std::path::{Path, PathBuf};
   }
 
   #[test]
+  fn alternate_angles_inherit_their_main_play_item_offset() {
+    let mut pl = mk_playlist(
+      "A.MPLS",
+      vec![
+        mk_clip("00001.M2TS", 0, 45_000, 0),
+        mk_clip("00101.M2TS", 0, 45_000, 1),
+        mk_clip("00002.M2TS", 90_000, 180_000, 0),
+        mk_clip("00102.M2TS", 90_000, 180_000, 1),
+      ],
+    );
+    pl.angle_count = 1;
+    let bd = BDRom {
+      path: PathBuf::new(),
+      source: DiscSource::Native,
+      volume_label: String::new(),
+      disc_title: None,
+      size: 0,
+      is_uhd: false,
+      is_bd_plus: false,
+      is_bd_java: false,
+      is_dbox: false,
+      is_psp: false,
+      is_3d: false,
+      is_50_hz: false,
+      playlists: std::collections::HashMap::new(),
+      stream_files: std::collections::HashMap::new(),
+      stream_clip_files: std::collections::HashMap::new(),
+      interleaved_files: std::collections::HashMap::new(),
+      use_ssif: false,
+    };
+
+    let info = build_playlist_info(&pl, &bd, 0);
+    assert_eq!(info.stream_clips[0].relative_time_in, 0);
+    assert_eq!(info.stream_clips[1].relative_time_in, 0);
+    assert_eq!(info.stream_clips[2].relative_time_in, 45_000);
+    assert_eq!(info.stream_clips[3].relative_time_in, 45_000);
+  }
+
+  #[test]
+  fn reference_clip_selection_matches_bdinfo_priority_order() {
+    let pl = mk_playlist(
+      "R.MPLS",
+      vec![
+        mk_clip("00001.M2TS", 0, 4_500_000, 0),
+        mk_clip("00002.M2TS", 0, 9_000_000, 0),
+      ],
+    );
+    let mut bd = BDRom {
+      path: PathBuf::new(),
+      source: DiscSource::Native,
+      volume_label: String::new(),
+      disc_title: None,
+      size: 0,
+      is_uhd: false,
+      is_bd_plus: false,
+      is_bd_java: false,
+      is_dbox: false,
+      is_psp: false,
+      is_3d: false,
+      is_50_hz: false,
+      playlists: std::collections::HashMap::new(),
+      stream_files: std::collections::HashMap::new(),
+      stream_clip_files: std::collections::HashMap::new(),
+      interleaved_files: std::collections::HashMap::new(),
+      use_ssif: false,
+    };
+    for name in ["00001.M2TS", "00002.M2TS"] {
+      bd.stream_files
+        .insert(name.to_string(), (StreamSource::Native(PathBuf::new()), 0));
+    }
+    bd.stream_clip_files.insert(
+      "00001.CLPI".into(),
+      clpi::StreamClipFile {
+        name: "00001.CLPI".into(),
+        is_valid: true,
+        streams: vec![clpi::ClpiStream::default(), clpi::ClpiStream::default()],
+        ..Default::default()
+      },
+    );
+    bd.stream_clip_files.insert(
+      "00002.CLPI".into(),
+      clpi::StreamClipFile {
+        name: "00002.CLPI".into(),
+        is_valid: true,
+        streams: vec![clpi::ClpiStream::default()],
+        ..Default::default()
+      },
+    );
+
+    assert_eq!(
+      reference_clip_name_for_playlist(&pl, &bd).as_deref(),
+      Some("00002.M2TS"),
+      "BDInfo lets a longer present clip replace a richer reference"
+    );
+  }
+
+  #[test]
   fn playlist_stream_to_info_video_and_audio() {
     // Video stream.
     let vs = mpls::PlaylistStream {
@@ -863,6 +960,7 @@ use std::path::{Path, PathBuf};
       audio_streams: Vec::new(),
       graphics_streams: Vec::new(),
       text_streams: Vec::new(),
+      angle_streams: Vec::new(),
       total_angles: 0,
     };
     pl.video_streams
@@ -936,7 +1034,7 @@ use std::path::{Path, PathBuf};
     src.is_vbr = true;
 
     let mut dst = TSStreamInfo::new(0x1011, TSStreamType::AVCVideo as u8);
-    copy_codec_metadata(&mut dst, &src);
+    super::codec_init::copy_codec_metadata(&mut dst, &src);
     assert!(dst.is_initialized);
     assert_eq!(dst.width, 1920);
     assert_eq!(dst.height, 1080);
@@ -947,7 +1045,7 @@ use std::path::{Path, PathBuf};
     // Not-initialized source is a no-op.
     let uninit = TSStreamInfo::new(0x1011, TSStreamType::AVCVideo as u8);
     let mut dst2 = TSStreamInfo::new(0x1011, TSStreamType::AVCVideo as u8);
-    copy_codec_metadata(&mut dst2, &uninit);
+    super::codec_init::copy_codec_metadata(&mut dst2, &uninit);
     assert!(!dst2.is_initialized);
   }
 
@@ -1008,6 +1106,7 @@ use std::path::{Path, PathBuf};
       audio_streams: Vec::new(),
       graphics_streams: Vec::new(),
       text_streams: Vec::new(),
+      angle_streams: Vec::new(),
       total_angles: 0,
     };
     let mut v = TSStreamInfo::new(0x1011, TSStreamType::AVCVideo as u8);

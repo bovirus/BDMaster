@@ -168,6 +168,7 @@ pub fn parse_mpls_bytes(name: String, data: &[u8]) -> Result<PlaylistFile> {
   let mut stream_clips: Vec<PlaylistStreamClip> = Vec::new();
   let mut playlist_streams: Vec<PlaylistStream> = Vec::new();
   let mut angle_count: u32 = 0;
+  let mut cumulative_main_length: i64 = 0;
 
   for _ in 0..item_count {
     let item_start = r.pos;
@@ -209,7 +210,8 @@ pub fn parse_mpls_bytes(name: String, data: &[u8]) -> Result<PlaylistFile> {
     if multiangle > 0 {
       let angles = r.read_u8()? as i32;
       r.skip(1)?;
-      for angle in 0..(angles - 1).max(0) {
+      let extra_angles = (angles - 1).max(0) as u32;
+      for angle in 0..extra_angles {
         let angle_name = r.read_string(5)?;
         let _angle_type = r.read_string(4)?;
         r.skip(1)?;
@@ -217,13 +219,11 @@ pub fn parse_mpls_bytes(name: String, data: &[u8]) -> Result<PlaylistFile> {
           name: format!("{}.M2TS", angle_name.trim_end_matches('\0')),
           time_in: in_time,
           time_out: out_time,
-          angle_index: (angle + 1) as u32,
+          angle_index: angle + 1,
         };
         stream_clips.push(angle_clip);
       }
-      if (angles - 1) as u32 > angle_count {
-        angle_count = (angles - 1) as u32;
-      }
+      angle_count = angle_count.max(extra_angles);
     }
 
     // STN_table
@@ -238,7 +238,12 @@ pub fn parse_mpls_bytes(name: String, data: &[u8]) -> Result<PlaylistFile> {
     let _stream_count_pip = r.read_u8()? as i32;
     r.skip(5)?;
 
-    let significant_clip = (out_time - in_time).max(0) > 450;
+    // BDInfo's `RelativeLength` is the current play item's duration divided
+    // by the preceding angle-0 playlist duration at this point. Metadata
+    // from an already-known PID is replaced only when that ratio is > 1%.
+    let clip_length = (out_time - in_time).max(0);
+    let significant_clip = clip_is_significant(clip_length, cumulative_main_length);
+    cumulative_main_length = cumulative_main_length.saturating_add(clip_length);
 
     for _ in 0..stream_count_video {
       if let Some(s) = create_stream(data, &mut r.pos)? {
@@ -320,9 +325,13 @@ pub fn parse_mpls_bytes(name: String, data: &[u8]) -> Result<PlaylistFile> {
   })
 }
 
+fn clip_is_significant(clip_length: i64, cumulative_main_length: i64) -> bool {
+  cumulative_main_length == 0 || clip_length as f64 / cumulative_main_length as f64 > 0.01
+}
+
 fn add_stream_metadata(list: &mut Vec<PlaylistStream>, s: PlaylistStream, significant_clip: bool) {
   if let Some(existing) = list.iter_mut().find(|x| x.pid == s.pid) {
-    if significant_clip && stream_metadata_score(&s) >= stream_metadata_score(existing) {
+    if significant_clip {
       *existing = s;
     }
   } else {
@@ -491,15 +500,6 @@ fn checked_skip(pos: &mut usize, amount: usize, len: usize) -> bool {
   }
   *pos = next;
   true
-}
-
-fn stream_metadata_score(s: &PlaylistStream) -> usize {
-  usize::from(s.video_format != TSVideoFormat::Unknown)
-    + usize::from(s.frame_rate != TSFrameRate::Unknown)
-    + usize::from(s.aspect_ratio != TSAspectRatio::Unknown)
-    + usize::from(s.channel_layout != TSChannelLayout::Unknown)
-    + usize::from(s.sample_rate_hz > 0)
-    + usize::from(!s.language_code.trim_end_matches('\0').is_empty())
 }
 
 fn playlist_relative_chapters(clips: &[PlaylistStreamClip], raw_chapters: &[(usize, u64)]) -> Vec<f64> {
@@ -806,7 +806,7 @@ mod tests {
   }
 
   #[test]
-  fn duplicate_pid_metadata_uses_later_significant_richer_stream() {
+  fn duplicate_pid_metadata_uses_the_last_significant_clip() {
     let mut list = vec![PlaylistStream {
       pid: 0x1100,
       stream_type: TSStreamType::AC3Audio,
@@ -844,7 +844,7 @@ mod tests {
       language_code: "fra".to_string(),
     };
     add_stream_metadata(&mut list, poorer, true);
-    assert_eq!(list[0].language_code, "eng");
+    assert_eq!(list[0].language_code, "fra");
 
     let insignificant = PlaylistStream {
       pid: 0x1100,
@@ -857,7 +857,15 @@ mod tests {
       language_code: "jpn".to_string(),
     };
     add_stream_metadata(&mut list, insignificant, false);
-    assert_eq!(list[0].language_code, "eng");
+    assert_eq!(list[0].language_code, "fra");
+  }
+
+  #[test]
+  fn clip_significance_is_relative_to_accumulated_playlist_length() {
+    assert!(clip_is_significant(45_000, 45_000));
+    assert!(clip_is_significant(1_001, 100_000));
+    assert!(!clip_is_significant(1_000, 100_000));
+    assert!(!clip_is_significant(450, 4_500_450));
   }
 
   #[test]

@@ -178,6 +178,7 @@ pub(crate) fn build_playlist_info(pl: &PlaylistFile, bd: &BDRom, group_index: u3
   let mut clips: Vec<PlaylistStreamClipInfo> = Vec::new();
 
   let mut relative_time_in: i64 = 0;
+  let mut current_play_item_relative_time_in: i64 = 0;
   for c in &pl.stream_clips {
     let length = (c.time_out - c.time_in).max(0);
     let m2ts_size = bd.stream_files.get(&c.name).map(|(_, s)| *s).unwrap_or(0);
@@ -193,13 +194,16 @@ pub(crate) fn build_playlist_info(pl: &PlaylistFile, bd: &BDRom, group_index: u3
       m2ts_size
     };
     total_file_size += file_size;
+    if c.angle_index == 0 {
+      current_play_item_relative_time_in = relative_time_in;
+    }
     let info = PlaylistStreamClipInfo {
       name: c.name.clone(),
       display_name: stream_display_name(bd, &c.name),
       time_in: c.time_in as u64,
       time_out: c.time_out as u64,
-      relative_time_in: relative_time_in.max(0) as u64,
-      relative_time_out: (relative_time_in + length).max(0) as u64,
+      relative_time_in: current_play_item_relative_time_in.max(0) as u64,
+      relative_time_out: (current_play_item_relative_time_in + length).max(0) as u64,
       length: length as u64,
       file_size,
       measured_size: 0,
@@ -269,6 +273,8 @@ pub(crate) fn build_playlist_info(pl: &PlaylistFile, bd: &BDRom, group_index: u3
     }
   }
 
+  let angle_streams = (0..pl.angle_count).map(|_| video_streams.clone()).collect();
+
   PlaylistInfo {
     name: pl.name.clone(),
     group_index,
@@ -286,6 +292,7 @@ pub(crate) fn build_playlist_info(pl: &PlaylistFile, bd: &BDRom, group_index: u3
     audio_streams,
     graphics_streams,
     text_streams,
+    angle_streams,
     total_angles: pl.angle_count,
   }
 }
@@ -347,17 +354,28 @@ pub(crate) fn clpi_file_for_clip<'a>(bd: &'a BDRom, clip_name: &str) -> Option<&
 }
 
 pub(crate) fn reference_clip_name_for_playlist(pl: &PlaylistFile, bd: &BDRom) -> Option<String> {
-  let mut best: Option<(String, usize, i64)> = None;
+  let mut best: Option<(String, usize, i64, bool)> = None;
+  let mut preceding_length = 0i64;
   for clip in pl.stream_clips.iter().filter(|c| c.angle_index == 0) {
     let stream_count = clpi_file_for_clip(bd, &clip.name).map(|c| c.streams.len()).unwrap_or(0);
     let length = (clip.time_out - clip.time_in).max(0);
+    let stream_file_present = bd.stream_files.contains_key(&clip.name);
+    let significant = preceding_length == 0 || length as f64 / preceding_length as f64 > 0.01;
+    let candidate = (clip.name.clone(), stream_count, length, stream_file_present);
     match &best {
-      Some((_, best_count, best_length))
-        if stream_count < *best_count || (stream_count == *best_count && length <= *best_length) => {}
-      _ => best = Some((clip.name.clone(), stream_count, length)),
+      None => best = Some(candidate),
+      Some((_, best_count, best_length, best_file_present)) => {
+        if (!best_file_present && stream_file_present)
+          || (stream_count > *best_count && significant && stream_file_present)
+          || (length > *best_length && stream_file_present)
+        {
+          best = Some(candidate);
+        }
+      }
     }
+    preceding_length = preceding_length.saturating_add(length);
   }
-  best.map(|(name, _, _)| name)
+  best.map(|(name, _, _, _)| name)
 }
 
 pub(crate) fn clpi_stream_to_info(stream: &ClpiStream) -> Option<TSStreamInfo> {
@@ -496,6 +514,11 @@ pub(crate) fn cache_estimated_stream_sizes(disc: &mut DiscInfo) {
       .chain(pl.text_streams.iter_mut())
     {
       stream.estimated_size = estimate_stream_size(stream, total_seconds);
+    }
+    for angle_streams in &mut pl.angle_streams {
+      for stream in angle_streams {
+        stream.estimated_size = estimate_stream_size(stream, total_seconds);
+      }
     }
   }
 }

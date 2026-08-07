@@ -30,7 +30,12 @@ export default function NotificationSnackbar() {
       onClose={() => setNotification(null)}
       anchorOrigin={{ vertical: "top", horizontal: "center" }}
     >
-      <Alert onClose={() => setNotification(null)} severity={severity} variant="filled">
+      <Alert
+        onClose={() => setNotification(null)}
+        severity={severity}
+        variant="filled"
+        sx={{ whiteSpace: "pre-line", maxWidth: "80vw", maxHeight: "50vh", overflow: "auto" }}
+      >
         {notification?.title}
       </Alert>
     </Snackbar>

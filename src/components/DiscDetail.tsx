@@ -358,6 +358,18 @@ export default function DiscDetail() {
         stopPolling();
         if (progress.isCompleted && progress.disc) {
           setFullScanCompletedFor(progress.disc.path);
+          if (progress.fileErrors.length > 0) {
+            const details = progress.fileErrors
+              .map(({ file, message }) => `${file}: ${message}`)
+              .join("\n");
+            setDialogNotification({
+              title: t("disc.scanFileErrors", {
+                count: progress.fileErrors.length,
+                details,
+              }),
+              type: Protocol.DialogNotificationType.Error,
+            });
+          }
         } else if (progress.isCancelled) {
           // Cancelled scans leave the partial measurements in place and
           // simply revert the button back to "Scan". No notification.

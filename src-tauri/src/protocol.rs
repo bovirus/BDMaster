@@ -132,6 +132,10 @@ pub struct PlaylistInfo {
   pub graphics_streams: Vec<TSStreamInfo>,
   #[serde(rename = "textStreams")]
   pub text_streams: Vec<TSStreamInfo>,
+  /// One video-stream collection per alternate angle. Audio, graphics, and
+  /// text streams are shared with angle 0, matching BDInfo's AngleStreams.
+  #[serde(rename = "angleStreams")]
+  pub angle_streams: Vec<Vec<TSStreamInfo>>,
   #[serde(rename = "totalAngles")]
   pub total_angles: u32,
 }
@@ -346,6 +350,12 @@ pub struct ChartSample {
 /// the worker writes a new snapshot, letting the client re-render only on
 /// real changes.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ScanFileErrorInfo {
+  pub file: String,
+  pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ScanProgressInfo {
   pub path: String,
   #[serde(rename = "totalBytes")]
@@ -359,6 +369,8 @@ pub struct ScanProgressInfo {
   #[serde(rename = "isCancelled")]
   pub is_cancelled: bool,
   pub error: Option<String>,
+  #[serde(rename = "fileErrors")]
+  pub file_errors: Vec<ScanFileErrorInfo>,
   #[serde(rename = "currentFile")]
   pub current_file: Option<String>,
   /// Unix epoch milliseconds at which the worker started. The frontend

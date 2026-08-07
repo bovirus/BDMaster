@@ -50,7 +50,6 @@ pub use scan::scan;
 // sibling bdrom submodules) can keep referencing these items via
 // `crate::bdrom::X` / `super::X`. Item names are unique across submodules, so
 // glob re-exports don't collide.
-pub(crate) use codec_init::*;
 pub(crate) use disc_info::*;
 pub(crate) use model::*;
 pub(crate) use open::*;

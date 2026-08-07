@@ -500,6 +500,20 @@ export default function Config() {
     <Box>
       <SectionHeader icon={<ScanIcon fontSize="small" />} title={t("settings.scan")} />
       <Stack>
+        <SettingRow label={t("settings.fastScanSeconds")}>
+          <TextField
+            size="small"
+            type="number"
+            sx={{ width: 96 }}
+            value={draft.scan.fastScanSeconds}
+            slotProps={{ htmlInput: { min: 1, max: 3600 } }}
+            onChange={(e) =>
+              updateScan({
+                fastScanSeconds: Math.min(3600, Math.max(1, parseInt(e.target.value || "1", 10))),
+              })
+            }
+          />
+        </SettingRow>
         <SettingRow label={t("settings.enableSsifSupport")}>
           <Switch
             checked={draft.scan.enableSsifSupport}
